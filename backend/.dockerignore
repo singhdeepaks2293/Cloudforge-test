@@ -1,0 +1,6 @@
+# Keep the api build context small and secret-free.
+.git
+*.md
+*_test.go
+.env
+.env.*
