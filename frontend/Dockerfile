@@ -20,7 +20,8 @@ RUN npm run build
 
 FROM nginx:1.27.0-alpine
 RUN chown -R nginx:nginx /var/cache/nginx /var/log/nginx /etc/nginx/conf.d
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN sed -i 's|pid[[:space:]]*[^;]*;|pid /tmp/nginx.pid;|' /etc/nginx/nginx.conf && grep '^pid' /etc/nginx/nginx.conf
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080
 USER nginx

@@ -6,7 +6,7 @@
 # the build.rs also falls back to a vendored protoc if none is on PATH.
 FROM rust:1.100-bookworm AS builder
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends protobuf-compiler=3.21.12-3 \
+    && apt-get install -y --no-install-recommends protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 # Copy the workspace and the shared proto contracts (paths are relative
