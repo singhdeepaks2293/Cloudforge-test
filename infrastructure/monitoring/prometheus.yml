@@ -1,0 +1,42 @@
+# CloudForge — Prometheus scrape configuration (Milestone 9, Part 3).
+#
+# Used by the optional `prometheus` service in
+# deployments/compose/docker-compose.yml (profile "monitoring"):
+#   docker compose --profile monitoring up -d prometheus grafana
+#
+# The API is the only component that exposes a Prometheus endpoint
+# today (GET /metrics on the Go control plane — see
+# backend/internal/metrics). The network engine exposes gRPC
+# Health only, and the host agent exposes /healthz + /v1/inventory;
+# neither has a /metrics endpoint yet, so their jobs below are
+# commented out rather than pointed at a URL that would fail to
+# scrape. Their health is still visible in Grafana through the
+# API-exported gauges cloudforge_network_engine_up and
+# cloudforge_host_agent_up (set by /readyz and /api/v1/health).
+# Uncomment a job when that component gains a /metrics endpoint.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: cloudforge-api
+    static_configs:
+      # Docker service name on the compose frontend_net network.
+      - targets: ["api:8080"]
+        labels:
+          component: api
+    # For a host run (no Docker), scrape localhost:8080 instead:
+    # - targets: ["localhost:8080"]
+
+  # - job_name: cloudforge-network-engine
+  #   static_configs:
+  #     - targets: ["network-engine:50051"]
+  #   metrics_path: /metrics
+  #   # Requires a Prometheus endpoint on the engine (not implemented).
+
+  # - job_name: cloudforge-host-agent
+  #   static_configs:
+  #     - targets: ["host-agent:8082"]
+  #   metrics_path: /metrics
+  #   # Requires a Prometheus endpoint on the host agent (not implemented).

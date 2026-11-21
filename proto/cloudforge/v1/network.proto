@@ -1,0 +1,348 @@
+syntax = "proto3";
+
+package cloudforge.v1;
+
+import "cloudforge/v1/common.proto";
+
+option go_package = "github.com/cloudforge/cloudforge/backend/internal/networkclient/gen/cloudforge/v1;cloudforgev1";
+
+// Rust Network Engine API — Milestone 1 subset plus Milestone 4
+// operations (subnets, veth pairs, routes, firewall, NAT, fault
+// injection, telemetry). M4 implements all RPCs below; the M1 methods
+// are unchanged (additive-only evolution: no existing field was
+// renumbered, removed or retyped).
+
+service NetworkEngine {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
+  rpc DeleteNetwork(DeleteNetworkRequest) returns (OperationResult);
+  rpc CreateNamespace(CreateNamespaceRequest) returns (OperationResult);
+  rpc DeleteNamespace(DeleteNamespaceRequest) returns (OperationResult);
+  rpc CreateBridge(CreateBridgeRequest) returns (OperationResult);
+  rpc AllocateAddress(AllocateAddressRequest) returns (AllocateAddressResponse);
+  rpc ReleaseAddress(ReleaseAddressRequest) returns (OperationResult);
+  rpc InspectTopology(InspectTopologyRequest) returns (InspectTopologyResponse);
+  rpc ValidateNetwork(ValidateNetworkRequest) returns (ValidateNetworkResponse);
+  rpc CleanupLab(CleanupLabRequest) returns (OperationResult);
+  // Milestone 4.
+  rpc CreateSubnet(CreateSubnetRequest) returns (CreateSubnetResponse);
+  rpc DeleteSubnet(DeleteSubnetRequest) returns (OperationResult);
+  rpc CreateVethPair(CreateVethPairRequest) returns (OperationResult);
+  rpc AttachInterface(AttachInterfaceRequest) returns (OperationResult);
+  rpc AddRoute(AddRouteRequest) returns (OperationResult);
+  rpc DeleteRoute(DeleteRouteRequest) returns (OperationResult);
+  rpc CreateFirewallPolicy(CreateFirewallPolicyRequest) returns (OperationResult);
+  rpc ApplyFirewallPolicy(ApplyFirewallPolicyRequest) returns (OperationResult);
+  rpc CreateNAT(CreateNATRequest) returns (OperationResult);
+  rpc DeleteNAT(DeleteNATRequest) returns (OperationResult);
+  rpc InjectFault(InjectFaultRequest) returns (InjectFaultResponse);
+  rpc CollectTelemetry(CollectTelemetryRequest) returns (CollectTelemetryResponse);
+}
+
+message CreateNetworkRequest {
+  RequestMeta meta = 1;
+  string network_id = 2;
+  string name = 3;
+  string cidr = 4; // e.g. 10.10.0.0/16
+}
+
+message CreateNetworkResponse {
+  OperationResult result = 1;
+  string network_id = 2;
+  string cidr = 3;
+}
+
+message DeleteNetworkRequest {
+  RequestMeta meta = 1;
+  string network_id = 2;
+}
+
+message CreateNamespaceRequest {
+  RequestMeta meta = 1;
+  string namespace = 2;
+}
+
+message DeleteNamespaceRequest {
+  RequestMeta meta = 1;
+  string namespace = 2;
+}
+
+message CreateBridgeRequest {
+  RequestMeta meta = 1;
+  string bridge = 2;
+  string namespace = 3; // "" = host namespace
+}
+
+message AllocateAddressRequest {
+  RequestMeta meta = 1;
+  string network_id = 2;
+  string cidr = 3;
+  string hint = 4; // optional requested address
+}
+
+message AllocateAddressResponse {
+  OperationResult result = 1;
+  string address = 2;
+  string cidr = 3;
+}
+
+message ReleaseAddressRequest {
+  RequestMeta meta = 1;
+  string network_id = 2;
+  string address = 3;
+}
+
+message InspectTopologyRequest {
+  RequestMeta meta = 1;
+  string network_id = 2;
+}
+
+message TopologyNode {
+  string id = 1;
+  string kind = 2; // network | namespace | bridge | address
+  string name = 3;
+  map<string, string> labels = 4;
+}
+
+message InspectTopologyResponse {
+  OperationResult result = 1;
+  repeated TopologyNode nodes = 2;
+}
+
+message ValidateNetworkRequest {
+  RequestMeta meta = 1;
+  string cidr = 2;
+  repeated string existing_cidrs = 3;
+}
+
+message ValidateNetworkResponse {
+  OperationResult result = 1;
+  bool valid = 2;
+  repeated string problems = 3;
+}
+
+message CleanupLabRequest {
+  RequestMeta meta = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Milestone 4 messages.
+// ---------------------------------------------------------------------------
+
+// A subnet: a CIDR carved out of a parent network. Must be contained in
+// the parent network's CIDR and must not overlap a sibling subnet.
+message Subnet {
+  string subnet_id = 1;
+  string network_id = 2;
+  string name = 3;
+  string cidr = 4; // e.g. 10.10.1.0/24
+}
+
+message CreateSubnetRequest {
+  RequestMeta meta = 1;
+  string subnet_id = 2;
+  string network_id = 3;
+  string name = 4;
+  string cidr = 5;
+}
+
+message CreateSubnetResponse {
+  OperationResult result = 1;
+  Subnet subnet = 2;
+}
+
+message DeleteSubnetRequest {
+  RequestMeta meta = 1;
+  string subnet_id = 2;
+}
+
+// A veth pair: two peer interfaces. `attached` is true once
+// AttachInterface has bound one peer to a bridge / namespace.
+message VethPair {
+  string veth_id = 1;
+  string peer_a = 2;
+  string peer_b = 3;
+  string namespace_a = 4;
+  string namespace_b = 5;
+  string bridge = 6;
+  bool attached = 7;
+}
+
+message CreateVethPairRequest {
+  RequestMeta meta = 1;
+  string veth_id = 2;
+  string peer_a = 3;
+  string peer_b = 4;
+  string namespace_a = 5; // "" = host namespace
+  string namespace_b = 6;
+}
+
+message AttachInterfaceRequest {
+  RequestMeta meta = 1;
+  string veth_id = 2;
+  string interface = 3; // must be peer_a or peer_b of the pair
+  string namespace = 4; // "" = host namespace; must exist if set
+  string bridge = 5; // "" = no bridge; must exist if set
+}
+
+// A static route. `destination` is a CIDR (0.0.0.0/0 = default route).
+message Route {
+  string route_id = 1;
+  string destination = 2;
+  string gateway = 3; // IPv4 address
+  string interface = 4;
+  int32 metric = 5;
+  string namespace = 6;
+}
+
+message AddRouteRequest {
+  RequestMeta meta = 1;
+  string route_id = 2;
+  string destination = 3;
+  string gateway = 4;
+  string interface = 5;
+  int32 metric = 6;
+  string namespace = 7;
+}
+
+message DeleteRouteRequest {
+  RequestMeta meta = 1;
+  string route_id = 2;
+}
+
+enum FirewallDirection {
+  FIREWALL_DIRECTION_UNSPECIFIED = 0;
+  FIREWALL_DIRECTION_INGRESS = 1;
+  FIREWALL_DIRECTION_EGRESS = 2;
+}
+
+enum FirewallProtocol {
+  FIREWALL_PROTOCOL_UNSPECIFIED = 0;
+  FIREWALL_PROTOCOL_ANY = 1;
+  FIREWALL_PROTOCOL_TCP = 2;
+  FIREWALL_PROTOCOL_UDP = 3;
+  FIREWALL_PROTOCOL_ICMP = 4;
+}
+
+enum FirewallAction {
+  FIREWALL_ACTION_UNSPECIFIED = 0;
+  FIREWALL_ACTION_ALLOW = 1;
+  FIREWALL_ACTION_DENY = 2;
+}
+
+// One firewall rule. Port range is [port_start, port_end]; 0/0 means
+// "any port". `cidr` is the remote CIDR the rule matches; 0.0.0.0/0
+// means "any address". Lower `priority` wins; ties are broken
+// deny-before-allow. No matching rule => deny (default-deny).
+message FirewallRule {
+  string rule_id = 1;
+  FirewallDirection direction = 2;
+  FirewallProtocol protocol = 3;
+  int32 port_start = 4;
+  int32 port_end = 5;
+  string cidr = 6;
+  FirewallAction action = 7;
+  int32 priority = 8;
+}
+
+message FirewallPolicy {
+  string policy_id = 1;
+  string network_id = 2;
+  string name = 3;
+  repeated FirewallRule rules = 4;
+  bool applied = 5;
+}
+
+message CreateFirewallPolicyRequest {
+  RequestMeta meta = 1;
+  string policy_id = 2;
+  string network_id = 3;
+  string name = 4;
+  repeated FirewallRule rules = 5;
+}
+
+message ApplyFirewallPolicyRequest {
+  RequestMeta meta = 1;
+  string policy_id = 2;
+}
+
+enum NatKind {
+  NAT_KIND_UNSPECIFIED = 0;
+  NAT_KIND_SNAT = 1;
+  NAT_KIND_DNAT = 2;
+}
+
+// A NAT rule. SNAT: traffic from `source_cidr` leaving via `interface`
+// is rewritten to `translated_address`. DNAT: traffic arriving for
+// `translated_address` is rewritten to `source_cidr` (the internal
+// destination, an address or CIDR).
+message NATRule {
+  string nat_id = 1;
+  NatKind kind = 2;
+  string source_cidr = 3;
+  string translated_address = 4; // IPv4 address
+  string interface = 5;
+}
+
+message CreateNATRequest {
+  RequestMeta meta = 1;
+  string nat_id = 2;
+  NatKind kind = 3;
+  string source_cidr = 4;
+  string translated_address = 5;
+  string interface = 6;
+}
+
+message DeleteNATRequest {
+  RequestMeta meta = 1;
+  string nat_id = 2;
+}
+
+enum FaultKind {
+  FAULT_KIND_UNSPECIFIED = 0;
+  FAULT_KIND_LATENCY = 1; // magnitude = added latency in ms (0..10000)
+  FAULT_KIND_LOSS = 2; // magnitude = loss percent (0..100)
+  FAULT_KIND_PARTITION = 3; // magnitude = 1 (partitioned) or 0
+  FAULT_KIND_DNS = 4; // magnitude = failure percent (0..100)
+  FAULT_KIND_ROUTE_BLACKHOLE = 5; // magnitude = 1 (blackholed) or 0
+}
+
+// A fault to inject into a lab. `target` names the affected resource
+// (network / namespace / interface); "" means the whole lab.
+// `duration_seconds` is bounded: 1..3600.
+message FaultSpec {
+  string fault_id = 1;
+  FaultKind kind = 2;
+  double magnitude = 3;
+  int64 duration_seconds = 4;
+  string target = 5;
+}
+
+message InjectFaultRequest {
+  RequestMeta meta = 1;
+  FaultSpec fault = 2;
+}
+
+message InjectFaultResponse {
+  OperationResult result = 1;
+  string fault_id = 2;
+  int64 expires_at_unix_seconds = 3;
+}
+
+// One telemetry sample. Counters are real in-memory counters kept by
+// the engine (zero for a fresh lab); no traffic is fabricated.
+message TelemetryPoint {
+  string name = 1;
+  double value = 2;
+  int64 timestamp_unix_seconds = 3;
+  map<string, string> labels = 4;
+}
+
+message CollectTelemetryRequest {
+  RequestMeta meta = 1;
+}
+
+message CollectTelemetryResponse {
+  OperationResult result = 1;
+  repeated TelemetryPoint points = 2;
+}

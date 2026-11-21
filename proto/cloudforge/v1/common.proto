@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package cloudforge.v1;
+
+option go_package = "github.com/cloudforge/cloudforge/backend/internal/networkclient/gen/cloudforge/v1;cloudforgev1";
+
+// Common request metadata. Every infrastructure operation MUST carry
+// lab_id, tenant_id, request_id and idempotency_key.
+message RequestMeta {
+  string lab_id = 1;
+  string tenant_id = 2;
+  string request_id = 3;
+  string idempotency_key = 4;
+  int64 timeout_ms = 5; // 0 = server default (30s)
+}
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_PENDING = 1;
+  OPERATION_STATE_RUNNING = 2;
+  OPERATION_STATE_SUCCEEDED = 3;
+  OPERATION_STATE_FAILED = 4;
+  OPERATION_STATE_ROLLED_BACK = 5;
+  OPERATION_STATE_CANCELLED = 6;
+}
+
+message OperationResult {
+  string operation_id = 1;
+  OperationState state = 2;
+  string message = 3;
+  string error_code = 4; // machine-readable, e.g. CIDR_OVERLAP
+  int64 duration_ms = 5;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string service = 1;
+  string version = 2;
+  bool ok = 3;
+  string detail = 4;
+  int64 uptime_seconds = 5;
+}

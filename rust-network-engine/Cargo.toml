@@ -1,0 +1,45 @@
+[workspace]
+members = [
+    "crates/engine-core",
+    "crates/ipam",
+    "crates/grpc-server",
+    "crates/firewall",
+    "crates/routing",
+    "crates/fault-injection",
+    "crates/telemetry",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/cloudforge/cloudforge"
+rust-version = "1.75"
+
+[workspace.dependencies]
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+futures = "0.3"
+# Real kernel backend (Milestone 4). Fetched from crates.io; the
+# simulated backend is still the default and needs none of these.
+rtnetlink = "0.14"
+nftables = "0.5"
+
+# Internal workspace crates.
+engine-core = { path = "crates/engine-core" }
+ipam = { path = "crates/ipam" }
+firewall = { path = "crates/firewall" }
+routing = { path = "crates/routing" }
+fault-injection = { path = "crates/fault-injection" }
+telemetry = { path = "crates/telemetry" }
+
+[profile.release]
+opt-level = 2

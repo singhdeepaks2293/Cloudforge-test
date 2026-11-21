@@ -1,0 +1,13 @@
+# Grafana provisioning — Prometheus datasource (Milestone 9, Part 3).
+# Mounted read-only at /etc/grafana/provisioning/datasources by the
+# optional `grafana` compose service.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true

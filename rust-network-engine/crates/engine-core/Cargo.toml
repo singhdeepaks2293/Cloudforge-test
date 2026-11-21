@@ -1,0 +1,21 @@
+[package]
+name = "engine-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Shared types, validation, topology store and idempotency store for the CloudForge Rust network engine. No network syscalls in the store; kernel access goes through the RealNetlink trait."
+
+[dependencies]
+ipam = { workspace = true }
+firewall = { workspace = true }
+routing = { workspace = true }
+fault-injection = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+rtnetlink = { workspace = true }
+nftables = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

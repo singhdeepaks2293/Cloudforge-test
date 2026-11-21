@@ -1,0 +1,16 @@
+# Grafana provisioning — dashboard provider (Milestone 9, Part 3).
+# The dashboard JSON files live in infrastructure/monitoring/
+# (grafana-cloudforge-overview.json, grafana-labs.json) and are
+# mounted read-only at /etc/grafana/dashboards by the optional
+# `grafana` compose service.
+apiVersion: 1
+
+providers:
+  - name: CloudForge
+    folder: CloudForge
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
