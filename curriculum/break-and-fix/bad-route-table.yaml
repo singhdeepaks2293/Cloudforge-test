@@ -1,0 +1,33 @@
+id: bad-route-table
+title: 'Traffic to Nowhere: A Bad Route Table'
+symptom: Instances in the public subnet cannot reach the internet. SSH into the instance works from the
+  bastion, but curl to any external address times out, and package installs fail with DNS and connection
+  errors.
+injected_fault:
+  kind: route-blackhole
+  target: route_table
+  parameters:
+    route_table_id: rtb-public
+    destination: 0.0.0.0/0
+    action: drop
+diagnosis_hints:
+- 'Check whether the failure is DNS or connectivity: does ping to 8.8.8.8 work?'
+- Inspect the subnet's associated route table and look at the 0.0.0.0/0 entry.
+- Compare the route table with the one on a working subnet in the same VPC.
+- Check the CloudWatch VPC flow logs for rejected packets leaving the subnet.
+fix_steps:
+- Identify the subnet's route table in the console.
+- Find the 0.0.0.0/0 route that points at a black hole instead of the internet gateway.
+- Replace the target with the VPC's internet gateway.
+- Re-test connectivity from the instance with curl to an external address.
+validation_rules:
+- rule: route_to_igw
+  description: Public subnets route 0.0.0.0/0 to the internet gateway
+  params:
+    subnet_type: public
+- rule: instance_reachable
+  description: Instance can reach the internet
+  params:
+    protocol: http
+    port: 80
+xp_reward: 120

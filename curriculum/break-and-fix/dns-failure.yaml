@@ -1,0 +1,36 @@
+id: dns-failure
+title: Names Stopped Resolving
+symptom: 'Every service in the VPC fails with name resolution errors: package installs, API calls and
+  database connections by hostname all fail, yet connections by raw IP address still work.'
+injected_fault:
+  kind: dns
+  target: vpc_dns_resolver
+  parameters:
+    vpc_id: vpc-main
+    failure_mode: nxdomain
+    affected: all
+diagnosis_hints:
+- IP connectivity works but names do not — the fault is in DNS, not routing.
+- Check whether DNS hostnames and DNS resolution are enabled on the VPC.
+- Try resolving a name from inside the VPC and from outside it to isolate the scope.
+- Inspect the DHCP options set and the resolver the instances are using.
+fix_steps:
+- Verify DNS hostnames and DNS resolution are enabled on the VPC.
+- Check the DHCP options set points at the VPC resolver.
+- Restore the resolver configuration or re-enable DNS support on the VPC.
+- Verify name resolution from an instance with nslookup or dig.
+validation_rules:
+- rule: dns_resolves
+  description: VPC DNS resolves internal names
+  params:
+    name: example.internal
+- rule: dns_resolves
+  description: VPC DNS resolves external names
+  params:
+    name: archive.ubuntu.com
+- rule: instance_reachable
+  description: Instance can reach an external host by name
+  params:
+    protocol: http
+    port: 80
+xp_reward: 150

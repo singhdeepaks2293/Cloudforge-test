@@ -1,0 +1,228 @@
+id: serverless
+title: Lambda & Serverless
+description: 'Functions as a service: write code, AWS runs it. Events, triggers, scaling and the cold-start
+  trade-off.'
+difficulty: intermediate
+estimated_hours: 5
+learning_objectives:
+- Write and deploy a Lambda function triggered by an event
+- Explain the Lambda execution model and its limits
+- Connect Lambda to S3, API Gateway and queues
+- Diagnose cold starts and timeouts
+- Compare serverless with container and instance hosting
+modules:
+- id: serverless-lambda
+  title: Functions as a Service
+  lessons:
+  - id: lambda-model
+    title: The Lambda Execution Model
+    theory: 'Lambda lets you run code without provisioning or managing servers: you upload a function,
+      configure a trigger, and AWS runs it in response to events, scaling from zero to thousands of concurrent
+      executions automatically. Each execution runs in an isolated environment with a configured amount
+      of memory — which also sets the CPU share — and a maximum duration of 15 minutes. Billing is per
+      request plus per gigabyte-second of execution, so idle time costs nothing and a function that runs
+      rarely is nearly free. The trade is control: you cannot SSH into a Lambda environment, you cannot
+      keep state between invocations except in /tmp, and long-running or stateful workloads do not fit.
+      CloudForge runs functions in isolated containers on the same event model, so the triggers, the scaling
+      behaviour and the limits you practise are the same ones that shape real serverless designs. The
+      cost model follows the same shape: a function invoked a few times a day costs fractions of a cent,
+      while one invoked millions of times a day needs the same capacity thinking as any other service.'
+    key_points:
+    - No servers to provision; AWS scales from zero automatically
+    - Memory setting also sets the CPU share
+    - 15-minute maximum duration; billing per request and GB-second
+    - No persistent local state between invocations except /tmp
+    - Idle functions cost nothing
+    architecture_diagram_mermaid: "flowchart TD\n    Event[Event - S3 upload] --> Lambda[Lambda function]\n\
+      \    Lambda --> Scale[Scales 0 to 1000s]\n    Lambda --> Out[Output - DynamoDB / S3]"
+  - id: lambda-triggers
+    title: Triggers and Event Sources
+    theory: 'A Lambda function does nothing until something invokes it, and the trigger defines the architecture.
+      S3 events fire when an object is created or deleted, which drives image processing, ETL and validation
+      pipelines. API Gateway turns HTTP requests into invocations, which is how serverless APIs are built.
+      SQS queues invoke functions with batches of messages, and EventBridge delivers scheduled or cross-service
+      events. Each trigger has its own delivery semantics: SQS can retry and dead-letter failed messages,
+      API Gateway is synchronous and must answer within 29 seconds, and S3 events are asynchronous and
+      may be retried. Designing a serverless system is largely choosing the right trigger and understanding
+      what happens when the function fails — whether the event is retried, dropped or sent to a dead-letter
+      queue. In CloudForge every trigger is wired to a real local event source, so a failed invocation
+      produces a real retry or a real dead-letter message you can inspect.'
+    key_points:
+    - S3 events drive processing pipelines
+    - API Gateway turns HTTP requests into invocations
+    - SQS invokes with message batches and supports retries
+    - EventBridge delivers scheduled and cross-service events
+    - Each trigger has different delivery and retry semantics
+    architecture_diagram_mermaid: "flowchart LR\n    S3[S3 event] --> L[Lambda]\n    API[API Gateway]\
+      \ --> L\n    SQS[SQS queue] --> L\n    EB[EventBridge] --> L"
+  - id: lambda-limits
+    title: Cold Starts, Timeouts and Limits
+    theory: 'A cold start happens when Lambda must create a new execution environment for your function:
+      it provisions the sandbox, loads your code and runs initialisation before handling the request,
+      which can add hundreds of milliseconds or seconds for large packages and VPC-attached functions.
+      Warm environments reuse the sandbox for subsequent requests, so the first request after idle time
+      is slow and the rest are fast. Mitigations include keeping packages small, initialising heavy resources
+      outside the handler so they are reused, and using provisioned concurrency for latency-sensitive
+      endpoints. Timeouts are the other sharp edge: a function that calls a slow downstream service must
+      have a timeout longer than the call, but shorter than the caller''s patience — an API Gateway invocation
+      cannot exceed 29 seconds regardless of the function''s limit. Memory, ephemeral storage, concurrency
+      and deployment package size all have limits, and the skill is designing inside them rather than
+      fighting them. The labs make you measure a cold start, then reduce it, so the trade-off is something
+      you have felt rather than read about.'
+    key_points:
+    - 'Cold start: new environment provisioning adds latency to the first call'
+    - Warm environments reuse the sandbox for later calls
+    - Initialise heavy resources outside the handler
+    - API Gateway caps synchronous invocations at 29 seconds
+    - Design inside the limits rather than fighting them
+    architecture_diagram_mermaid: "flowchart TD\n    First[First request] --> Cold[Cold start - init]\n\
+      \    Cold --> Warm[Warm environment]\n    Next[Next requests] --> Warm"
+- id: serverless-patterns
+  title: Serverless Patterns
+  lessons:
+  - id: serverless-api
+    title: Building a Serverless API
+    theory: 'A serverless API is API Gateway in front of Lambda functions, with DynamoDB or RDS behind
+      them. Each route maps to a function, so the API scales per endpoint, deploys independently and costs
+      nothing when idle. The design questions are the same as for any API — authentication, validation,
+      error handling and observability — but the answers change: authentication happens at the gateway
+      with a Lambda authorizer or a Cognito pool, validation happens inside the function, and observability
+      comes from structured logs and distributed tracing rather than from server metrics. The failure
+      mode to design for is a downstream service being slow: the function must time out gracefully and
+      return a useful error instead of letting the gateway time out first. In CloudForge you will build
+      this stack against the local API Gateway and Lambda simulators, with real HTTP requests driving
+      it end to end. Versioning and stages matter here: API Gateway stages let you run development, staging
+      and production side by side, each pointing at a different version of the same functions.'
+    key_points:
+    - API Gateway routes map to Lambda functions
+    - Authentication at the gateway with authorizers
+    - Scales per endpoint and costs nothing when idle
+    - Observability comes from logs and tracing, not server metrics
+    - Functions must fail gracefully before the gateway times out
+    architecture_diagram_mermaid: "flowchart LR\n    Client[Client] --> GW[API Gateway]\n    GW --> F1[Lambda\
+      \ - GET /users]\n    GW --> F2[Lambda - POST /orders]\n    F1 --> DB[(DynamoDB)]"
+  - id: serverless-vs-containers
+    title: Serverless vs Containers vs Instances
+    theory: 'The hosting choice is a trade between control, cost and operational work. Instances give
+      full control over the operating system and the longest runtimes, at the cost of patching, scaling
+      and paying for idle time. Containers give the same control with better packaging and density, but
+      you still manage the cluster. Serverless removes the infrastructure entirely and bills only for
+      execution, but caps duration, limits local state and gives you the least control over the runtime.
+      The decision rule is to match the workload''s shape: spiky, event-driven, short-lived work belongs
+      in Lambda; long-running, stateful or specialised-runtime work belongs in containers or on instances;
+      and a single application often uses all three, with Lambda handling events, containers running the
+      API and instances running the database. Cost follows the same shape: serverless is cheapest at low
+      or bursty volumes and becomes more expensive than provisioned capacity at sustained high volume,
+      which is why the choice is revisited as traffic grows.'
+    key_points:
+    - 'Instances: full control, pay for idle, you patch and scale'
+    - 'Containers: better packaging, you still manage the cluster'
+    - 'Serverless: no infrastructure, pay per execution, capped duration'
+    - Match the hosting model to the workload's shape
+    - One application often uses all three models
+    architecture_diagram_mermaid: "flowchart TD\n    W[Workload shape?] --> S[Spiky, event-driven, short]\n\
+      \    W --> L[Long-running, stateful]\n    S --> Lam[Lambda]\n    L --> Cont[Containers / instances]"
+guided_lab:
+  lab_definition_id: lab-serverless-thumbnail
+  title: Image Pipeline with Lambda
+  tasks:
+  - Create a Lambda function that generates a thumbnail when an object lands in an uploads bucket
+  - Wire the S3 event trigger and an output bucket
+  - Upload an image and verify the thumbnail appears
+  - Check the function's logs for the invocation
+  validation_rules:
+  - rule: lambda_exists
+    description: Function make-thumbnail exists
+    params:
+      function_name: make-thumbnail
+  - rule: lambda_trigger
+    description: Function is triggered by the uploads bucket
+    params:
+      function_name: make-thumbnail
+      source: s3
+      bucket: uploads
+  - rule: object_exists
+    description: Thumbnail photo-thumb.jpg exists in the output bucket
+    params:
+      bucket: thumbnails
+      key: photo-thumb.jpg
+  - rule: lambda_invoked
+    description: Function was invoked at least once
+    params:
+      function_name: make-thumbnail
+      min_count: 1
+challenge:
+  title: Scheduled cleanup job
+  task: Build a Lambda function invoked on a schedule by EventBridge that deletes objects older than 30
+    days from a scratch bucket, and prove it runs without manual invocation.
+  validation_rules:
+  - rule: lambda_exists
+    description: Function cleanup-scratch exists
+    params:
+      function_name: cleanup-scratch
+  - rule: lambda_schedule
+    description: Function is scheduled by EventBridge
+    params:
+      function_name: cleanup-scratch
+      schedule: rate(1 day)
+  - rule: lambda_invoked
+    description: Scheduled function ran at least once
+    params:
+      function_name: cleanup-scratch
+      min_count: 1
+assessment:
+- question: What happens to a Lambda function when it receives no traffic?
+  options:
+  - It keeps billing
+  - It scales to zero and costs nothing
+  - It is deleted
+  - It keeps a warm environment forever
+  correct_answer: 1
+  explanation: Lambda scales to zero; with no invocations there is nothing to bill.
+- question: Which trigger fits processing an image uploaded to S3?
+  options:
+  - API Gateway
+  - An S3 event notification
+  - A scheduled EventBridge rule
+  - An SSH connection
+  correct_answer: 1
+  explanation: S3 events fire on object creation, which is the natural trigger for upload processing.
+- question: What is a cold start?
+  options:
+  - A function that never runs
+  - Latency from creating a new execution environment for the first call
+  - A function running in a cold Region
+  - A timeout error
+  correct_answer: 1
+  explanation: A cold start is the provisioning and initialisation of a new environment before the first
+    request is handled.
+- question: A synchronous API Gateway invocation must complete within how long?
+  options:
+  - 15 minutes
+  - 29 seconds
+  - 5 minutes
+  - There is no limit
+  correct_answer: 1
+  explanation: API Gateway caps synchronous integrations at 29 seconds regardless of the function timeout.
+- question: Where can a Lambda function safely keep state between invocations?
+  options:
+  - In /tmp only, and only within one warm environment
+  - In global variables, guaranteed
+  - On the instance disk
+  - In the function's code
+  correct_answer: 0
+  explanation: Only /tmp persists within a single warm environment; durable state belongs in S3 or DynamoDB.
+- question: A workload runs 24/7 at steady high volume. What is the likely cheapest hosting?
+  options:
+  - Lambda, always
+  - Provisioned instances or containers, because per-invocation billing adds up
+  - S3 static hosting
+  - There is no difference
+  correct_answer: 1
+  explanation: Serverless billing per execution is cheapest for bursty or low volume; steady high volume
+    is usually cheaper provisioned.
+xp_reward: 200
+prerequisites:
+- fundamentals
+- iam
+- ec2

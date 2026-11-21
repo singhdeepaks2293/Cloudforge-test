@@ -1,0 +1,227 @@
+id: fundamentals
+title: Cloud Computing Fundamentals
+description: What cloud computing is, why it exists, and how CloudForge simulates AWS concepts on real
+  local infrastructure. The starting point for every other track.
+difficulty: beginner
+estimated_hours: 4
+learning_objectives:
+- Explain cloud computing and its five essential characteristics
+- Distinguish IaaS, PaaS and SaaS and choose between them
+- Compare public, private and hybrid deployment models
+- Apply the shared responsibility model to a real workload
+- Estimate the cost of a simple workload and explain pay-as-you-go pricing
+modules:
+- id: cf-foundations
+  title: Cloud Foundations
+  lessons:
+  - id: what-is-cloud
+    title: What Is Cloud Computing?
+    theory: 'Cloud computing is the on-demand delivery of IT resources over a network, with pay-as-you-go
+      pricing. Instead of buying servers, racking them and waiting weeks for procurement, you request
+      a virtual machine, a database or a block of storage through an API and it exists minutes later.
+      The US National Institute of Standards and Technology defines five essential characteristics: on-demand
+      self-service, broad network access, resource pooling, rapid elasticity, and measured service. Resource
+      pooling means your virtual machine shares physical hardware with other tenants through a hypervisor,
+      which is why a cloud instance can be created so quickly. Elasticity means you can scale from one
+      instance to a hundred and back again as demand changes, instead of sizing for peak load all year.
+      Measured service means every resource is metered, so you pay for what you use. CloudForge reproduces
+      this model locally: KVM virtual machines and Docker containers stand in for EC2, Linux network namespaces
+      stand in for VPCs, and MinIO stands in for S3, so the concepts you learn map directly onto AWS while
+      nothing leaves your machine.'
+    key_points:
+    - 'On-demand self-service: provision resources without human interaction'
+    - Resource pooling and multi-tenancy via virtualization
+    - 'Rapid elasticity: scale out and in with demand'
+    - 'Measured service: pay-as-you-go metering'
+    - CloudForge maps AWS services to real local infrastructure
+    architecture_diagram_mermaid: "flowchart TD\n    User[Learner] --> API[CloudForge API]\n    API -->\
+      \ KVM[KVM VMs = EC2]\n    API --> NS[Linux namespaces = VPC]\n    API --> MinIO[MinIO = S3]\n  \
+      \  API --> PG[PostgreSQL = RDS]"
+  - id: service-models
+    title: 'Service Models: IaaS, PaaS and SaaS'
+    theory: 'Cloud services are usually grouped into three models that differ in how much of the stack
+      the provider manages. With Infrastructure as a Service (IaaS) you rent raw building blocks — virtual
+      machines, networks, storage — and you manage the operating system, middleware and application. EC2
+      is the classic IaaS example, and in CloudForge a KVM virtual machine plays that role. With Platform
+      as a Service (PaaS) the provider also manages the operating system and runtime, so you deploy code
+      and the platform handles scaling, patching and availability; AWS Elastic Beanstalk and Lambda fit
+      here. With Software as a Service (SaaS) you consume a finished application, such as Gmail or Salesforce,
+      and manage almost nothing beyond your data and user accounts. The trade-off is control versus convenience:
+      IaaS gives you the most control and the most operational work, SaaS gives you the least control
+      and the least work. Most real systems mix all three. A useful rule of thumb is to move up the stack
+      — toward PaaS and SaaS — whenever the undifferentiated work of running servers adds no value to
+      your product, and to stay at IaaS when you need fine control over the operating system, kernel or
+      network.'
+    key_points:
+    - 'IaaS: you manage OS and up; provider manages hardware and virtualization'
+    - 'PaaS: provider manages OS and runtime; you deploy code'
+    - 'SaaS: you consume a finished application'
+    - Higher abstraction means less control but less operational work
+    - Real architectures mix all three models
+    architecture_diagram_mermaid: "flowchart LR\n    subgraph IaaS[EC2 / KVM]\n      A[App] --> B[OS]\
+      \ --> C[Hypervisor]\n    end\n    subgraph PaaS[Lambda / Beanstalk]\n      D[App] --> E[Runtime\
+      \ managed]\n    end\n    subgraph SaaS[Gmail]\n      F[Finished app]\n    end"
+  - id: deployment-models
+    title: 'Deployment Models: Public, Private and Hybrid'
+    theory: 'A deployment model describes where cloud infrastructure lives and who controls it. A public
+      cloud is infrastructure owned and operated by a provider such as AWS and shared by many tenants;
+      you get the largest scale and the lowest entry cost, but you share physical hardware and you accept
+      the provider''s data residency options. A private cloud is infrastructure dedicated to one organization,
+      either on-premises or hosted; it offers the most control and the clearest compliance story, but
+      you carry the capital cost and the operational burden. A hybrid cloud connects the two, keeping
+      sensitive or latency-critical workloads private while bursting into the public cloud for scale.
+      CloudForge itself is a private cloud in miniature: it runs entirely on your own machine, so your
+      labs never touch a public provider, yet it emulates the public-cloud APIs and concepts you would
+      use on AWS. A fourth model, community cloud, shares infrastructure between organizations with common
+      concerns, such as government agencies. When choosing a model, weigh data sensitivity, regulatory
+      requirements, latency, cost structure and how much operational work your team can absorb. There
+      is no universally right answer; there is only the model that fits a particular workload''s constraints.'
+    key_points:
+    - 'Public cloud: shared, provider-operated, largest scale'
+    - 'Private cloud: dedicated, most control, highest operational burden'
+    - 'Hybrid cloud: private core with public burst capacity'
+    - CloudForge is a private cloud that emulates public-cloud APIs
+    - Choose by sensitivity, compliance, latency and cost
+    architecture_diagram_mermaid: "flowchart TD\n    Pub[Public cloud - AWS] --- Hyb[Hybrid]\n    Priv[Private\
+      \ cloud - on premises] --- Hyb\n    Hyb --> CF[CloudForge: local, emulates public APIs]"
+  - id: shared-responsibility
+    title: The Shared Responsibility Model
+    theory: 'In the cloud, security is split between the provider and the customer, and the split moves
+      depending on the service model. AWS summarises it as security OF the cloud versus security IN the
+      cloud. AWS is responsible for the security of the cloud: the physical data centres, the hardware,
+      the hypervisor and the network that connects them. You are responsible for security in the cloud:
+      your data, your identity and access policies, your operating system patches, your firewall rules
+      and your application code. With IaaS the customer carries most of the responsibility; with SaaS
+      the provider carries most of it. The most common beginner mistake is assuming the provider secures
+      everything — the classic example is an S3 bucket left publicly readable, which is a customer configuration
+      error, not an AWS failure. CloudForge mirrors this split locally: the platform secures the host
+      and isolates lab networks, but the security groups, IAM policies and bucket settings inside your
+      labs are yours to get right, and the labs and break-and-fix scenarios in later tracks will deliberately
+      let you get them wrong so you can see the consequences safely.'
+    key_points:
+    - 'Security OF the cloud: provider owns facilities, hardware, hypervisor'
+    - 'Security IN the cloud: customer owns data, IAM, OS, firewall rules'
+    - Responsibility shifts toward the provider as abstraction increases
+    - A public S3 bucket is a customer error, not a provider failure
+    - CloudForge labs make you own the customer side of the split
+    architecture_diagram_mermaid: "flowchart LR\n    AWS[AWS: facilities, hardware, hypervisor] --> Split{Shared\
+      \ boundary}\n    You[You: data, IAM, OS, firewall, app code] --> Split"
+  - id: cloud-economics
+    title: Cloud Economics and Pay-As-You-Go Pricing
+    theory: 'Cloud pricing replaces capital expenditure with operational expenditure: instead of buying
+      a server for thousands of dollars up front, you rent compute by the second and storage by the gigabyte-month.
+      That changes how you think about cost. An EC2 instance that runs all month costs roughly its hourly
+      rate times 730; an instance you start for a ten-minute test costs a few cents. This makes experimentation
+      cheap but makes idle resources expensive — a forgotten instance or an unattached disk keeps billing
+      forever. AWS offers several ways to reduce cost: reserved instances and savings plans trade commitment
+      for discounts, spot instances offer spare capacity at a steep discount with the risk of interruption,
+      and rightsizing matches instance size to actual usage. Storage pricing rewards lifecycle management:
+      data that is rarely read belongs in a cheaper tier. The discipline that ties it together is tagging
+      and cost visibility — every resource should carry an owner and a purpose so a surprise bill can
+      be traced. CloudForge costs you nothing but local electricity, which is exactly why it exists: you
+      can practise costly mistakes — leaving instances running, over-provisioning storage, misconfiguring
+      NAT — and learn the lesson without ever seeing a bill.'
+    key_points:
+    - 'CapEx becomes OpEx: rent by the second, pay for what you use'
+    - Idle resources keep billing; forgotten instances are the classic leak
+    - Reserved instances, savings plans and spot instances cut compute cost
+    - Storage tiers reward moving cold data to cheaper storage
+    - Tagging and cost visibility make bills explainable
+    - CloudForge lets you practise expensive mistakes for free
+    architecture_diagram_mermaid: "flowchart TD\n    Bill[Monthly bill] --> C1[Compute hours]\n    Bill\
+      \ --> C2[Storage GB-months]\n    Bill --> C3[Data transfer]\n    Bill --> C4[Idle / forgotten resources]"
+guided_lab:
+  lab_definition_id: lab-fundamentals-hello-cloud
+  title: Your First CloudForge Lab
+  tasks:
+  - Create a lab and inspect its topology in the console
+  - Launch one Linux instance and connect to it over SSH
+  - Tag the instance with owner and purpose, then stop it
+  validation_rules:
+  - rule: lab_exists
+    description: Lab session exists for this definition
+    params:
+      lab_definition_id: lab-fundamentals-hello-cloud
+  - rule: instance_running
+    description: At least one instance is running
+    params:
+      count: 1
+      operator: '>='
+  - rule: instance_reachable
+    description: Instance answers on SSH port 22
+    params:
+      protocol: ssh
+      port: 22
+challenge:
+  title: Standalone instance, no help
+  task: Launch a single instance from the console without following the guided steps, tag it purpose=challenge,
+    and prove you can reach it over SSH.
+  validation_rules:
+  - rule: instance_running
+    description: At least one instance is running
+    params:
+      count: 1
+      operator: '>='
+  - rule: instance_reachable
+    description: Instance answers on SSH port 22
+    params:
+      protocol: ssh
+      port: 22
+assessment:
+- question: Which NIST characteristic means you can request resources without human interaction with the
+    provider?
+  options:
+  - Resource pooling
+  - On-demand self-service
+  - Rapid elasticity
+  - Measured service
+  correct_answer: 1
+  explanation: On-demand self-service is provisioning without human interaction; elasticity is scaling,
+    pooling is sharing hardware, measured service is metering.
+- question: In the shared responsibility model, who is responsible for patching the guest operating system
+    on an EC2 instance?
+  options:
+  - AWS, always
+  - The customer
+  - The hypervisor vendor
+  - Nobody — EC2 instances are not patched
+  correct_answer: 1
+  explanation: The guest OS is security IN the cloud, so it is the customer's job; AWS owns the hypervisor
+    and below.
+- question: Which service model gives you the most control over the operating system?
+  options:
+  - SaaS
+  - PaaS
+  - IaaS
+  - All three are equal
+  correct_answer: 2
+  explanation: IaaS rents raw infrastructure; you manage the OS. PaaS manages the runtime, SaaS manages
+    almost everything.
+- question: A workload needs to scale from 2 to 50 instances for a one-hour sale, then back to 2. Which
+    cloud characteristic matters most?
+  options:
+  - Broad network access
+  - Resource pooling
+  - Rapid elasticity
+  - Measured service
+  correct_answer: 2
+  explanation: Rapid elasticity is scaling out and in with demand; measured service only affects billing.
+- question: Why is a publicly readable S3 bucket usually the customer's fault, not AWS's?
+  options:
+  - AWS configures buckets as public by default
+  - Bucket access policy is security IN the cloud — customer-owned
+  - AWS has no bucket security controls
+  - S3 buckets cannot be made private
+  correct_answer: 1
+  explanation: Data and access configuration are the customer's responsibility under the shared responsibility
+    model.
+- question: Which deployment model keeps sensitive data on-premises while bursting to a provider for scale?
+  options:
+  - Public cloud
+  - Private cloud
+  - Hybrid cloud
+  - Community cloud
+  correct_answer: 2
+  explanation: Hybrid connects a private core with public burst capacity.
+xp_reward: 100
+prerequisites: []

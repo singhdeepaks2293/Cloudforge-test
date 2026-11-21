@@ -1,0 +1,227 @@
+id: databases
+title: Databases on AWS
+description: Relational databases with RDS, NoSQL with DynamoDB, caching and backups. Choose the right
+  database by access pattern, not by habit.
+difficulty: intermediate
+estimated_hours: 6
+learning_objectives:
+- Launch an RDS instance in private subnets with automated backups
+- Design a DynamoDB table around its access patterns
+- Explain read replicas, Multi-AZ and failover
+- Add a cache to reduce database load
+- Choose between relational, NoSQL and cache for a workload
+modules:
+- id: db-rds
+  title: Relational Databases with RDS
+  lessons:
+  - id: rds-basics
+    title: 'RDS: Managed Relational Databases'
+    theory: 'RDS runs a relational database — PostgreSQL, MySQL, MariaDB, Oracle or SQL Server — while
+      AWS handles the undifferentiated work: provisioning the instance, patching the engine, taking backups
+      and replacing failed hardware. You still own the schema, the queries, the users and the parameters.
+      An RDS instance lives in a DB subnet group spanning at least two Availability Zones, and its security
+      group must allow traffic only from the application tier, on the database port — a database in a
+      public subnet with a permissive security group is one of the most common real-world breaches. Storage
+      is EBS-backed and can autoscale; the instance class fixes CPU and memory, and changing it requires
+      a reboot or a brief failover. CloudForge runs real PostgreSQL containers as its RDS analogue, so
+      connections, users, grants and slow queries behave exactly as they would against a managed instance,
+      and the lab validators connect to the database to verify it is actually working.'
+    key_points:
+    - RDS manages provisioning, patching, backups and hardware replacement
+    - You still own schema, queries, users and parameters
+    - DB subnet group spans at least two AZs; database stays private
+    - Storage is EBS-backed and can autoscale
+    - CloudForge runs real PostgreSQL as its RDS analogue
+    architecture_diagram_mermaid: "flowchart TD\n    App[App tier - private subnet] -->|5432| RDS[(RDS\
+      \ PostgreSQL)]\n    RDS --> AZ1[AZ-a - primary]\n    RDS --> AZ2[AZ-b - standby]\n    RDS --> Snap[Automated\
+      \ snapshots]"
+  - id: rds-ha-backups
+    title: Multi-AZ, Read Replicas and Backups
+    theory: 'High availability and scaling are different problems and RDS solves them with different features.
+      Multi-AZ deploys a synchronous standby in a second Availability Zone: writes go to both, and if
+      the primary fails AWS promotes the standby automatically, typically within a minute or two. It protects
+      against failure, not against load — the standby serves no reads. Read replicas are asynchronous
+      copies that serve read traffic, which is how you scale a read-heavy workload; they can lag behind
+      the primary, so an application that reads its own writes must read from the primary. Backups are
+      separate from both: automated backups take daily snapshots and retain transaction logs, giving point-in-time
+      recovery to any second in the retention window, while manual snapshots persist until you delete
+      them. The discipline is to enable automated backups with a retention period that matches the business,
+      to test a restore regularly, and to keep the primary and its replicas in different zones.'
+    key_points:
+    - 'Multi-AZ: synchronous standby for failover, not for reads'
+    - 'Read replicas: asynchronous copies that scale read traffic'
+    - Replicas can lag — read-your-writes must hit the primary
+    - Automated backups give point-in-time recovery
+    - Test restores; a backup you never restored is a hope
+    architecture_diagram_mermaid: "flowchart TD\n    W[Writes] --> P[Primary - AZ-a]\n    P -->|sync|\
+      \ S[Standby - AZ-b]\n    R[Reads] --> RR[Read replica]\n    P -->|async| RR"
+  - id: choosing-engine
+    title: Choosing a Database Engine
+    theory: 'Engine choice is driven by the workload''s access pattern and the team''s existing skill.
+      PostgreSQL is the default choice for most new applications: it is a full-featured relational database
+      with JSON support, strong consistency and a huge ecosystem. MySQL is similar and dominant in the
+      LAMP world. Aurora is AWS''s cloud-native engine, compatible with PostgreSQL and MySQL, with storage
+      replicated across three Availability Zones and much faster failover. Oracle and SQL Server appear
+      mainly in migrations of existing enterprise workloads, where licensing costs dominate the decision.
+      The question to ask before any of this is whether a relational database is the right shape at all:
+      if the access pattern is key-value lookups at massive scale, DynamoDB fits better; if the data is
+      a graph, a cache or a search index, a specialist store fits better. The most expensive database
+      mistake is choosing the engine first and discovering the access pattern later.'
+    key_points:
+    - PostgreSQL is the default for most new applications
+    - 'Aurora: cloud-native, storage replicated across three AZs, fast failover'
+    - Oracle and SQL Server usually arrive with enterprise migrations
+    - Choose by access pattern, not by habit or fashion
+    - Key-value at scale belongs in DynamoDB, not in a relational engine
+    architecture_diagram_mermaid: "flowchart TD\n    Q[Access pattern?] --> Rel[Relational - joins, transactions]\n\
+      \    Q --> KV[Key-value at scale]\n    Rel --> PG[PostgreSQL / Aurora]\n    KV --> Dyn[DynamoDB]"
+- id: db-nosql
+  title: NoSQL and Caching
+  lessons:
+  - id: dynamodb
+    title: 'DynamoDB: Key-Value at Scale'
+    theory: 'DynamoDB is a fully managed key-value and document database that scales to any throughput
+      without provisioning servers. Every item has a partition key, which decides which partition stores
+      it, and optionally a sort key, which orders items within a partition. The critical design rule is
+      that access patterns come first: you design the table around the queries you will run, using sort
+      keys and global secondary indexes to support each one, because DynamoDB cannot do ad-hoc joins or
+      unplanned queries efficiently. A hot partition — one partition key receiving most of the traffic
+      — throttles the table, so keys must distribute load evenly. Capacity is provisioned or on-demand:
+      provisioned is cheaper for predictable traffic, on-demand absorbs spikes without configuration.
+      DynamoDB is single-digit-millisecond at any scale, but that performance is bought with a rigid query
+      model; if you need flexible ad-hoc queries, a relational database is the better tool. CloudForge
+      runs DynamoDB Local, so the API and the table design discipline are identical to the real service.'
+    key_points:
+    - Partition key decides the partition; sort key orders items within it
+    - Design the table around the queries you will run
+    - Hot partitions throttle the table — keys must distribute load
+    - Provisioned capacity is cheaper; on-demand absorbs spikes
+    - Single-digit-millisecond reads, but no ad-hoc joins
+    architecture_diagram_mermaid: "flowchart TD\n    App[Application] --> T[Table: Users]\n    T --> P1[Partition\
+      \ - user_id A-M]\n    T --> P2[Partition - user_id N-Z]\n    T --> GSI[Global secondary index -\
+      \ by email]"
+  - id: caching
+    title: Caching with ElastiCache
+    theory: 'A cache sits between the application and the database and absorbs the reads the database
+      would otherwise repeat. The lazy-loading pattern is the common one: the application checks the cache,
+      and on a miss it reads the database and stores the result with a time-to-live. The write-through
+      pattern writes to the cache and the database together, keeping them consistent at the cost of slower
+      writes. Redis, the usual choice, is an in-memory data structure store supporting strings, hashes,
+      sets and sorted sets; Memcached is simpler and purely key-value. The hard problems are invalidation
+      — knowing when cached data is stale — and the cold start, when a fresh cache has nothing in it and
+      every request hits the database at once. A cache also changes the failure mode: the application
+      must keep working, more slowly, when the cache is down. CloudForge runs real Redis, and the labs
+      ask you to add caching to a slow endpoint and measure the latency and database load before and after,
+      so the benefit is a number rather than a claim.'
+    key_points:
+    - 'Lazy loading: cache miss reads the database and populates the cache'
+    - 'Write-through: cache and database written together'
+    - Redis supports data structures; Memcached is simple key-value
+    - Invalidation and cold starts are the hard problems
+    - The app must degrade gracefully when the cache is down
+    architecture_diagram_mermaid: "flowchart LR\n    App[Application] --> Cache[(Redis cache)]\n    Cache\
+      \ -->|miss| DB[(Database)]\n    App -->|cache down| DB"
+guided_lab:
+  lab_definition_id: lab-databases-rds
+  title: Private Database with Backups
+  tasks:
+  - Launch a PostgreSQL instance in private subnets across two AZs
+  - Restrict its security group to the application tier on port 5432
+  - Enable automated backups with 7-day retention and take a manual snapshot
+  - Connect from an application instance and create a table
+  validation_rules:
+  - rule: database_exists
+    description: A PostgreSQL database instance exists
+    params:
+      engine: postgres
+  - rule: database_private
+    description: Database has no public endpoint
+  - rule: security_group_allows
+    description: Database security group allows 5432 only from the application tier
+    params:
+      port: 5432
+      source: application-tier
+  - rule: database_backup_enabled
+    description: Automated backups enabled with 7-day retention
+    params:
+      retention_days: 7
+  - rule: table_exists
+    description: Table users exists in appdb
+    params:
+      database: appdb
+      table: users
+challenge:
+  title: Migrate a table to DynamoDB
+  task: A session store in PostgreSQL is struggling under read load. Design a DynamoDB table for sessions
+    with a partition key that distributes load, migrate the data, and prove point lookups return in single-digit
+    milliseconds.
+  validation_rules:
+  - rule: table_exists
+    description: DynamoDB table sessions exists
+    params:
+      database: dynamodb
+      table: sessions
+  - rule: dynamodb_partition_key
+    description: Table uses session_id as partition key
+    params:
+      table: sessions
+      key: session_id
+assessment:
+- question: What does Multi-AZ protect against?
+  options:
+  - Read load
+  - Failure of the primary instance or its AZ
+  - Slow queries
+  - Running out of disk
+  correct_answer: 1
+  explanation: Multi-AZ keeps a synchronous standby for automatic failover; it does not serve reads or
+    add capacity.
+- question: An application reads data it just wrote from a read replica and sees stale data. Why?
+  options:
+  - Replicas are synchronous
+  - Replica lag — asynchronous replication has not caught up yet
+  - The primary is down
+  - The replica is in the same AZ
+  correct_answer: 1
+  explanation: Read replicas replicate asynchronously, so they can lag; read-your-writes must go to the
+    primary.
+- question: What is the first step in designing a DynamoDB table?
+  options:
+  - Choose the instance size
+  - List the access patterns the table must serve
+  - Create the indexes
+  - Enable backups
+  correct_answer: 1
+  explanation: DynamoDB tables are designed around their queries; without the access patterns you cannot
+    choose keys.
+- question: What causes a hot partition in DynamoDB?
+  options:
+  - Too many partitions
+  - One partition key receiving most of the traffic
+  - On-demand capacity
+  - Too many indexes
+  correct_answer: 1
+  explanation: A hot partition key concentrates traffic on one partition, which throttles while other
+    partitions sit idle.
+- question: In lazy-loading cache, what happens on a cache miss?
+  options:
+  - The request fails
+  - The app reads the database and stores the result in the cache
+  - The cache is flushed
+  - The database is bypassed
+  correct_answer: 1
+  explanation: On a miss the application reads the database and populates the cache with a TTL.
+- question: A database must accept connections only from application servers. Where is that enforced?
+  options:
+  - In the VPC route table
+  - In the database security group, allowing port 5432 from the app tier
+  - In the NAT gateway
+  - In the internet gateway
+  correct_answer: 1
+  explanation: The database security group is the enforcement point for which sources may reach the database
+    port.
+xp_reward: 200
+prerequisites:
+- fundamentals
+- networking
+- storage

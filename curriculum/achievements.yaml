@@ -1,0 +1,118 @@
+achievements:
+- id: first-steps
+  title: First Steps
+  description: Complete your first lesson.
+  trigger:
+    type: lessons_completed
+    operator: '>='
+    value: 1
+  xp: 25
+- id: first-lab
+  title: Hands On
+  description: Complete your first guided lab.
+  trigger:
+    type: labs_completed
+    operator: '>='
+    value: 1
+  xp: 50
+- id: cloud-foundations
+  title: Cloud Foundations
+  description: Complete the Cloud Computing Fundamentals track.
+  trigger:
+    type: track_completed
+    track: fundamentals
+  xp: 100
+- id: network-builder
+  title: Network Builder
+  description: Complete the VPC & Networking track.
+  trigger:
+    type: track_completed
+    track: networking
+  xp: 150
+- id: security-minded
+  title: Security Minded
+  description: Complete the IAM & Security track.
+  trigger:
+    type: track_completed
+    track: iam
+  xp: 150
+- id: breaker
+  title: Breaker
+  description: Solve your first break-and-fix scenario.
+  trigger:
+    type: break_fix_solved
+    operator: '>='
+    value: 1
+  xp: 100
+- id: fixer
+  title: Fixer
+  description: Solve all break-and-fix scenarios.
+  trigger:
+    type: break_fix_solved
+    operator: '>='
+    value: 6
+  xp: 300
+- id: challenge-accepted
+  title: Challenge Accepted
+  description: Complete your first challenge without guided steps.
+  trigger:
+    type: challenges_completed
+    operator: '>='
+    value: 1
+  xp: 75
+- id: challenge-master
+  title: Challenge Master
+  description: Complete five challenges.
+  trigger:
+    type: challenges_completed
+    operator: '>='
+    value: 5
+  xp: 200
+- id: exam-ace
+  title: Exam Ace
+  description: Score 100% on any track assessment.
+  trigger:
+    type: assessment_score
+    operator: '>='
+    value: 100
+  xp: 100
+- id: xp-1000
+  title: Rising Cloud
+  description: Earn 1,000 XP in total.
+  trigger:
+    type: xp_total
+    operator: '>='
+    value: 1000
+  xp: 100
+- id: xp-5000
+  title: Cloud Architect
+  description: Earn 5,000 XP in total.
+  trigger:
+    type: xp_total
+    operator: '>='
+    value: 5000
+  xp: 250
+- id: streak-7
+  title: Seven-Day Streak
+  description: Learn for seven days in a row.
+  trigger:
+    type: streak_days
+    operator: '>='
+    value: 7
+  xp: 150
+- id: full-stack
+  title: Full Stack
+  description: Complete every beginner track.
+  trigger:
+    type: tracks_completed
+    difficulty: beginner
+    operator: '>='
+    value: 5
+  xp: 200
+- id: capstone
+  title: Capstone Architect
+  description: Complete the Solutions Architecture track and its design review.
+  trigger:
+    type: track_completed
+    track: architecture
+  xp: 300

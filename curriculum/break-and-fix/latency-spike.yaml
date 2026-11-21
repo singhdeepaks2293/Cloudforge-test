@@ -1,0 +1,33 @@
+id: latency-spike
+title: 'Everything Is Slow: A Latency Injection'
+symptom: The application still works, but page loads that took 200 ms now take over 5 seconds. Error rates
+  are normal, CPU is low, and the slowness affects every request equally.
+injected_fault:
+  kind: latency
+  target: subnet
+  parameters:
+    subnet_id: subnet-app-a
+    latency_ms: 5000
+    jitter_ms: 500
+diagnosis_hints:
+- Errors are normal and CPU is low, so this is latency, not load or failure.
+- 'Compare latency between tiers: is the app tier slow, or the database tier?'
+- Check traces for where request time is spent — which hop added the delay?
+- Look at the network path between the load balancer and the app tier.
+fix_steps:
+- Identify the affected subnet from the trace data.
+- Inspect the fault injection state for that subnet and clear the latency fault.
+- Verify page load latency returns below 500 ms.
+- Confirm the alarm on p99 latency clears.
+validation_rules:
+- rule: metric_below
+  description: p99 latency is back below 500 ms
+  params:
+    metric: p99_latency_ms
+    threshold: 500
+- rule: instance_reachable
+  description: Application responds over HTTP
+  params:
+    protocol: http
+    port: 80
+xp_reward: 150

@@ -1,0 +1,256 @@
+id: networking
+title: VPC & Networking
+description: Virtual private clouds, subnets, route tables, internet gateways and NAT — build an isolated
+  network the way AWS VPCs work, on real Linux networking primitives.
+difficulty: intermediate
+estimated_hours: 8
+learning_objectives:
+- Design a VPC with CIDR blocks and public/private subnets
+- Build route tables and attach an internet gateway
+- Provide outbound internet to private subnets with NAT
+- Control traffic with security groups and network ACLs
+- Diagnose connectivity failures from routing and firewall state
+modules:
+- id: net-vpc
+  title: VPCs, Subnets and Routing
+  lessons:
+  - id: cloud-networking
+    title: Cloud Networking Concepts
+    theory: 'A cloud network is a software-defined network: the switches, routers and firewalls you would
+      buy as hardware in a data centre are implemented in software and driven by API calls. In CloudForge
+      that software is the Linux kernel itself — network namespaces isolate each lab, bridges act as switches,
+      veth pairs act as cables, and nftables acts as the firewall. Because the network is software, it
+      is also versionable: a VPC can be described in Terraform, reviewed, applied and destroyed exactly
+      like application code. The core abstractions are the same on AWS and in CloudForge: a VPC is an
+      isolated network with its own address space, a subnet is a slice of that space in one Availability
+      Zone, a route table decides where packets go, and gateways connect the VPC to the internet or to
+      other networks. Understanding these five pieces and how packets flow between them is the whole of
+      cloud networking; everything else — load balancers, endpoints, peering — is a variation on the theme.'
+    key_points:
+    - Cloud networks are software-defined and API-driven
+    - Linux namespaces, bridges, veth pairs and nftables are the building blocks
+    - VPC, subnet, route table and gateway are the core abstractions
+    - Networks can be versioned and applied like code
+    - Packet flow between these pieces is the whole of cloud networking
+    architecture_diagram_mermaid: "flowchart TD\n    Internet((Internet)) --> IGW[Internet gateway]\n\
+      \    IGW --> RT[Route table]\n    RT --> Pub[Public subnet]\n    RT --> Priv[Private subnet]\n \
+      \   Priv --> NAT[NAT gateway]"
+  - id: vpc-cidr
+    title: VPCs and CIDR Blocks
+    theory: 'A VPC is created with a CIDR block, a range of private IP addresses such as 10.0.0.0/16,
+      which gives 65,536 addresses. The /16 is the network prefix and the remaining 16 bits are host addresses.
+      Choosing the size is a real design decision: too small and you run out of addresses when you add
+      subnets; too large and you cannot peer with another VPC that uses overlapping space, because overlapping
+      CIDRs cannot be routed between. AWS reserves five addresses in every subnet — the network address,
+      the VPC router, the DNS server, a future-use address and the broadcast address — so a /24 subnet
+      holds 251 usable addresses, not 256. Subnets carve the VPC range into smaller blocks, one per Availability
+      Zone, and each subnet''s CIDR must sit inside the VPC''s range without overlapping another subnet.
+      In CloudForge the same arithmetic applies to real Linux addressing, and the IPAM component of the
+      Rust engine tracks allocations, so an overlapping or out-of-range subnet is rejected by the engine
+      rather than silently accepted.'
+    key_points:
+    - A VPC CIDR such as 10.0.0.0/16 defines its address space
+    - Too small runs out of addresses; too large blocks peering
+    - AWS reserves five addresses per subnet
+    - Subnet CIDRs must sit inside the VPC range without overlap
+    - CloudForge IPAM enforces the same rules on real addresses
+    architecture_diagram_mermaid: "flowchart TD\n    VPC[VPC 10.0.0.0/16] --> S1[10.0.1.0/24 - AZ-a]\n\
+      \    VPC --> S2[10.0.2.0/24 - AZ-b]\n    VPC --> S3[10.0.3.0/24 - AZ-a private]"
+  - id: public-private-subnets
+    title: Public and Private Subnets
+    theory: 'A subnet is public if its route table has a route to an internet gateway; it is private if
+      it does not. The distinction is entirely about routing, not about the subnet''s name or CIDR. Public
+      subnets hold things that must be reachable from the internet — load balancers, bastion hosts and
+      NAT gateways. Private subnets hold everything else: application servers and databases, which can
+      initiate outbound connections through NAT but cannot be reached directly from outside. The standard
+      pattern is two public and two private subnets across two Availability Zones, giving both isolation
+      and redundancy. A common beginner error is placing a database in a public subnet and relying on
+      its security group for protection; the group helps, but a routing mistake or a misconfigured rule
+      then exposes it directly. Defence in depth means the database sits in a private subnet AND has a
+      restrictive security group. In CloudForge the Rust engine implements this with real namespaces and
+      routes, so a private subnet genuinely cannot be reached from outside the lab.'
+    key_points:
+    - A subnet is public only if its route table routes to an internet gateway
+    - Public subnets hold load balancers, bastions and NAT gateways
+    - Private subnets hold app servers and databases
+    - 'Standard pattern: two public and two private subnets across two AZs'
+    - Private subnet plus restrictive security group is defence in depth
+    architecture_diagram_mermaid: "flowchart TD\n    IGW[Internet gateway] --> Pub[Public subnet]\n  \
+      \  Pub --> NAT[NAT gateway]\n    NAT --> Priv[Private subnet]\n    Priv --> DB[(Database)]"
+  - id: route-tables-igw
+    title: Route Tables and Internet Gateways
+    theory: 'A route table is a list of rules that decide where a packet goes based on its destination.
+      Each entry has a destination CIDR and a target: local for traffic inside the VPC, an internet gateway
+      for 0.0.0.0/0, a NAT gateway for private outbound traffic, or a VPC peering connection. The most
+      specific matching route wins — a route for 10.0.5.0/24 beats the default route for 0.0.0.0/0 — and
+      if no route matches, the packet is dropped. An internet gateway is a horizontally scaled, redundant
+      component attached to the VPC that performs network address translation between public and private
+      addresses; it does nothing until a route table points at it, which is why creating a gateway alone
+      never makes a subnet public. Route tables are associated with subnets, and every subnet has exactly
+      one associated table, falling back to the VPC''s main table. In CloudForge the engine installs these
+      as real Linux routes inside the lab namespace, so a missing or wrong route produces a genuine, diagnosable
+      connectivity failure — the basis of the break-and-fix scenarios in this track.'
+    key_points:
+    - A route is a destination CIDR plus a target
+    - The most specific matching route wins; no match means the packet drops
+    - An internet gateway does nothing until a route table points at it
+    - Every subnet has exactly one associated route table
+    - CloudForge installs routes as real Linux routes in the lab namespace
+    architecture_diagram_mermaid: "flowchart TD\n    Pkt[Packet to 0.0.0.0/0] --> RT[Route table]\n  \
+      \  RT -->|0.0.0.0/0| IGW[Internet gateway]\n    RT -->|10.0.0.0/16| Local[local]\n    IGW --> Net((Internet))"
+  - id: nat-gateways
+    title: NAT Gateways
+    theory: 'Instances in a private subnet need outbound internet access — to download packages or call
+      an API — but must not be reachable from the internet. A NAT gateway solves this: it sits in a public
+      subnet with a public IP, and private instances route their default traffic to it. It rewrites the
+      source address of outbound packets to its own public address and remembers the connection, so return
+      traffic is forwarded back to the right instance while unsolicited inbound traffic is dropped. NAT
+      gateways are managed and highly available within their Availability Zone, but they are zonal: a
+      NAT gateway in AZ-a does not serve AZ-b if AZ-a fails, so a resilient design uses one NAT gateway
+      per AZ with a separate route table per private subnet. NAT gateways also bill per hour plus per
+      gigabyte processed, which makes them one of the first cost items to review. A NAT instance — a self-managed
+      EC2 instance doing the same job — is cheaper but a single point of failure you must maintain. In
+      CloudForge, NAT is implemented with nftables masquerade rules in the Rust engine, so you can watch
+      the address translation happen in real packet captures.'
+    key_points:
+    - NAT lets private instances reach the internet without being reachable
+    - It rewrites source addresses and tracks connections for return traffic
+    - NAT gateways are zonal — use one per AZ for resilience
+    - NAT bills per hour plus per gigabyte processed
+    - CloudForge implements NAT with nftables masquerade rules
+    architecture_diagram_mermaid: "flowchart TD\n    Priv[Private instance 10.0.3.5] -->|0.0.0.0/0| NAT[NAT\
+      \ gateway - public IP]\n    NAT --> Net((Internet))\n    Net -->|return traffic only| NAT"
+  - id: security-groups-nacls
+    title: Security Groups and Network ACLs
+    theory: 'AWS has two firewall layers, and they behave differently. A security group is stateful and
+      attached to a resource such as an instance or a load balancer: if you allow inbound traffic on port
+      80, the return traffic is automatically allowed, and you only write allow rules — everything else
+      is denied by default. A network ACL is stateless and attached to a subnet: it checks packets in
+      both directions, it supports explicit deny rules, and its rules are evaluated in number order, lowest
+      first, until one matches. Security groups are the primary tool and the one you will use daily; NACLs
+      are the coarse backstop, typically left at their permissive default and used to block specific hostile
+      addresses at the subnet edge. The classic mistakes are opening SSH to 0.0.0.0/0, forgetting that
+      a security group change takes effect immediately, and assuming a NACL''s statefulness — forgetting
+      the return rule and then wondering why a connection hangs. In CloudForge both layers are real nftables
+      rule sets owned by the Rust engine, and the validators inspect them directly: a lab can require
+      that SSH is allowed from your address and denied from everywhere else.'
+    key_points:
+    - Security groups are stateful, attached to resources, allow-only
+    - NACLs are stateless, attached to subnets, support deny rules
+    - NACL rules are evaluated in number order until a match
+    - Security groups are the daily tool; NACLs are the coarse backstop
+    - Both layers are real nftables rule sets in CloudForge
+    architecture_diagram_mermaid: "flowchart TD\n    Net((Internet)) --> NACL[Network ACL - subnet]\n\
+      \    NACL --> SG[Security group - instance]\n    SG --> VM[Instance]\n    SG -.->|stateful return|\
+      \ Net"
+guided_lab:
+  lab_definition_id: lab-networking-vpc
+  title: Build a Two-Tier VPC
+  tasks:
+  - Create a VPC 10.0.0.0/16 with two public and two private subnets across two AZs
+  - Attach an internet gateway and route public subnets to it
+  - Place a NAT gateway in a public subnet and route private subnets to it
+  - Launch an instance in a private subnet and prove it can reach the internet but not be reached
+  validation_rules:
+  - rule: vpc_exists
+    description: VPC 10.0.0.0/16 exists
+    params:
+      cidr: 10.0.0.0/16
+  - rule: subnet_count
+    description: At least four subnets exist
+    params:
+      operator: '>='
+      value: 4
+  - rule: route_to_igw
+    description: Public subnets route 0.0.0.0/0 to the internet gateway
+    params:
+      subnet_type: public
+  - rule: route_to_nat
+    description: Private subnets route 0.0.0.0/0 to a NAT gateway
+    params:
+      subnet_type: private
+  - rule: nat_gateway_exists
+    description: At least one NAT gateway exists
+    params:
+      min_count: 1
+  - rule: security_group_allows_ssh
+    description: SSH is allowed from inside the VPC
+    params:
+      port: 22
+      source: 10.0.0.0/16
+challenge:
+  title: Isolate the database tier
+  task: 'Add a third tier: a database subnet in each AZ with no route to the internet gateway or NAT,
+    and a security group that allows traffic only from the application tier on port 5432.'
+  validation_rules:
+  - rule: subnet_count
+    description: At least six subnets exist including the database tier
+    params:
+      operator: '>='
+      value: 6
+  - rule: no_route_to_internet
+    description: Database subnets have no route to the internet
+    params:
+      subnet_type: database
+  - rule: security_group_allows
+    description: Database security group allows 5432 only from the application tier
+    params:
+      port: 5432
+      source: application-tier
+assessment:
+- question: A subnet's route table has no route to an internet gateway. Is the subnet public or private?
+  options:
+  - Public
+  - Private
+  - Both
+  - Neither — it has no traffic
+  correct_answer: 1
+  explanation: Public means the route table routes to an internet gateway; without that route the subnet
+    is private.
+- question: 'Two routes match a packet: 10.0.0.0/16 to local and 0.0.0.0/0 to the internet gateway. Which
+    wins for 10.0.5.9?'
+  options:
+  - The default route
+  - The most specific route — 10.0.0.0/16 to local
+  - Neither; the packet is dropped
+  - The first route created
+  correct_answer: 1
+  explanation: 'Longest-prefix match wins: 10.0.0.0/16 is more specific than 0.0.0.0/0.'
+- question: Why does a NAT gateway need to live in a public subnet?
+  options:
+  - It needs a public IP and a route to the internet gateway
+  - Private subnets cannot hold gateways
+  - It needs more CPU
+  - It is a legal requirement
+  correct_answer: 0
+  explanation: The NAT gateway must itself reach the internet, so it needs a public IP and an IGW route.
+- question: A security group allows inbound port 80. What about the return traffic?
+  options:
+  - It must be allowed by a separate outbound rule
+  - It is automatically allowed — security groups are stateful
+  - It is blocked
+  - It depends on the NACL
+  correct_answer: 1
+  explanation: 'Security groups are stateful: return traffic for an allowed connection is automatically
+    permitted.'
+- question: A NACL allows inbound port 80 but the connection hangs. What is the likely cause?
+  options:
+  - The security group is stateful
+  - The NACL is stateless — the outbound rule for return traffic is missing
+  - The instance is stopped
+  - The route table is wrong
+  correct_answer: 1
+  explanation: Stateless NACLs check both directions; the ephemeral-port return rule must be explicitly
+    allowed.
+- question: How many usable IP addresses does a /24 subnet have on AWS?
+  options:
+  - '256'
+  - '251'
+  - '254'
+  - '250'
+  correct_answer: 1
+  explanation: AWS reserves five addresses per subnet, so a /24 offers 251 usable addresses.
+xp_reward: 250
+prerequisites:
+- fundamentals
+- global-infrastructure

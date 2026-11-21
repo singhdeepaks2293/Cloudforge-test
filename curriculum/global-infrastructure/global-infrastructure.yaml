@@ -1,0 +1,185 @@
+id: global-infrastructure
+title: AWS Global Infrastructure
+description: Regions, Availability Zones, edge locations and how to choose where a workload lives. Latency,
+  data residency and designing for failure.
+difficulty: beginner
+estimated_hours: 3
+learning_objectives:
+- Explain regions, Availability Zones and edge locations
+- Choose a region using latency, compliance and service availability
+- Design an application to survive the loss of one Availability Zone
+- Distinguish regional, zonal and global AWS services
+modules:
+- id: gi-regions
+  title: Regions and Availability Zones
+  lessons:
+  - id: regions-azs
+    title: Regions and Availability Zones
+    theory: 'AWS infrastructure is organised into Regions, each a separate geographic area such as eu-west-1
+      in Ireland or us-east-1 in Virginia. A Region is made of multiple Availability Zones, which are
+      physically separate data centres within the Region, connected by low-latency links but isolated
+      from one another for power, cooling and flooding. The standard practice is to run an application
+      across at least two Availability Zones inside one Region, so a fire or power failure in one data
+      centre does not take the application down. This is the foundation of high availability on AWS, and
+      it is why the VPC track spends so much time on subnets: a subnet lives in exactly one Availability
+      Zone, so a multi-AZ design needs a subnet per zone. Regions are independent of each other; resources
+      in one Region do not automatically exist in another, and copying data between Regions is an explicit
+      act. CloudForge simulates this by letting each lab declare a region and spread its subnets across
+      simulated zones, so the same design discipline applies even though everything runs on one host.'
+    key_points:
+    - A Region is a geographic area; an AZ is an isolated data centre in it
+    - Run across at least two AZs for high availability
+    - A subnet lives in exactly one AZ
+    - Regions are independent; replication is explicit
+    architecture_diagram_mermaid: "flowchart TD\n    R[Region eu-west-1] --> A[AZ-a]\n    R --> B[AZ-b]\n\
+      \    R --> C[AZ-c]\n    A --> S1[Subnet 10.0.1.0/24]\n    B --> S2[Subnet 10.0.2.0/24]"
+  - id: edge-locations
+    title: Edge Locations and CloudFront
+    theory: 'Not everything needs to live in a Region. Edge locations are small points of presence in
+      many more cities than Regions, and they power Amazon CloudFront, the content delivery network, and
+      Route 53, the DNS service. When a user in Tokyo requests a file from CloudFront, the request is
+      served from the nearest edge location if the file is cached there, instead of travelling to the
+      origin Region. That cuts latency from hundreds of milliseconds to tens, and it offloads traffic
+      from the origin. Edge locations also run Lambda@Edge and CloudFront Functions for lightweight request
+      processing close to users. The key mental model is tiered: the Region holds the durable, authoritative
+      copy of data and the heavy compute, while the edge holds cached, read-mostly copies close to users.
+      CloudForge models this with a simulated edge cache in front of a MinIO origin, so you can measure
+      the latency difference between a cache hit and a cache miss and see why cache invalidation and TTLs
+      matter in real deployments.'
+    key_points:
+    - Edge locations are points of presence beyond Regions
+    - CloudFront serves cached content from the nearest edge
+    - Edge caching cuts latency and origin load
+    - Region holds the authoritative copy; edge holds cached copies
+    architecture_diagram_mermaid: "flowchart LR\n    User[User in Tokyo] --> Edge[Edge location - cache]\n\
+      \    Edge -->|cache miss| Origin[Origin in eu-west-1]\n    Edge -->|cache hit| User"
+  - id: choosing-region
+    title: Choosing a Region
+    theory: 'Choosing a Region is a trade-off between four factors. Latency comes first for user-facing
+      workloads: pick the Region closest to most of your users, and measure it rather than guessing. Data
+      residency and compliance come second: some data must stay inside a country or a jurisdiction, which
+      rules out most Regions immediately. Service availability comes third: new AWS services launch in
+      a few Regions first, so the service you need may not exist where you want it. Price comes last:
+      the same instance type can cost noticeably more in one Region than another, because of local power
+      and tax costs. A common pattern is a primary Region for the application plus a second Region for
+      disaster recovery, with data replicated between them. Multi-Region active-active designs exist but
+      they are significantly harder — writes conflict, consistency gets complicated, and costs roughly
+      double — so start with one Region and multiple Availability Zones, and only add a second Region
+      when the business case genuinely requires it.'
+    key_points:
+    - 'Latency: closest Region to most users'
+    - 'Compliance: data residency can rule Regions out'
+    - 'Service availability: new services launch in few Regions first'
+    - Price varies by Region
+    - Start multi-AZ in one Region; add a second Region only with a real case
+    architecture_diagram_mermaid: "flowchart TD\n    Choice[Choose a Region] --> Lat[Latency to users]\n\
+      \    Choice --> Comp[Compliance / residency]\n    Choice --> Svc[Service availability]\n    Choice\
+      \ --> Price[Price]"
+  - id: global-services
+    title: Regional, Zonal and Global Services
+    theory: 'AWS services fall into three scopes, and confusing them causes real outages. Zonal services
+      are tied to one Availability Zone: an EC2 instance or an EBS volume lives in one zone, and if that
+      zone fails the resource is gone until it recovers. Regional services span a Region: S3 buckets,
+      DynamoDB tables and VPCs are regional, and AWS replicates their data across zones for you. Global
+      services span the world: IAM, Route 53 and CloudFront have a single global namespace, so a user
+      or a DNS zone created once is visible everywhere. The practical consequences are concrete: an IAM
+      role works in every Region; an S3 bucket name must be globally unique; a security group exists only
+      in its VPC''s Region. Disaster recovery planning depends on this too — a regional service survives
+      a zone failure by itself, but a zonal service needs you to have a copy elsewhere. CloudForge labels
+      every lab resource with its scope, and the validators in later tracks check that your critical resources
+      are not all sitting in a single zone.'
+    key_points:
+    - 'Zonal: EC2, EBS — tied to one AZ'
+    - 'Regional: S3, DynamoDB, VPC — replicated across AZs by AWS'
+    - 'Global: IAM, Route 53, CloudFront — one global namespace'
+    - IAM roles work everywhere; bucket names must be globally unique
+    - Scope determines what survives a zone failure
+    architecture_diagram_mermaid: "flowchart TD\n    G[Global: IAM, Route 53] --> R[Regional: S3, VPC,\
+      \ DynamoDB]\n    R --> Z1[Zonal: EC2 in AZ-a]\n    R --> Z2[Zonal: EBS in AZ-b]"
+guided_lab:
+  lab_definition_id: lab-global-infra-two-az
+  title: Design a Two-AZ Topology
+  tasks:
+  - Create a VPC spanning two simulated Availability Zones
+  - Place a public subnet in each zone and verify both exist
+  - Record which resources are zonal, regional and global
+  validation_rules:
+  - rule: vpc_exists
+    description: VPC 10.1.0.0/16 exists
+    params:
+      cidr: 10.1.0.0/16
+  - rule: subnet_count
+    description: At least two subnets exist
+    params:
+      operator: '>='
+      value: 2
+  - rule: subnet_az_spread
+    description: Subnets span at least two Availability Zones
+    params:
+      min_zones: 2
+challenge:
+  title: Pick the right region
+  task: You are given three user populations and a compliance rule requiring EU data residency. Choose
+    a Region, justify it in the lab notes, and deploy a two-AZ VPC there.
+  validation_rules:
+  - rule: vpc_exists
+    description: A VPC exists in the chosen Region
+  - rule: subnet_az_spread
+    description: Subnets span at least two Availability Zones
+    params:
+      min_zones: 2
+assessment:
+- question: What is an Availability Zone?
+  options:
+  - A geographic AWS Region
+  - A physically isolated data centre within a Region
+  - An edge caching location
+  - A single server rack
+  correct_answer: 1
+  explanation: An AZ is one or more physically separate data centres inside a Region, isolated for power
+    and cooling.
+- question: A subnet is created in eu-west-1a. Where does it live?
+  options:
+  - Across all of eu-west-1
+  - In eu-west-1a only
+  - In every Region
+  - At the nearest edge location
+  correct_answer: 1
+  explanation: A subnet lives in exactly one AZ; multi-AZ designs need one subnet per zone.
+- question: Which of these is a global AWS service?
+  options:
+  - EC2
+  - EBS
+  - IAM
+  - VPC
+  correct_answer: 2
+  explanation: IAM has a single global namespace; EC2 and EBS are zonal, VPC is regional.
+- question: Why serve static content from an edge location instead of the origin Region?
+  options:
+  - Edge locations store the only copy
+  - Lower latency and less origin load
+  - Edge locations are cheaper to run
+  - Origins cannot serve HTTP
+  correct_answer: 1
+  explanation: Cached copies at the edge are closer to users, so responses are faster and the origin sees
+    less traffic.
+- question: What should you do before choosing a second Region for disaster recovery?
+  options:
+  - Always add one immediately
+  - Confirm the business case; start multi-AZ in one Region first
+  - Move everything to the edge
+  - Disable the first Region
+  correct_answer: 1
+  explanation: Multi-Region doubles cost and complexity; multi-AZ in one Region covers most failure modes
+    first.
+- question: Two users request the same S3 bucket name in different Regions. What happens?
+  options:
+  - Both succeed — names are regional
+  - The second fails — bucket names are globally unique
+  - AWS merges the buckets
+  - The first bucket is renamed
+  correct_answer: 1
+  explanation: S3 bucket names live in a single global namespace even though buckets themselves are regional.
+xp_reward: 90
+prerequisites:
+- fundamentals

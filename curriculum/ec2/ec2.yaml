@@ -1,0 +1,218 @@
+id: ec2
+title: EC2 Basics
+description: Launch, connect to and manage Linux instances. AMIs, key pairs, disks and the instance lifecycle
+  — backed by local KVM VMs.
+difficulty: beginner
+estimated_hours: 5
+learning_objectives:
+- Launch an instance from an AMI and connect over SSH
+- Manage key pairs securely
+- Explain the instance lifecycle and choose an instance type
+- Attach and manage EBS-style disks
+- Use instance metadata and cloud-init to bootstrap instances
+modules:
+- id: ec2-core
+  title: Instances and Access
+  lessons:
+  - id: instances-amis
+    title: Instances and AMIs
+    theory: 'An EC2 instance is a virtual machine running on AWS hardware, and an Amazon Machine Image
+      (AMI) is the template it is launched from: the operating system, the installed software and the
+      disk layout, frozen into a reusable image. Launching an instance means choosing an AMI, an instance
+      type that fixes the virtual CPU and memory, a key pair, a subnet and a security group — and the
+      instance boots from the AMI in minutes. Instance types follow a naming pattern: the family letter
+      describes the optimisation, such as t for burstable, m for general purpose, c for compute and r
+      for memory, and the size describes the capacity. Burstable instances earn CPU credits while idle
+      and spend them under load, which makes them cheap for spiky workloads and a trap for sustained ones.
+      CloudForge maps this directly onto KVM: its lab images are the AMIs, its VM flavours are the instance
+      types, and the same launch parameters apply. The discipline to build early is to treat instances
+      as cattle, not pets — reproducible from an image and replaceable, never hand-tuned and irreplaceable.'
+    key_points:
+    - 'An AMI is the launch template: OS, software and disk layout'
+    - Instance type fixes vCPU and memory; family letter shows optimisation
+    - Burstable instances earn and spend CPU credits
+    - CloudForge lab images are AMIs; VM flavours are instance types
+    - 'Treat instances as cattle: reproducible and replaceable'
+    architecture_diagram_mermaid: "flowchart TD\n    AMI[AMI - Ubuntu 24.04] --> Launch[Launch]\n    Launch\
+      \ --> Type[Instance type t3.micro]\n    Launch --> Subnet[Subnet + security group]\n    Launch -->\
+      \ VM[Running instance]"
+  - id: key-pairs-ssh
+    title: Key Pairs and SSH
+    theory: 'SSH access to an EC2 instance uses public-key cryptography, not passwords. A key pair has
+      a public key, which AWS stores and injects into the instance at launch, and a private key, which
+      you download once and must protect — AWS cannot recover it if you lose it. When you connect, your
+      SSH client proves it holds the private key without ever sending it over the network, and the instance
+      checks the proof against the injected public key. The private key file must have restrictive permissions,
+      typically 400, or the SSH client will refuse to use it. The security group is the other half of
+      access: port 22 must be open to your address, and opening it to the whole internet invites constant
+      brute-force attempts, so restrict the source to your IP. In CloudForge the same flow applies to
+      KVM instances through cloud-init, and the lab validators check both halves — that the key pair exists
+      and that the security group allows SSH only from the expected source.'
+    key_points:
+    - Public key is injected at launch; private key is downloaded once
+    - SSH proves possession of the private key without sending it
+    - Private key file must be mode 400
+    - Security group must allow port 22 from a restricted source
+    - AWS cannot recover a lost private key
+    architecture_diagram_mermaid: "flowchart LR\n    You[Your laptop - private key] -->|SSH proof| VM[Instance\
+      \ - public key]\n    SG[Security group: 22 from your IP] --> VM"
+  - id: instance-lifecycle
+    title: Instance Lifecycle
+    theory: 'An instance moves through states that determine what you can do with it and what you pay
+      for. Pending means it is booting; running means it is up and billing; stopping and stopped pause
+      it — a stopped instance keeps its disks and configuration but does not bill for compute; terminated
+      means it is gone, and termination is permanent. Rebooting keeps the instance and its data; stopping
+      and starting moves it to different physical hardware, which changes its public IP unless you use
+      an Elastic IP. The lifecycle matters for cost: a running instance bills by the second whether or
+      not it is doing work, so stopping idle instances is the simplest saving available. It also matters
+      for design: anything that must survive termination belongs on a persistent disk or in S3, never
+      on the instance''s ephemeral storage. CloudForge reproduces every state in the KVM-backed lab lifecycle,
+      and the lab state machine in the platform itself mirrors this — labs move from PROVISIONING to READY
+      to RUNNING to COMPLETED or DESTROYED with the same discipline.'
+    key_points:
+    - pending → running → stopping → stopped → terminated
+    - Stopped instances keep disks but do not bill for compute
+    - Termination is permanent; stop/start may change the public IP
+    - Data that must survive belongs on persistent storage, not the instance
+    - Running instances bill by the second, idle or not
+    architecture_diagram_mermaid: "flowchart LR\n    P[pending] --> R[running]\n    R --> S[stopping]\n\
+      \    S --> St[stopped]\n    St --> R\n    R --> T[terminated]"
+- id: ec2-storage
+  title: Disks and Bootstrapping
+  lessons:
+  - id: disks-ebs
+    title: Disks and EBS Concepts
+    theory: 'An EBS volume is a persistent block disk that lives independently of any instance. It exists
+      in one Availability Zone, it can be attached to one instance at a time, and it keeps its data when
+      the instance stops or terminates — unless you set delete-on-termination for the root volume. Volume
+      types trade performance for price: gp3 is the general-purpose default with configurable IOPS, io2
+      is for latency-sensitive databases, and st1 and sc1 are throughput- and cold-storage-optimised.
+      Snapshots capture a volume at a point in time and are stored in S3, which makes them the basis for
+      backups and for creating new volumes in another zone. The root volume holds the operating system;
+      additional volumes hold data, and separating the two means you can replace the instance without
+      touching the data. In CloudForge, volumes are qcow2 disks managed by the host agent, and the same
+      rules apply: a disk belongs to one zone, snapshots are the backup mechanism, and the validators
+      check that your data volume survives an instance replacement.'
+    key_points:
+    - 'EBS volume: persistent block disk, independent of the instance'
+    - A volume lives in one AZ and attaches to one instance at a time
+    - gp3 is the general-purpose default; io2 is for databases
+    - Snapshots are point-in-time backups stored in S3
+    - Separate root and data volumes so instances are replaceable
+    architecture_diagram_mermaid: "flowchart TD\n    AZ[Availability Zone] --> Vol[Volume - gp3 20 GiB]\n\
+      \    Vol --> Inst[Instance]\n    Vol --> Snap[Snapshot in S3]"
+  - id: metadata-cloud-init
+    title: Instance Metadata and Cloud-Init
+    theory: 'Every EC2 instance can reach a metadata service at the link-local address 169.254.169.254,
+      which answers questions about the instance itself: its ID, its Availability Zone, its public IP,
+      and the temporary credentials of its IAM role. Applications use this to discover their own environment
+      without hard-coding values. Cloud-init is the companion mechanism: a script or configuration passed
+      as user data at launch time that runs on first boot to install packages, write files, create users
+      and start services. Together they are how instances bootstrap themselves reproducibly — the same
+      user data that builds a web server on one instance builds an identical one on the next, which is
+      the foundation of immutable infrastructure. The metadata service must be protected: version 2 requires
+      a session token, which prevents a simple server-side request forgery from stealing role credentials.
+      CloudForge implements both, so your labs can fetch metadata from a KVM instance and bootstrap it
+      with the same user data you would pass to EC2.'
+    key_points:
+    - Metadata service at 169.254.169.254 describes the instance itself
+    - Role credentials are available through metadata — protect them
+    - IMDSv2 requires a session token to block SSRF credential theft
+    - Cloud-init runs user data on first boot to bootstrap the instance
+    - User data makes instances reproducible and immutable
+    architecture_diagram_mermaid: "flowchart LR\n    VM[Instance] -->|GET 169.254.169.254| MD[Metadata\
+      \ service]\n    MD --> Creds[Role credentials]\n    UD[User data / cloud-init] --> VM"
+guided_lab:
+  lab_definition_id: lab-ec2-first-instance
+  title: Launch and Connect to an Instance
+  tasks:
+  - Launch an instance from the Ubuntu lab image in a public subnet
+  - Connect over SSH using the lab key pair
+  - Attach a 10 GiB data volume and mount it
+  validation_rules:
+  - rule: instance_running
+    description: At least one instance is running
+    params:
+      count: 1
+      operator: '>='
+  - rule: instance_reachable
+    description: Instance answers on SSH port 22
+    params:
+      protocol: ssh
+      port: 22
+  - rule: volume_attached
+    description: A data volume of at least 10 GiB is attached
+    params:
+      size_gib: 10
+      operator: '>='
+challenge:
+  title: Replace, don't repair
+  task: Your instance has a corrupted package install. Terminate it and launch a replacement from the
+    same AMI and user data, proving the data volume survives the swap.
+  validation_rules:
+  - rule: instance_running
+    description: A replacement instance is running
+    params:
+      count: 1
+      operator: '>='
+  - rule: volume_attached
+    description: The data volume is attached to the replacement
+    params:
+      size_gib: 10
+      operator: '>='
+assessment:
+- question: What does an AMI contain?
+  options:
+  - Only the operating system kernel
+  - OS, installed software and disk layout — the launch template
+  - Only the instance type
+  - The VPC configuration
+  correct_answer: 1
+  explanation: 'An AMI is the full template an instance boots from: OS, software and disk layout.'
+- question: A t3.micro instance runs a sustained CPU-heavy job for hours. What happens?
+  options:
+  - It earns extra credits
+  - It runs out of CPU credits and is throttled
+  - It automatically upgrades
+  - Nothing — burstable instances have no limit
+  correct_answer: 1
+  explanation: Burstable instances earn credits while idle and spend them under load; sustained load exhausts
+    them.
+- question: You lose the private key for an instance. What is true?
+  options:
+  - AWS can re-issue it
+  - You cannot SSH in with that key pair again; replace the key or the instance
+  - The password still works
+  - The public key can be reversed into a private key
+  correct_answer: 1
+  explanation: The private key is downloaded once and cannot be recovered; access must be re-established
+    another way.
+- question: What is the difference between stopping and terminating an instance?
+  options:
+  - None — both delete the instance
+  - Stopped keeps disks and config and can restart; terminated is permanent
+  - Stopped still bills for compute
+  - Terminated instances keep running
+  correct_answer: 1
+  explanation: A stopped instance preserves its volumes and configuration; termination deletes the instance
+    permanently.
+- question: Where should data that must survive instance termination live?
+  options:
+  - On the instance's ephemeral storage
+  - On a persistent volume or in S3
+  - In the instance's memory
+  - In the security group
+  correct_answer: 1
+  explanation: Ephemeral storage dies with the instance; persistent volumes and S3 outlive it.
+- question: What does cloud-init user data do?
+  options:
+  - It encrypts the disk
+  - It runs a bootstrap script or config on first boot
+  - It replaces the AMI
+  - It opens port 22
+  correct_answer: 1
+  explanation: User data is executed by cloud-init on first boot to install software and configure the
+    instance.
+xp_reward: 150
+prerequisites:
+- fundamentals

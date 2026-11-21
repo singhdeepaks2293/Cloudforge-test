@@ -1,0 +1,41 @@
+id: wrong-security-group
+title: 'SSH Worked Yesterday: A Security Group Regression'
+symptom: SSH to the application instances times out from the bastion host, even though the instances are
+  running and the bastion can reach everything else. The application itself still serves traffic through
+  the load balancer.
+injected_fault:
+  kind: loss
+  target: security_group
+  parameters:
+    security_group_id: sg-app
+    port: 22
+    protocol: tcp
+    loss_percent: 100
+    note: simulates a security group rule that no longer allows SSH from the bastion
+diagnosis_hints:
+- The instances are running and the app works, so this is a firewall problem, not a routing one.
+- Check the application security group's inbound rules for port 22.
+- Compare the source of the SSH rule with the bastion's address — did it change?
+- Check VPC flow logs for REJECT entries on port 22.
+fix_steps:
+- Open the application security group in the console.
+- Add or restore an inbound rule allowing TCP port 22 from the bastion security group.
+- Remove any overly broad 0.0.0.0/0 SSH rule if one was added as a workaround.
+- Reconnect over SSH from the bastion to verify.
+validation_rules:
+- rule: security_group_allows_ssh
+  description: SSH is allowed from the bastion host
+  params:
+    port: 22
+    source: bastion
+- rule: security_group_denies
+  description: SSH is not open to the whole internet
+  params:
+    port: 22
+    source: 0.0.0.0/0
+- rule: instance_reachable
+  description: Instance answers on SSH port 22
+  params:
+    protocol: ssh
+    port: 22
+xp_reward: 120

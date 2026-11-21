@@ -1,0 +1,225 @@
+id: devops
+title: CI/CD & DevOps
+description: 'Pipelines that build, test and deploy safely: continuous integration, continuous delivery,
+  and the deployment strategies that keep users happy.'
+difficulty: advanced
+estimated_hours: 5
+learning_objectives:
+- Build a CI pipeline that tests every change
+- Design a CD pipeline with approval and rollback
+- Compare blue-green, canary and rolling deployments
+- Explain GitOps and environment promotion
+- Measure deployment frequency and change failure rate
+modules:
+- id: devops-ci
+  title: Continuous Integration
+  lessons:
+  - id: ci-basics
+    title: Continuous Integration
+    theory: 'Continuous integration means developers merge small changes to the main branch frequently
+      — daily, not monthly — and every merge triggers an automated build and test run. The point is to
+      find integration problems while they are small: a change that breaks the build is caught within
+      minutes, when the author still remembers what they did, instead of weeks later during a painful
+      merge. A CI pipeline typically runs in stages: check out the code, install dependencies, run linting
+      and formatting checks, run unit tests, run integration tests against real services, and build the
+      artifact. The pipeline must be fast and reliable — a slow pipeline is skipped, and a flaky pipeline
+      is ignored, and both defeat the purpose. The discipline is to keep the main branch always releasable,
+      which means no half-finished work merged behind feature flags instead of behind long-lived branches.
+      CloudForge labs run a real pipeline against the repository, so a failing test is a failing pipeline
+      you have to fix, not a slide.'
+    key_points:
+    - Merge small changes frequently; test every merge automatically
+    - Find integration problems while they are small and fresh
+    - 'Pipeline stages: lint, unit tests, integration tests, build artifact'
+    - Slow or flaky pipelines get skipped or ignored
+    - Keep main always releasable; hide unfinished work behind flags
+    architecture_diagram_mermaid: "flowchart LR\n    Commit[Commit] --> Build[Build]\n    Build --> Lint[Lint\
+      \ + format]\n    Lint --> Unit[Unit tests]\n    Unit --> Int[Integration tests]\n    Int --> Artifact[Artifact]"
+  - id: testing-strategy
+    title: Testing Strategy for Pipelines
+    theory: 'A pipeline is only as good as its tests, and the test pyramid is the guide: many fast unit
+      tests at the base, fewer integration tests in the middle, and a small number of end-to-end tests
+      at the top. Unit tests verify one function in isolation and run in milliseconds; integration tests
+      verify that components work together against real services, such as a database or a queue; end-to-end
+      tests verify a whole user journey. The common failure is an inverted pyramid — few unit tests and
+      many slow, flaky end-to-end tests — which makes the pipeline slow and untrusted. Infrastructure
+      code needs tests too: Terraform configuration is validated with fmt and validate, planned in CI,
+      and tested with tools that apply it to a scratch environment and assert on the result. The CloudForge
+      validators are an example of that pattern: a lab''s validation rules are integration tests for infrastructure,
+      asserting on real state rather than on the configuration text.'
+    key_points:
+    - 'Test pyramid: many unit tests, fewer integration tests, few end-to-end'
+    - Unit tests are fast and isolated; integration tests use real services
+    - An inverted pyramid makes pipelines slow and untrusted
+    - Terraform is tested with fmt, validate, plan and scratch applies
+    - CloudForge lab validators are integration tests for infrastructure
+    architecture_diagram_mermaid: "flowchart TD\n    E2E[End-to-end - few, slow] --> Int[Integration -\
+      \ some]\n    Int --> Unit[Unit - many, fast]"
+- id: devops-cd
+  title: Continuous Delivery and Deployment
+  lessons:
+  - id: cd-pipelines
+    title: Continuous Delivery and Deployment
+    theory: 'Continuous delivery means every change that passes CI is a releasable artifact, and deploying
+      it is a business decision, not an engineering project. Continuous deployment goes one step further
+      and deploys every passing change automatically. The pipeline between CI and production typically
+      has an approval gate, an environment promotion — staging, then production — and a deployment strategy
+      that limits blast radius. The artifact is built once and promoted unchanged through environments,
+      so what was tested is what ships; rebuilding per environment is a classic source of works-on-staging
+      bugs. Secrets and configuration are injected per environment, never baked into the artifact. The
+      two metrics that matter are deployment frequency and change failure rate: elite teams deploy many
+      times a day with a low failure rate, and the way they get there is small batches and fast rollback,
+      not heroics. CloudForge models this with a pipeline that deploys the lab application through staging
+      to production, with the approval step you practised in the Terraform track.'
+    key_points:
+    - 'Delivery: every passing change is releasable; deployment is a decision'
+    - 'Deployment: every passing change ships automatically'
+    - Build the artifact once and promote it unchanged
+    - Configuration is injected per environment, never baked in
+    - Small batches and fast rollback beat heroic releases
+    architecture_diagram_mermaid: "flowchart LR\n    CI[CI - tested artifact] --> Stag[Staging]\n    Stag\
+      \ --> Appr[Approval]\n    Appr --> Prod[Production]"
+  - id: deployment-strategies
+    title: Blue-Green, Canary and Rolling Deployments
+    theory: 'A deployment strategy decides how a new version replaces the old one. A rolling deployment
+      replaces instances gradually, so the service stays up but two versions run side by side for a while.
+      A blue-green deployment runs the new version alongside the old one, tests it, then flips the traffic
+      in one switch — and can flip it back just as fast, which makes rollback trivial but costs double
+      the capacity during the switch. A canary deployment sends a small percentage of traffic to the new
+      version, watches its error rate and latency, and increases the share only if the new version behaves.
+      Canary is the safest for user-facing services because a bad release affects a few percent of users
+      instead of all of them. The choice depends on the failure cost and the cost of running two versions:
+      canary for high-traffic services, blue-green when rollback speed matters most, rolling when resources
+      are tight. All three require the same foundations: health checks, metrics, and an automated way
+      to shift traffic.'
+    key_points:
+    - 'Rolling: gradual replacement, two versions coexist briefly'
+    - 'Blue-green: full parallel run, instant traffic flip and rollback'
+    - 'Canary: small traffic percentage first, grow only if healthy'
+    - Canary limits a bad release to a few percent of users
+    - All strategies need health checks, metrics and traffic control
+    architecture_diagram_mermaid: "flowchart TD\n    Old[Old version - 100%] --> Can[Canary - 5% new]\n\
+      \    Can -->|healthy| Grow[50% then 100% new]\n    Can -->|errors| Roll[Rollback to 100% old]"
+  - id: gitops
+    title: GitOps and Environment Promotion
+    theory: 'GitOps makes Git the single source of truth for what is deployed: the desired state of every
+      environment lives in a repository, and an agent continuously reconciles the running system toward
+      it. A change is a pull request; a merge is a deployment; a revert is a rollback. There is no kubectl
+      apply from a laptop, no console click that bypasses review. Environments are promoted by merging
+      a change from a staging branch or folder to a production one, with the same artifact referenced
+      throughout. The properties this buys are auditability — every change has an author and a review
+      — and recoverability, since the whole system can be rebuilt from the repository. The risk is drift:
+      if someone changes the running system directly, the agent will revert it, which is correct behaviour
+      but surprising if the team does not expect it. CloudForge''s own deployment is managed this way,
+      and the lab asks you to make a change through Git only and watch the agent apply it.'
+    key_points:
+    - Git is the single source of truth for deployed state
+    - A merge is a deployment; a revert is a rollback
+    - No manual applies from laptops or consoles
+    - Promotion moves the same artifact from staging to production
+    - Direct manual changes are reverted by the agent — by design
+    architecture_diagram_mermaid: "flowchart TD\n    PR[Pull request] --> Merge[Merge to main]\n    Merge\
+      \ --> Agent[GitOps agent]\n    Agent --> Prod[Production reconciled]\n    Manual[Manual change]\
+      \ -.->|reverted| Agent"
+guided_lab:
+  lab_definition_id: lab-devops-pipeline
+  title: Pipeline with Canary Release
+  tasks:
+  - Create a CI pipeline that builds and tests the application on every commit
+  - Add a staging deployment and a manual approval gate
+  - Deploy to production as a canary at 10% traffic
+  - Promote to 100% only after the canary metrics stay healthy
+  validation_rules:
+  - rule: pipeline_exists
+    description: Pipeline web-app-pipeline exists
+    params:
+      name: web-app-pipeline
+  - rule: pipeline_stage_passed
+    description: The test stage passed
+    params:
+      pipeline: web-app-pipeline
+      stage: test
+  - rule: deployment_strategy
+    description: Production deployment uses a canary strategy
+    params:
+      service: web-service
+      strategy: canary
+  - rule: canary_healthy
+    description: Canary metrics stayed healthy during the rollout
+    params:
+      service: web-service
+challenge:
+  title: Rollback a bad release
+  task: A canary release is showing a rising error rate. Roll it back, prove the error rate returns to
+    baseline, and record the incident in the runbook.
+  validation_rules:
+  - rule: deployment_strategy
+    description: Deployment used a canary strategy
+    params:
+      service: web-service
+      strategy: canary
+  - rule: canary_rolled_back
+    description: The bad canary was rolled back
+    params:
+      service: web-service
+  - rule: metric_below
+    description: Error rate is back below 1%
+    params:
+      metric: error_rate
+      threshold: 1
+assessment:
+- question: What is the core practice of continuous integration?
+  options:
+  - Deploying every hour
+  - Merging small changes frequently and testing every merge automatically
+  - Writing tests after release
+  - Using long-lived feature branches
+  correct_answer: 1
+  explanation: CI is frequent small merges with automated build and test on every merge.
+- question: Why build the artifact once and promote it unchanged?
+  options:
+  - It is faster
+  - So what was tested is exactly what ships
+  - Artifacts cannot be rebuilt
+  - It saves disk space
+  correct_answer: 1
+  explanation: Rebuilding per environment can introduce differences; promoting the tested artifact guarantees
+    identity.
+- question: Which deployment strategy sends a small percentage of traffic to the new version first?
+  options:
+  - Rolling
+  - Blue-green
+  - Canary
+  - Recreate
+  correct_answer: 2
+  explanation: A canary shifts a small share of traffic first and grows it only if the new version stays
+    healthy.
+- question: What is the main advantage of blue-green over rolling?
+  options:
+  - It uses fewer resources
+  - Instant traffic flip and instant rollback
+  - It needs no load balancer
+  - It deploys faster
+  correct_answer: 1
+  explanation: Blue-green keeps both versions running, so switching — and switching back — is a single
+    traffic flip.
+- question: In GitOps, how is a rollback performed?
+  options:
+  - By running a script
+  - By reverting the commit in Git, which the agent reconciles
+  - By restarting the service
+  - By deleting the deployment
+  correct_answer: 1
+  explanation: Git is the source of truth; reverting the change makes the agent restore the previous state.
+- question: Which two metrics best indicate delivery performance?
+  options:
+  - Lines of code and test count
+  - Deployment frequency and change failure rate
+  - CPU usage and memory
+  - Number of pipelines and jobs
+  correct_answer: 1
+  explanation: Deployment frequency and change failure rate are the DORA measures of delivery performance.
+xp_reward: 200
+prerequisites:
+- containers
+- terraform

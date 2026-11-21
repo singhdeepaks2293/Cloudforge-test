@@ -1,0 +1,229 @@
+id: containers
+title: Containers & Orchestration
+description: 'Docker images, ECS and Kubernetes concepts: package once, run anywhere, and let the orchestrator
+  keep the desired state.'
+difficulty: intermediate
+estimated_hours: 6
+learning_objectives:
+- Build and run a Docker image
+- Explain images, layers and registries
+- Run a service on ECS with a task definition
+- Explain Kubernetes pods, deployments and services
+- Design a container service for scaling and failure
+modules:
+- id: containers-docker
+  title: Docker Fundamentals
+  lessons:
+  - id: docker-basics
+    title: Images, Containers and Layers
+    theory: 'A Docker image is a read-only template made of layers, each layer the result of one Dockerfile
+      instruction: a base operating system layer, a layer installing dependencies, a layer copying application
+      code. A container is a running instance of an image — an isolated process with its own filesystem,
+      network namespace and resource limits, sharing the host kernel. Because layers are cached and shared,
+      rebuilding an image after changing only the last layer is fast, and two images built from the same
+      base share the base layer on disk. The Dockerfile is the recipe: FROM chooses the base, RUN installs
+      software, COPY adds code, CMD sets the default command. The discipline is to keep images small and
+      single-purpose — one process per container, no secrets baked into layers, and a minimal base image
+      — because every layer is attack surface and every megabyte is pull time on every deploy. CloudForge
+      runs Docker as a first-class compute option in labs, so the images you build here are the same ones
+      the platform deploys.'
+    key_points:
+    - An image is a read-only template made of layers
+    - A container is a running instance of an image
+    - Layers are cached and shared between images
+    - One process per container; keep images small and minimal
+    - Never bake secrets into image layers
+    architecture_diagram_mermaid: "flowchart TD\n    DF[Dockerfile] --> IMG[Image - layers]\n    IMG -->\
+      \ REG[Registry - ECR]\n    REG --> C1[Container 1]\n    REG --> C2[Container 2]"
+  - id: docker-networking
+    title: Container Networking and Storage
+    theory: 'Containers need the same things instances need: a network and a place to keep data. Docker''s
+      bridge network gives each container a private IP and lets containers on the same host talk to each
+      other by name, while port publishing maps a container port to a host port for outside access. In
+      production, containers usually attach to a VPC network directly, so each task gets a real VPC IP
+      and security groups apply to it — the awsvpc network mode in ECS. Storage is the harder problem:
+      a container''s filesystem is ephemeral and dies with the container, so persistent data belongs in
+      a volume, an EFS mount, or an external service such as S3 or a database. The pattern is to treat
+      containers as stateless and push all state out to managed services, which is what makes containers
+      replaceable and scalable. In CloudForge, containers run on the same Linux networking primitives
+      as the VPC labs — bridges, veth pairs and namespaces — so the container network you inspect is the
+      same network model you already learned.'
+    key_points:
+    - Bridge networks give containers private IPs on one host
+    - awsvpc mode gives each task a real VPC IP and security groups
+    - Container filesystems are ephemeral; state belongs outside
+    - Stateless containers are replaceable and scalable
+    - CloudForge containers use the same namespace model as VPC labs
+    architecture_diagram_mermaid: "flowchart TD\n    Host[Docker host] --> B[Bridge network]\n    B -->\
+      \ C1[web - 172.17.0.2]\n    B --> C2[api - 172.17.0.3]\n    C1 --> Vol[Volume - persistent data]"
+  - id: ecs-basics
+    title: 'ECS: Running Containers on AWS'
+    theory: 'ECS is AWS''s container orchestrator. A task definition describes a task: the container image,
+      CPU and memory, environment variables, port mappings and the IAM role the containers assume. A service
+      keeps a desired number of tasks running, replacing ones that fail health checks and spreading them
+      across Availability Zones. With Fargate, AWS runs the underlying hosts and you pay per task; with
+      EC2 launch type, you manage the cluster''s instances yourself. Scaling is driven by metrics — CPU,
+      memory or request count — or by schedules, and deployments are rolling by default, replacing tasks
+      gradually so the service stays up. The security model mirrors EC2: tasks get an IAM role, and in
+      awsvpc mode they get a security group. CloudForge emulates ECS with Docker containers managed by
+      the host agent, so task definitions, services and rolling deployments behave the way they do on
+      AWS, with real containers you can inspect.'
+    key_points:
+    - A task definition describes image, resources, ports and IAM role
+    - A service keeps the desired number of tasks running and healthy
+    - 'Fargate: AWS manages hosts; EC2 launch type: you manage them'
+    - Scaling is driven by metrics or schedules
+    - Deployments are rolling by default
+    architecture_diagram_mermaid: "flowchart TD\n    TD[Task definition] --> Svc[ECS service - desired\
+      \ 3]\n    Svc --> T1[Task - AZ-a]\n    Svc --> T2[Task - AZ-b]\n    Svc --> T3[Task - AZ-a]"
+- id: containers-k8s
+  title: Kubernetes Concepts
+  lessons:
+  - id: k8s-concepts
+    title: Pods, Deployments and Services
+    theory: 'Kubernetes organises containers into pods — one or more containers that share a network namespace
+      and storage, scheduled together onto a node. A Deployment manages a set of identical pods, keeping
+      the desired number running, rolling out new versions and rolling back failures. A Service gives
+      a stable network identity to a set of pods, load balancing across them even as individual pods are
+      created and destroyed. ConfigMaps and Secrets hold configuration, and Ingress exposes services to
+      the outside world. The mental model that matters is desired state: you declare what should exist,
+      and the control plane continuously works to make reality match, which is why a failed pod is replaced
+      without human intervention. EKS is AWS''s managed Kubernetes control plane. The trade against ECS
+      is power versus simplicity: Kubernetes is more capable and more portable, but it carries a much
+      larger operational surface. CloudForge teaches the concepts against a local single-node cluster
+      so you can practise the objects without the operational burden.'
+    key_points:
+    - A pod is one or more containers sharing a network namespace
+    - A Deployment keeps the desired number of pods running
+    - A Service gives pods a stable network identity and load balancing
+    - Kubernetes reconciles reality toward declared desired state
+    - EKS is the managed control plane; ECS is simpler, Kubernetes more capable
+    architecture_diagram_mermaid: "flowchart TD\n    Dep[Deployment - desired 3] --> P1[Pod 1]\n    Dep\
+      \ --> P2[Pod 2]\n    Dep --> P3[Pod 3]\n    Svc[Service - ClusterIP] --> P1\n    Svc --> P2\n  \
+      \  Svc --> P3"
+  - id: container-scaling
+    title: Scaling and Failure in Container Services
+    theory: 'A container service scales in two dimensions: horizontally, by running more tasks or pods,
+      and vertically, by giving each one more CPU and memory. Horizontal scaling is the default because
+      containers start fast and are stateless, and the trigger is usually a metric — request count per
+      target, CPU utilisation or queue depth. The failure modes to design for are a bad deployment, a
+      dependency failure and a zone failure. A bad deployment is contained by rolling updates with health
+      checks and by automatic rollback when the new version fails. A dependency failure is contained by
+      timeouts, retries with backoff, and circuit breakers. A zone failure is contained by spreading tasks
+      across at least two zones and by keeping the load balancer healthy-target count above zero in each.
+      The health check is the mechanism that ties it together: the orchestrator can only replace unhealthy
+      tasks if it can tell they are unhealthy, so a meaningful readiness probe — one that checks the database
+      connection, not just that the process is alive — is a production requirement, not a nicety.'
+    key_points:
+    - Scale horizontally by adding tasks; vertically by adding resources
+    - 'Triggers: request count, CPU, queue depth'
+    - Rolling updates with health checks contain bad deployments
+    - Timeouts, retries and circuit breakers contain dependency failures
+    - Readiness probes must check real dependencies, not just process liveness
+    architecture_diagram_mermaid: "flowchart TD\n    LB[Load balancer] --> H1[Healthy task - AZ-a]\n \
+      \   LB --> H2[Healthy task - AZ-b]\n    LB -.->|unhealthy - removed| X[Failed task]\n    HPA[Autoscaler\
+      \ - request count] --> LB"
+guided_lab:
+  lab_definition_id: lab-containers-ecs
+  title: Containerised Web Service on ECS
+  tasks:
+  - Build a Docker image for a small web application and push it to the registry
+  - Define a task with the image, port 8080 and a task IAM role
+  - Run a service with 2 tasks across two AZs behind a load balancer
+  - Prove the service stays up when one task is killed
+  validation_rules:
+  - rule: container_image_exists
+    description: Image web-app:v1 exists in the registry
+    params:
+      image: web-app
+      tag: v1
+  - rule: container_running
+    description: At least two containers of web-service are running
+    params:
+      service: web-service
+      min_count: 2
+  - rule: load_balancer_healthy_targets
+    description: Load balancer has at least two healthy targets
+    params:
+      service: web-service
+      min_count: 2
+  - rule: container_az_spread
+    description: Tasks span at least two Availability Zones
+    params:
+      service: web-service
+      min_zones: 2
+challenge:
+  title: Zero-downtime deployment
+  task: Deploy v2 of the web application as a rolling update and prove the service never drops below one
+    healthy target during the rollout.
+  validation_rules:
+  - rule: container_image_exists
+    description: Image web-app:v2 exists in the registry
+    params:
+      image: web-app
+      tag: v2
+  - rule: container_running
+    description: At least two containers are running after the update
+    params:
+      service: web-service
+      min_count: 2
+  - rule: load_balancer_healthy_targets
+    description: Load balancer kept at least one healthy target throughout
+    params:
+      service: web-service
+      min_count: 1
+assessment:
+- question: What is the difference between an image and a container?
+  options:
+  - They are the same thing
+  - An image is a read-only template; a container is a running instance of it
+  - Images run; containers are stored
+  - Containers are built from Dockerfiles; images are not
+  correct_answer: 1
+  explanation: Images are templates made of layers; containers are isolated running instances of an image.
+- question: Why keep container images small and single-purpose?
+  options:
+  - Large images are illegal
+  - Less attack surface and faster pulls on every deploy
+  - Small images run faster
+  - Docker requires it
+  correct_answer: 1
+  explanation: Every layer is attack surface and pull time; minimal images deploy faster and more safely.
+- question: An ECS service has desired count 3 and one task fails its health check. What happens?
+  options:
+  - The service stops
+  - ECS replaces the unhealthy task automatically
+  - The task restarts itself
+  - Nothing — desired count is a suggestion
+  correct_answer: 1
+  explanation: A service reconciles toward its desired count, replacing tasks that fail health checks.
+- question: In Kubernetes, what gives a set of pods a stable network identity?
+  options:
+  - A Deployment
+  - A Service
+  - A ConfigMap
+  - A pod
+  correct_answer: 1
+  explanation: A Service load balances across the pods behind it with a stable address, even as pods churn.
+- question: A container's filesystem holds session data. What happens when the container is replaced?
+  options:
+  - The data moves to the new container
+  - The data is lost — container filesystems are ephemeral
+  - The data is backed up automatically
+  - The container cannot be replaced
+  correct_answer: 1
+  explanation: Container filesystems die with the container; persistent data belongs in a volume or a
+    managed service.
+- question: What is the Kubernetes desired-state model?
+  options:
+  - You issue commands to start and stop pods
+  - You declare what should exist and the control plane reconciles reality toward it
+  - The scheduler asks you what to do
+  - Desired state is only for ECS
+  correct_answer: 1
+  explanation: Kubernetes continuously works to make actual state match the declared desired state.
+xp_reward: 200
+prerequisites:
+- fundamentals
+- ec2
+- networking

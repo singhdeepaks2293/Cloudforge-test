@@ -1,0 +1,261 @@
+# CloudForge — compose deployment (Milestone 1, hardened M9 Part 3)
+#
+# Pinned images only; no :latest anywhere.
+# NOTE: the `api` build context is backend/ (backend/Dockerfile,
+# M9 Part 3) and the `network-engine` build context is the repo root
+# (rust-network-engine/Dockerfile copies rust-network-engine/ and
+# proto/ relative to the repo root — a context of
+# rust-network-engine/ alone would fail its COPY steps).
+#
+# Privilege policy: ONLY network-engine carries a capability
+# (NET_ADMIN, required in M4 for netlink/nftables work). api, frontend,
+# postgres and redis run with no added capabilities. network-engine must
+# run on the KVM host machine, not inside this sandbox — see
+# infrastructure/scripts/check-host.sh.
+#
+# Networks:
+#   frontend_net   - browser-facing: frontend + api
+#   backend_net    - internal: api, worker (M2), postgres, redis
+#   emulator_net   - internal: api + AWS emulator / MinIO (M5)
+#   management_net - internal: host agent + network engine control traffic
+
+services:
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    image: cloudforge-api:0.1.0
+    container_name: cloudforge-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cloudforge}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-cloudforge}?sslmode=disable
+      # M9: config reads REDIS_ADDR (not REDIS_URL) and
+      # CLOUDFORGE_JWT_SECRET (not JWT_SECRET). The old names
+      # silently fell back to localhost:6379 / the dev default
+      # secret; with fail-closed auth rate limiting, a wrong
+      # REDIS_ADDR would 503 every login in Docker.
+      REDIS_ADDR: redis:6379
+      NETWORK_ENGINE_ADDR: network-engine:50051
+      CLOUDFORGE_JWT_SECRET: ${CLOUDFORGE_JWT_SECRET:?set CLOUDFORGE_JWT_SECRET in .env}
+      API_PORT: "8080"
+    ports:
+      - "${API_PORT:-8080}:8080"
+    networks:
+      - frontend_net
+      - backend_net
+      - emulator_net
+      - management_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The distroless api image has no wget/curl; it probes itself
+      # with the api binary's --health-check flag (GET /readyz).
+      # M9: /readyz (503 while Postgres is down; Redis/engine outages
+      # are reported but do not fail readiness).
+      test: ["CMD", "/app/api", "--health-check"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  network-engine:
+    build:
+      # Repo-root context: the engine Dockerfile copies
+      # rust-network-engine/ and proto/ relative to the repo root.
+      context: ../..
+      dockerfile: rust-network-engine/Dockerfile
+    image: cloudforge-network-engine:0.1.0
+    container_name: cloudforge-network-engine
+    restart: unless-stopped
+    # Minimum capability for netlink / nftables work (M4). No other
+    # capabilities, no --privileged. Runs on the KVM host only.
+    cap_add:
+      - NET_ADMIN
+    environment:
+      NETWORK_ENGINE_ADDR: "0.0.0.0:50051"
+    ports:
+      - "50051:50051"
+    networks:
+      - management_net
+    healthcheck:
+      # The engine binary has no --health-check flag (it ignores
+      # argv and would try to start a second server), so the old
+      # `network-engine --health-check` probe could never pass.
+      # This is a TCP liveness probe only: it proves the gRPC
+      # listener is up, not that the engine is healthy. Real engine
+      # health is reported by the API's /readyz (network_engine_*).
+      test: ["CMD-SHELL", "timeout 3 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/50051'"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        # M9: empty by default — the browser uses same-origin
+        # relative URLs through the nginx proxy (frontend/nginx.conf).
+        # Set VITE_API_URL only for a split deployment where the API
+        # lives on another origin.
+        VITE_API_URL: ${VITE_API_URL:-}
+    image: cloudforge-frontend:0.1.0
+    container_name: cloudforge-frontend
+    restart: unless-stopped
+    # M9 Part 3: nginx runs unprivileged and listens on 8080 inside
+    # the container (see frontend/Dockerfile); the host port is :80.
+    ports:
+      - "${FRONTEND_PORT:-80}:8080"
+    networks:
+      - frontend_net
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16.4
+    container_name: cloudforge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cloudforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-cloudforge}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cloudforge} -d ${POSTGRES_DB:-cloudforge}"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  redis:
+    image: redis:7.4
+    container_name: cloudforge-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 5
+
+  # Optional: S3-compatible object storage for the M5 S3 adapter.
+  # Start with: docker compose --profile optional up -d minio
+  minio:
+    profiles: ["optional"]
+    image: minio/minio:RELEASE.2024-08-17T01-12-02Z
+    container_name: cloudforge-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-cloudforge}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env to enable minio}
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      - miniodata:/data
+    networks:
+      - emulator_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  # Optional: Prometheus + Grafana (Milestone 9, Part 3).
+  # Start with: docker compose --profile monitoring up -d
+  # Prometheus scrapes the API's /metrics (see
+  # infrastructure/monitoring/prometheus.yml); Grafana serves the
+  # CloudForge dashboards from infrastructure/monitoring/ on
+  # :3000. Both images are pinned; the tags were verified to exist
+  # on Docker Hub 2026-11-21. Grafana's first login is admin/admin
+  # and forces a password change unless GRAFANA_ADMIN_PASSWORD is
+  # set in .env — set it before any shared deployment.
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v3.3.0
+    container_name: cloudforge-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ../../infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheusdata:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - frontend_net
+    depends_on:
+      api:
+        condition: service_healthy
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:11.5.2
+    container_name: cloudforge-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../../infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../infrastructure/monitoring:/etc/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - frontend_net
+    depends_on:
+      - prometheus
+
+networks:
+  frontend_net:
+    name: cloudforge_frontend_net
+  backend_net:
+    name: cloudforge_backend_net
+    internal: true
+  emulator_net:
+    name: cloudforge_emulator_net
+    internal: true
+  management_net:
+    name: cloudforge_management_net
+    internal: true
+
+volumes:
+  pgdata:
+    name: cloudforge_pgdata
+  redisdata:
+    name: cloudforge_redisdata
+  miniodata:
+    name: cloudforge_miniodata
+  prometheusdata:
+    name: cloudforge_prometheusdata
+  grafanadata:
+    name: cloudforge_grafanadata
+  # Reserved for M3 (host agent / libvirt): VM disks, templates, lab artifacts.
+  vm-disks:
+    name: cloudforge_vm_disks
+  templates:
+    name: cloudforge_templates
+  lab-artifacts:
+    name: cloudforge_lab_artifacts

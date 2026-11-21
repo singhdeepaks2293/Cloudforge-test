@@ -1,0 +1,39 @@
+# CloudForge — development overrides for deployments/compose/docker-compose.yml
+#
+# Usage (from deployments/compose/):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Dev only: publishes postgres/redis ports, mounts source for live reload,
+# and relaxes restarts. Never use this file in production.
+services:
+  api:
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      # Read-only source mount for inspection only. The image runs
+      # the compiled /app/api binary — do NOT mount over /app, which
+      # would hide the binary and break startup.
+      - ../../backend:/src:ro
+    environment:
+      LOG_LEVEL: debug
+    restart: "no"
+
+  frontend:
+    # In dev, run the Vite dev server on the host instead:
+    #   cd frontend && npm run dev   (http://localhost:5173)
+    # This override only publishes the preview port for the built image
+    # (nginx listens on 8080 inside the container since M9 Part 3).
+    ports:
+      - "4173:8080"
+    restart: "no"
+
+  postgres:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+  network-engine:
+    restart: "no"

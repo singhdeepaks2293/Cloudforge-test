@@ -1,0 +1,227 @@
+id: messaging
+title: Messaging & Event-Driven Architecture
+description: 'Queues, topics and event buses: decouple services with SQS, SNS and EventBridge, and design
+  systems that survive failure.'
+difficulty: intermediate
+estimated_hours: 4
+learning_objectives:
+- Explain when to use a queue, a topic and an event bus
+- Build an SQS queue with a dead-letter queue
+- Publish and subscribe with SNS
+- Route events with EventBridge rules
+- Design idempotent consumers that survive redelivery
+modules:
+- id: msg-queues
+  title: Queues and Topics
+  lessons:
+  - id: why-decouple
+    title: Why Decouple with Messaging
+    theory: 'Direct synchronous calls between services create tight coupling: if the downstream service
+      is slow or down, the caller fails too, and a traffic spike in one service becomes a traffic spike
+      in all of them. Messaging breaks that coupling by putting a durable buffer between the producer
+      and the consumer. The producer writes a message and moves on; the consumer processes it when it
+      is ready; if the consumer is down, messages wait safely in the queue; if traffic spikes, the queue
+      absorbs it and the consumer works through the backlog at its own pace. The trade is complexity:
+      ordering, duplication and eventual consistency must be handled explicitly, and debugging a system
+      where nothing calls anything directly requires tracing through the queue. The rule is to decouple
+      at boundaries where the two sides change or scale independently, and to keep synchronous calls where
+      a fast answer is genuinely required. CloudForge''s messaging labs make this concrete: producers
+      and consumers run as separate lab resources, so a slow consumer visibly backs the queue up while
+      the producer keeps working.'
+    key_points:
+    - 'Synchronous calls couple services: one failure becomes everyone''s failure'
+    - A queue buffers producers from consumers
+    - Queues absorb spikes and survive consumer downtime
+    - Ordering, duplication and consistency must be handled explicitly
+    - Decouple where sides scale or change independently
+    architecture_diagram_mermaid: "flowchart LR\n    P[Producer] --> Q[Queue - durable buffer]\n    Q\
+      \ --> C[Consumer]\n    C -.->|down| Q"
+  - id: sqs-basics
+    title: 'SQS: Queues and Dead-Letter Queues'
+    theory: 'SQS is a fully managed message queue. A standard queue offers nearly unlimited throughput
+      with at-least-once delivery and best-effort ordering, which means a message can occasionally arrive
+      twice or out of order; a FIFO queue offers exactly-once processing and strict ordering at lower
+      throughput. Consumers poll for messages, process them, and delete them — but only after successful
+      processing, because a message that is not deleted becomes visible again after the visibility timeout
+      and is delivered to another consumer. That redelivery is the reliability mechanism, and it is why
+      consumers must be idempotent: processing the same message twice must be harmless. When a message
+      fails repeatedly, it is moved to a dead-letter queue after a configured number of receives, so a
+      single poison message cannot block the queue forever. In CloudForge, SQS is emulated against a real
+      local queue, and the labs make you send a poison message and watch it land in the dead-letter queue.'
+    key_points:
+    - 'Standard queue: at-least-once, best-effort ordering, unlimited throughput'
+    - 'FIFO queue: exactly-once processing and strict ordering'
+    - Messages not deleted become visible again after the visibility timeout
+    - Consumers must be idempotent because redelivery is expected
+    - Dead-letter queues catch messages that fail repeatedly
+    architecture_diagram_mermaid: "flowchart TD\n    P[Producer] --> Q[Standard queue]\n    Q --> C[Consumer\
+      \ - process, then delete]\n    C -->|fails 3 times| DLQ[Dead-letter queue]"
+  - id: sns-topics
+    title: 'SNS: Pub/Sub Topics'
+    theory: 'SNS is publish/subscribe messaging: a producer publishes one message to a topic, and every
+      subscriber receives a copy — an SQS queue, a Lambda function, an email address or an HTTP endpoint.
+      The producer does not know or care who subscribes, which makes topics the right tool for fan-out,
+      such as notifying several independent systems that an order was placed. The difference from a queue
+      is the shape: a queue delivers each message to one consumer, a topic delivers each message to every
+      subscriber. In practice the two combine: a topic fans out to several SQS queues, one per consumer,
+      giving each consumer its own durable buffer and retry behaviour. Filtering lets subscribers receive
+      only the messages they care about, based on message attributes. CloudForge emulates SNS topics locally,
+      and the labs have you build a fan-out where one order event reaches an email subscriber, a Lambda
+      function and a queue at the same time.'
+    key_points:
+    - A topic delivers each message to every subscriber
+    - A queue delivers each message to one consumer
+    - Topics fan out; queues buffer per consumer
+    - Topic to multiple SQS queues combines fan-out with durability
+    - Message attributes enable subscriber filtering
+    architecture_diagram_mermaid: "flowchart TD\n    P[Producer] --> T[Topic: orders]\n    T --> Q1[SQS\
+      \ - billing]\n    T --> L[Lambda - fulfilment]\n    T --> E[Email - customer]"
+- id: msg-events
+  title: Event Buses and Idempotency
+  lessons:
+  - id: eventbridge
+    title: 'EventBridge: Routing Events'
+    theory: 'EventBridge is an event bus: services publish events, and rules route them to targets based
+      on their content. Unlike a topic, which is one producer''s channel, a bus collects events from many
+      sources — AWS services, your applications and third-party SaaS — and routes each one to the right
+      consumers by pattern matching on fields such as source, detail-type and payload values. A rule can
+      route order-created events to a fulfilment Lambda, payment-failed events to a queue, and every event
+      to an archive for audit. EventBridge also provides scheduled rules, which are how cron jobs are
+      expressed in serverless architectures. The design discipline is the event schema: once consumers
+      depend on an event''s shape, changing it is a breaking change, so schemas are versioned and new
+      fields are added rather than old ones renamed. CloudForge runs a local event bus with the same rule
+      language, so the routing rules you write here transfer directly.'
+    key_points:
+    - An event bus collects events from many sources
+    - Rules route events to targets by pattern matching on content
+    - One event can reach many targets; targets can be Lambda, queues or APIs
+    - Scheduled rules express cron jobs in serverless systems
+    - Event schemas are versioned; never rename a field consumers depend on
+    architecture_diagram_mermaid: "flowchart TD\n    S1[Orders service] --> Bus[Event bus]\n    S2[Payments\
+      \ service] --> Bus\n    Bus -->|order.created| F[Lambda - fulfilment]\n    Bus -->|payment.failed|\
+      \ Q[Queue - retries]"
+  - id: idempotency
+    title: Idempotency and Exactly-Once Effects
+    theory: 'At-least-once delivery means a consumer will sometimes process the same message twice, and
+      the system must survive it. Idempotency is the property that processing a message twice has the
+      same effect as processing it once. The usual implementation is a deduplication record: the consumer
+      stores the message ID in DynamoDB with a conditional write, and if the write fails because the ID
+      already exists, the message is acknowledged without re-applying its effect. For payments and orders,
+      the idempotency key is part of the API contract, and the service returns the original result for
+      a repeated key instead of charging twice. The alternative — exactly-once delivery — is not available
+      from SQS standard queues, and systems that pretend it is are the ones that double-charge customers.
+      The lab makes this concrete: you will deliver the same order message twice and prove the customer''s
+      balance changes only once. The same pattern applies to webhooks, payment callbacks and any retryable
+      integration: design for the duplicate from the start, because the network will eventually deliver
+      one.'
+    key_points:
+    - At-least-once delivery means duplicate processing will happen
+    - Idempotent processing makes a duplicate harmless
+    - Store the message ID with a conditional write to deduplicate
+    - Idempotency keys belong in the API contract for payments
+    - Exactly-once delivery is not available from standard queues
+    architecture_diagram_mermaid: "flowchart TD\n    M[Message - id 42] --> C[Consumer]\n    C --> D{DynamoDB:\
+      \ id 42 seen?}\n    D -->|no| Apply[Apply effect, record id]\n    D -->|yes| Ack[Acknowledge, skip\
+      \ effect]"
+guided_lab:
+  lab_definition_id: lab-messaging-orders
+  title: Order Pipeline with Queue and DLQ
+  tasks:
+  - Create an orders queue with a dead-letter queue after 3 receives
+  - Publish an order message and have a consumer process it
+  - Send a poison message and verify it lands in the dead-letter queue
+  - Prove reprocessing the same message twice has no duplicate effect
+  validation_rules:
+  - rule: queue_exists
+    description: Queue orders exists
+    params:
+      name: orders
+  - rule: queue_dlq_configured
+    description: Orders queue has a dead-letter queue after 3 receives
+    params:
+      queue: orders
+      max_receives: 3
+  - rule: message_delivered
+    description: At least one message was delivered from the queue
+    params:
+      queue: orders
+      min_count: 1
+  - rule: dlq_has_message
+    description: The dead-letter queue received the poison message
+    params:
+      queue: orders-dlq
+      min_count: 1
+challenge:
+  title: Fan-out with a topic
+  task: 'Publish one order event to a topic and prove three independent subscribers each receive it: a
+    queue, a Lambda function and an email endpoint.'
+  validation_rules:
+  - rule: topic_exists
+    description: Topic order-events exists
+    params:
+      name: order-events
+  - rule: topic_subscribers
+    description: Topic has at least three subscribers
+    params:
+      topic: order-events
+      min_count: 3
+  - rule: message_delivered
+    description: The billing queue received the fanned-out event
+    params:
+      queue: billing-queue
+      min_count: 1
+assessment:
+- question: A producer writes faster than the consumer can process. What absorbs the spike?
+  options:
+  - The consumer's memory
+  - The queue, which buffers messages until the consumer catches up
+  - The topic
+  - The dead-letter queue
+  correct_answer: 1
+  explanation: A durable queue buffers the backlog so the consumer works through it at its own pace.
+- question: What is the key difference between a queue and a topic?
+  options:
+  - Queues are faster
+  - A queue delivers each message to one consumer; a topic delivers it to every subscriber
+  - Topics cannot be subscribed to
+  - Queues have no retention
+  correct_answer: 1
+  explanation: Queues are one-to-one delivery; topics are one-to-many fan-out.
+- question: A message fails processing three times and then disappears from the main queue. Where did
+    it go?
+  options:
+  - It was deleted permanently
+  - To the dead-letter queue
+  - Back to the producer
+  - To a topic
+  correct_answer: 1
+  explanation: After the configured max receives, failed messages move to the dead-letter queue.
+- question: Why must an SQS consumer be idempotent?
+  options:
+  - Because SQS is exactly-once
+  - Because at-least-once delivery can redeliver a message
+  - Because FIFO queues reorder messages
+  - Because consumers are slow
+  correct_answer: 1
+  explanation: Standard queues deliver at least once, so the same message can be processed twice.
+- question: What does an EventBridge rule match on?
+  options:
+  - The consumer's IP address
+  - Fields in the event, such as source and detail-type
+  - The queue depth
+  - The time of day only
+  correct_answer: 1
+  explanation: Rules pattern-match on event content to decide which targets receive it.
+- question: A consumer processes a message but crashes before deleting it. What happens?
+  options:
+  - The message is lost
+  - It becomes visible again after the visibility timeout and is redelivered
+  - The queue is deleted
+  - The producer is notified
+  correct_answer: 1
+  explanation: Undeleted messages return to visibility after the timeout — the reliability mechanism of
+    SQS.
+xp_reward: 150
+prerequisites:
+- fundamentals
+- serverless

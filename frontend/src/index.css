@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+/*
+ * CloudForge console theme — AWS-console-STYLE in CloudForge's own
+ * branding. The layout, colours and patterns follow the AWS Management
+ * Console (dark navy header, orange primary buttons, light-grey
+ * content background, AWS-style tables), but every wordmark, label and
+ * tile says CloudForge. No AWS trademarks, logos or brand assets are
+ * used, and nothing here claims this is AWS.
+ */
+@theme {
+  --color-aws-navy: #232f3e;
+  --color-aws-navy-dark: #161e2d;
+  --color-aws-navy-light: #37475a;
+  --color-aws-orange: #ff9900;
+  --color-aws-orange-dark: #ec7211;
+  --color-aws-orange-light: #fef3e2;
+  --color-aws-link: #0073bb;
+  --color-aws-link-hover: #0066c0;
+  --color-aws-bg: #eaeded;
+  --color-aws-card: #ffffff;
+  --color-aws-border: #d5dbdb;
+  --color-aws-border-dark: #aab7b8;
+  --color-aws-text: #232f3e;
+  --color-aws-muted: #687078;
+  --color-aws-success: #1e810b;
+  --color-aws-success-bg: #e6f4ea;
+  --color-aws-warning: #8a6100;
+  --color-aws-warning-bg: #fef3e2;
+  --color-aws-error: #d13239;
+  --color-aws-error-bg: #fdecea;
+
+  --font-sans: "Amazon Ember", "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    font-size: 14px;
+  }
+  body {
+    @apply bg-aws-bg font-sans text-aws-text antialiased;
+  }
+  a {
+    @apply text-aws-link;
+  }
+  a:hover {
+    @apply text-aws-link-hover underline;
+  }
+}

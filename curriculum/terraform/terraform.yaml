@@ -1,0 +1,228 @@
+id: terraform
+title: Infrastructure as Code with Terraform
+description: Declare infrastructure in code, plan it, review it, apply it — and destroy it cleanly. Terraform
+  against CloudForge's local providers.
+difficulty: intermediate
+estimated_hours: 6
+learning_objectives:
+- Write Terraform configuration for a VPC, subnets and instances
+- Explain state, plan and apply and why state matters
+- Use variables, outputs and modules to keep configuration reusable
+- Review a plan before applying it and approve changes
+- Destroy infrastructure cleanly and detect drift
+modules:
+- id: tf-core
+  title: Terraform Core Concepts
+  lessons:
+  - id: iac-why
+    title: Why Infrastructure as Code
+    theory: 'Clicking through a console produces infrastructure nobody can reproduce, review or roll back.
+      Infrastructure as code fixes that by describing the desired state in versioned text files: the same
+      configuration that built a VPC in development builds an identical one in production, a change is
+      a pull request with a diff that a colleague can review, and a disaster is recovered by re-applying
+      the configuration rather than by remembering what was clicked. The properties that matter are idempotency
+      — applying the same configuration twice changes nothing the second time — and declarativeness —
+      you describe what should exist, not the steps to build it. Terraform is the dominant tool in this
+      space because it is cloud-agnostic, with providers for AWS and hundreds of other systems. In CloudForge,
+      Terraform runs in isolated execution with a plan, an explicit approval step and an apply, against
+      the same local providers that back the console — so the infrastructure you declare is the infrastructure
+      that actually exists.'
+    key_points:
+    - Console clicks are unreviewable and unreproducible
+    - IaC makes infrastructure versioned, reviewable and repeatable
+    - 'Idempotency: applying twice changes nothing the second time'
+    - 'Declarative: describe what should exist, not the steps'
+    - Terraform is cloud-agnostic through providers
+    architecture_diagram_mermaid: "flowchart TD\n    Code[Terraform code - git] --> Plan[terraform plan]\n\
+      \    Plan --> Review[Review the diff]\n    Review --> Apply[terraform apply]\n    Apply --> Infra[Real\
+      \ infrastructure]"
+  - id: tf-state
+    title: State, Plan and Apply
+    theory: 'Terraform''s state file is the record of what it manages: every resource, its provider ID
+      and its attributes. The plan command compares the configuration, the state and the real world, and
+      produces a diff — resources to create, update or destroy. Apply executes the diff. The state is
+      why Terraform can be idempotent and why it can be dangerous: if the state is lost, Terraform no
+      longer knows the resources exist and will try to recreate them; if the state is edited by hand,
+      reality and the record diverge. That is why state belongs in a remote backend with locking, such
+      as S3 with DynamoDB locking, and never in a local file on one engineer''s laptop for shared infrastructure.
+      Drift is the gap between the state and the real world caused by manual changes outside Terraform;
+      the remedy is to detect it with a plan and to re-apply or import the change, never to let manual
+      edits accumulate. CloudForge stores lab Terraform state per lab and enforces locking, so two applies
+      cannot race each other.'
+    key_points:
+    - 'State records what Terraform manages: resource IDs and attributes'
+    - Plan diffs configuration, state and reality
+    - Lost state means Terraform forgets the resources exist
+    - State belongs in a remote backend with locking
+    - Drift is manual change outside Terraform; detect it with plan
+    architecture_diagram_mermaid: "flowchart LR\n    Config[Configuration] --> Plan[Plan - diff]\n   \
+      \ State[State file] --> Plan\n    Real[Real world] --> Plan\n    Plan --> Apply[Apply]"
+  - id: tf-language
+    title: 'The Terraform Language: Resources and Data'
+    theory: 'Terraform configuration is written in HCL, a language built for this job. A resource block
+      declares something to manage, such as an aws_vpc or a CloudForge lab VPC, with its arguments. A
+      data block reads something that already exists, such as the latest Ubuntu AMI, without managing
+      it. References connect resources: a subnet refers to the VPC''s ID, which creates an implicit dependency,
+      so Terraform builds the VPC first. Variables make configuration reusable across environments — the
+      same module with different CIDRs — and outputs expose values such as the VPC ID for other configurations
+      to consume. Expressions, functions and for_each let you generate repetitive resources, such as one
+      subnet per Availability Zone, from a small map instead of copy-pasted blocks. The skill is not memorising
+      syntax but writing configuration that a colleague can read: small resources, clear names, variables
+      with descriptions, and no hard-coded values that should be inputs.'
+    key_points:
+    - Resource blocks declare managed infrastructure
+    - Data blocks read existing infrastructure without managing it
+    - References create implicit dependencies and ordering
+    - Variables and outputs make configuration reusable
+    - Generate repetitive resources with for_each, not copy-paste
+    architecture_diagram_mermaid: "flowchart TD\n    Var[Variables - CIDR, AZs] --> Res[Resource: VPC]\n\
+      \    Res --> Sub[Resource: subnet - for_each AZ]\n    Sub --> Out[Output: VPC ID]"
+- id: tf-workflow
+  title: Modules, Workflow and Safety
+  lessons:
+  - id: tf-modules
+    title: Modules and Reuse
+    theory: 'A module is a folder of Terraform configuration with inputs and outputs, packaged for reuse.
+      Instead of writing the same VPC, subnets, route tables and gateways for every project, you write
+      a network module once and call it with different CIDRs and zone counts. Modules are the unit of
+      sharing: teams publish them, version them, and pin versions so a module update does not silently
+      change every environment. The rules for good modules are the rules for good code: a single responsibility,
+      clear inputs with descriptions and validation, minimal outputs, and no hidden side effects. A module
+      that creates a VPC should not also create a database. Composition is how real systems are built:
+      a root module calls a network module, a compute module and a data module, and the wiring between
+      them is explicit in the outputs. In CloudForge, the lab modules are published in the curriculum
+      repository, and the validators check that your root configuration uses the published modules rather
+      than duplicating their contents.'
+    key_points:
+    - A module is reusable configuration with inputs and outputs
+    - Write the VPC once, call it with different CIDRs
+    - Pin module versions so updates do not silently change environments
+    - One responsibility per module; no hidden side effects
+    - Root modules compose network, compute and data modules
+    architecture_diagram_mermaid: "flowchart TD\n    Root[Root module] --> Net[Network module]\n    Root\
+      \ --> Comp[Compute module]\n    Root --> Data[Data module]\n    Net --> Out[VPC ID output]"
+  - id: tf-workflow-safety
+    title: Plan, Approve, Apply and Destroy
+    theory: 'The safe Terraform workflow has four steps and one rule: never apply what you have not reviewed.
+      First, write the change and run fmt and validate to catch syntax and type errors. Second, run plan
+      and read the diff — every resource it will create, change or destroy, and why. Third, get approval
+      for the plan in production, which in CloudForge is an explicit step in the console. Fourth, apply,
+      and watch it succeed or fail as a whole. The plan output is also where dangerous changes are caught:
+      a change that forces replacement of a database is visible as a destroy-and-create pair before anything
+      happens. Destroy is the same workflow in reverse, and it is how labs are cleaned up — the validators
+      check that a destroy leaves no orphan resources, because an orphaned NAT gateway or volume is a
+      cost that keeps billing after the lab ends. The habit to build is treating plan output as a code
+      review: read it every time, even for small changes.'
+    key_points:
+    - Never apply what you have not reviewed
+    - fmt and validate catch syntax errors before planning
+    - Plan output shows creates, updates and destroys
+    - A destroy-and-create pair signals a forced replacement
+    - Destroy cleanly — orphaned resources keep billing
+    architecture_diagram_mermaid: "flowchart LR\n    Write[Write] --> Fmt[fmt + validate]\n    Fmt -->\
+      \ Plan[plan - read the diff]\n    Plan --> Appr[Approve]\n    Appr --> Apply[apply]"
+guided_lab:
+  lab_definition_id: lab-terraform-vpc
+  title: VPC as Code
+  tasks:
+  - Write Terraform configuration for a VPC with two public and two private subnets
+  - Run plan, review the diff and apply it
+  - Verify the real infrastructure matches the configuration
+  - Destroy it and verify no resources remain
+  validation_rules:
+  - rule: terraform_state_exists
+    description: Terraform state exists for the workspace
+    params:
+      workspace: lab-terraform-vpc
+  - rule: vpc_exists
+    description: VPC 10.2.0.0/16 exists
+    params:
+      cidr: 10.2.0.0/16
+  - rule: subnet_count
+    description: At least four subnets exist
+    params:
+      operator: '>='
+      value: 4
+  - rule: route_to_igw
+    description: Public subnets route to the internet gateway
+    params:
+      subnet_type: public
+  - rule: terraform_no_drift
+    description: A fresh plan shows no drift from the applied state
+    params:
+      workspace: lab-terraform-vpc
+challenge:
+  title: Module-ise the network
+  task: Refactor your VPC configuration into a reusable module with the CIDR and zone count as variables,
+    then instantiate it twice with different CIDRs and prove both VPCs exist.
+  validation_rules:
+  - rule: terraform_state_exists
+    description: Terraform state exists for the module workspace
+    params:
+      workspace: lab-terraform-module
+  - rule: vpc_exists
+    description: First VPC 10.3.0.0/16 exists
+    params:
+      cidr: 10.3.0.0/16
+  - rule: vpc_exists
+    description: Second VPC 10.4.0.0/16 exists
+    params:
+      cidr: 10.4.0.0/16
+assessment:
+- question: What does `terraform plan` do?
+  options:
+  - Applies the change
+  - Compares configuration, state and reality and shows the diff
+  - Deletes all resources
+  - Creates the state file
+  correct_answer: 1
+  explanation: Plan diffs the desired configuration against state and the real world, showing creates,
+    updates and destroys.
+- question: Why must Terraform state live in a remote backend with locking for shared infrastructure?
+  options:
+  - It is faster
+  - So it is not lost with one laptop and two applies cannot race
+  - Remote state is encrypted by default
+  - Local state cannot be read
+  correct_answer: 1
+  explanation: State is the record of what Terraform manages; losing it or racing two applies corrupts
+    that record.
+- question: A subnet block refers to `aws_vpc.main.id`. What does that create?
+  options:
+  - A security group
+  - An implicit dependency — Terraform builds the VPC first
+  - A duplicate VPC
+  - A data source
+  correct_answer: 1
+  explanation: References between resources create implicit dependencies that order creation.
+- question: What is drift?
+  options:
+  - A plan error
+  - Manual changes outside Terraform that make reality differ from state
+  - A slow apply
+  - A module version change
+  correct_answer: 1
+  explanation: Drift is the gap between the recorded state and the real world caused by out-of-band changes.
+- question: A plan shows a database being destroyed and recreated. What should you do?
+  options:
+  - Apply immediately
+  - Stop and investigate — a forced replacement may destroy data
+  - Ignore it
+  - Delete the state file
+  correct_answer: 1
+  explanation: A destroy-and-create pair on stateful resources can mean data loss; it must be reviewed
+    before applying.
+- question: What is a Terraform module?
+  options:
+  - A single resource
+  - A reusable package of configuration with inputs and outputs
+  - A provider plugin
+  - A state backend
+  correct_answer: 1
+  explanation: Modules package configuration for reuse, with variables as inputs and outputs for wiring.
+xp_reward: 250
+prerequisites:
+- fundamentals
+- networking
+- ec2
+- iam

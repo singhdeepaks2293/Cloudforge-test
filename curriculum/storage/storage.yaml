@@ -1,0 +1,230 @@
+id: storage
+title: S3 & Storage
+description: 'Object storage with S3: buckets, versioning, lifecycle, encryption and static websites —
+  backed by MinIO locally, with the same API as AWS.'
+difficulty: intermediate
+estimated_hours: 6
+learning_objectives:
+- Create buckets and control access with policies
+- Choose a storage class and lifecycle rule for a workload
+- Enable versioning and protect data from deletion
+- Serve a static website from object storage
+- Explain how object storage differs from block and file storage
+modules:
+- id: storage-s3
+  title: Object Storage with S3
+  lessons:
+  - id: object-storage
+    title: Object, Block and File Storage
+    theory: 'Storage comes in three forms, and choosing wrong is expensive. Block storage, such as EBS,
+      presents a raw disk that one instance formats and mounts; it is fast and low-latency but tied to
+      one Availability Zone and one instance. File storage, such as EFS, presents a shared filesystem
+      that many instances mount at once over the network. Object storage, such as S3, stores data as objects
+      in buckets, addressed by a key over HTTP; it is effectively unlimited, replicated across Availability
+      Zones, and accessible from anywhere — but it has no filesystem semantics, no in-place editing and
+      higher first-byte latency. The rule of thumb is: block for the operating system and databases that
+      need low latency, file for shared data between instances, object for everything else — backups,
+      media, logs, static websites and data lakes. CloudForge maps S3 to MinIO running locally, so the
+      API calls, the bucket semantics and the policy language are identical to AWS while the bytes stay
+      on your disk.'
+    key_points:
+    - 'Block: raw disk, one instance, one AZ, low latency'
+    - 'File: shared filesystem mounted by many instances'
+    - 'Object: buckets and keys over HTTP, unlimited, multi-AZ'
+    - Object storage has no in-place editing or filesystem semantics
+    - MinIO provides the S3 API locally in CloudForge
+    architecture_diagram_mermaid: "flowchart TD\n    App[Application] --> B[Block - EBS]\n    App -->\
+      \ F[File - EFS]\n    App --> O[Object - S3 / MinIO]"
+  - id: buckets-policies
+    title: Buckets and Access Policies
+    theory: 'A bucket is the container for objects, and its name must be globally unique across all of
+      AWS. Access is controlled by two mechanisms that combine: IAM policies attached to identities, and
+      bucket policies attached to the bucket itself. A bucket policy can grant access to another account
+      or to anonymous users, which IAM policies cannot do, and it is also where public access is granted
+      — or, more often, where it is accidentally granted. AWS now defaults to blocking all public access
+      at the account and bucket level, and the safe pattern is to keep that block on and grant access
+      only through presigned URLs or a CloudFront origin access identity. Every object has a key, a name
+      that looks like a path but is actually a flat namespace — folders are a convenience of the console,
+      not a real structure. In CloudForge, buckets are real MinIO buckets and the validators inspect their
+      policies directly, so a lab can require that a bucket is private and fail if you open it to the
+      world.'
+    key_points:
+    - Bucket names are globally unique
+    - IAM policies attach to identities; bucket policies attach to buckets
+    - Block Public Access is on by default — keep it on
+    - Presigned URLs and CloudFront OAC grant safe limited access
+    - Keys form a flat namespace; folders are a console convenience
+    architecture_diagram_mermaid: "flowchart TD\n    User[User] --> IAM[IAM policy]\n    User --> BP[Bucket\
+      \ policy]\n    BP --> Bucket[Bucket - private by default]\n    Bucket --> Obj[Object: key, data,\
+      \ metadata]"
+  - id: storage-classes-lifecycle
+    title: Storage Classes and Lifecycle Rules
+    theory: 'Not all data is equally hot. S3 Standard stores data across at least three Availability Zones
+      with millisecond access and is the default. Standard-IA costs less per gigabyte but charges for
+      retrieval, which fits data read rarely. One Zone-IA is cheaper still but stores data in a single
+      zone. Glacier Instant Retrieval, Flexible Retrieval and Deep Archive trade access time — minutes
+      to hours — for very low cost, fitting backups and compliance archives. Intelligent-Tiering moves
+      objects between classes automatically based on access patterns. Lifecycle rules automate the transitions:
+      move objects to Standard-IA after 30 days, to Glacier after 90, and expire them after a year, or
+      delete incomplete multipart uploads after a week. The common mistake is leaving everything in Standard
+      forever, paying premium prices for data nobody reads. In CloudForge, MinIO supports storage classes
+      and lifecycle rules, and the labs ask you to design a lifecycle policy for a realistic workload
+      and measure the cost difference.'
+    key_points:
+    - 'S3 Standard: multi-AZ, millisecond access, default'
+    - 'Standard-IA and One Zone-IA: cheaper storage, retrieval fees'
+    - Glacier tiers trade hours of retrieval time for very low cost
+    - Lifecycle rules automate transitions and expiry
+    - Leaving cold data in Standard is the classic storage waste
+    architecture_diagram_mermaid: "flowchart LR\n    Hot[S3 Standard] -->|30 days| IA[Standard-IA]\n \
+      \   IA -->|90 days| G[Glacier Flexible]\n    G -->|1 year| Exp[Expired]"
+  - id: versioning-protection
+    title: Versioning and Data Protection
+    theory: 'Versioning keeps every version of an object, so overwriting or deleting a file does not destroy
+      the previous copy — a delete creates a delete marker, and the older versions remain recoverable.
+      That makes versioning the single most effective protection against accidental deletion and against
+      ransomware that overwrites data. MFA Delete adds a further barrier by requiring a hardware token
+      to delete versions. Object Lock enforces write-once-read-many retention for compliance, and cross-region
+      replication copies objects to a second Region for disaster recovery. Encryption is separate from
+      all of this: SSE-S3 encrypts with keys managed by AWS, SSE-KMS uses keys you control in KMS with
+      an audit trail, and client-side encryption encrypts before upload. The discipline is to enable versioning
+      on any bucket that holds data you cannot recreate, to encrypt everything by default, and to test
+      restores — a backup you have never restored is a hope, not a backup. CloudForge enables versioning
+      and encryption on its lab buckets by default and the validators check that you have not turned them
+      off.'
+    key_points:
+    - Versioning keeps every version; deletes create a delete marker
+    - Versioning protects against accidental deletion and ransomware
+    - MFA Delete and Object Lock add deletion barriers for compliance
+    - SSE-S3 vs SSE-KMS vs client-side encryption
+    - A backup you have never restored is a hope, not a backup
+    architecture_diagram_mermaid: "flowchart TD\n    Put[PutObject v2] --> Ver[Versioned bucket]\n   \
+      \ Ver --> V1[v1 - retained]\n    Ver --> V2[v2 - current]\n    Del[Delete] --> Marker[Delete marker\
+      \ - v2 restorable]"
+  - id: static-website
+    title: Static Websites and CloudFront
+    theory: 'S3 can host a static website directly: enable website hosting on the bucket, set the index
+      and error documents, and the bucket serves HTML, CSS and JavaScript over HTTP. In practice you put
+      CloudFront in front of it, which adds HTTPS, edge caching and a custom domain, and keeps the bucket
+      private behind an origin access control so nobody can bypass the CDN and hit the bucket directly.
+      The pattern is the cheapest way to host a website on AWS — no servers, no patching, pay only for
+      storage and requests — and it scales to any traffic level without any action from you. The pitfalls
+      are caching: after you upload a new index.html, edge locations keep serving the old one until the
+      TTL expires or you invalidate the cache, and the classic debugging loop is to invalidate and re-check.
+      In CloudForge you will build this end to end: a MinIO bucket holding a real site, a simulated CloudFront
+      distribution in front of it, and validators that fetch the site through the CDN and check both the
+      content and the cache headers.'
+    key_points:
+    - S3 website hosting serves static files over HTTP
+    - CloudFront adds HTTPS, edge caching and a custom domain
+    - Keep the bucket private behind origin access control
+    - Static hosting scales with no servers and no patching
+    - Cache invalidation is required after updating content
+    architecture_diagram_mermaid: "flowchart LR\n    User[User] --> CF[CloudFront - HTTPS, edge cache]\n\
+      \    CF --> Bucket[S3 bucket - private]\n    Bucket --> Site[index.html, style.css, app.js]"
+guided_lab:
+  lab_definition_id: lab-storage-s3
+  title: Build a Private Bucket with Lifecycle
+  tasks:
+  - Create a bucket with versioning and encryption enabled
+  - Upload an object and verify a previous version survives an overwrite
+  - Add a lifecycle rule moving objects to infrequent access after 30 days
+  - Prove the bucket blocks public access
+  validation_rules:
+  - rule: bucket_exists
+    description: Bucket lab-assets exists
+    params:
+      name: lab-assets
+  - rule: bucket_versioning_enabled
+    description: Versioning is enabled on lab-assets
+    params:
+      bucket: lab-assets
+  - rule: bucket_encryption_enabled
+    description: Encryption is enabled on lab-assets
+    params:
+      bucket: lab-assets
+  - rule: bucket_not_public
+    description: Bucket lab-assets is not publicly accessible
+    params:
+      bucket: lab-assets
+  - rule: object_exists
+    description: Object welcome.txt exists in the bucket
+    params:
+      bucket: lab-assets
+      key: welcome.txt
+challenge:
+  title: Static site behind the CDN
+  task: Publish a three-page static site to a private bucket, front it with a distribution, and prove
+    the site loads over HTTPS through the CDN while direct bucket access is denied.
+  validation_rules:
+  - rule: bucket_exists
+    description: Bucket site-bucket exists
+    params:
+      name: site-bucket
+  - rule: bucket_not_public
+    description: Site bucket is not directly public
+    params:
+      bucket: site-bucket
+  - rule: object_exists
+    description: index.html is published
+    params:
+      bucket: site-bucket
+      key: index.html
+  - rule: cdn_serves_site
+    description: The distribution serves the site over HTTPS
+    params:
+      distribution: site-dist
+assessment:
+- question: Why is object storage a poor fit for a database's data files?
+  options:
+  - It is too expensive
+  - No in-place editing and higher first-byte latency
+  - Buckets are too small
+  - Objects cannot be encrypted
+  correct_answer: 1
+  explanation: Object storage has no filesystem semantics or in-place writes; databases need low-latency
+    block storage.
+- question: A bucket name must be unique across what scope?
+  options:
+  - Your account
+  - Your Region
+  - All of AWS globally
+  - Your VPC
+  correct_answer: 2
+  explanation: S3 bucket names live in a single global namespace.
+- question: What does enabling versioning change about a delete?
+  options:
+  - Deletes are blocked
+  - A delete marker is created and older versions remain
+  - The bucket becomes read-only
+  - Deletes become permanent immediately
+  correct_answer: 1
+  explanation: With versioning, delete creates a marker; previous versions stay recoverable.
+- question: Data is read once a month and must survive a zone failure. Which class fits?
+  options:
+  - S3 Standard
+  - S3 Standard-IA
+  - S3 One Zone-IA
+  - Glacier Deep Archive
+  correct_answer: 1
+  explanation: Standard-IA is cheaper for infrequent reads and still multi-AZ; One Zone-IA risks a zone
+    loss; Deep Archive is too slow.
+- question: How should a private bucket grant temporary read access to one file?
+  options:
+  - Make the bucket public
+  - Issue a presigned URL
+  - Share the root password
+  - Disable Block Public Access
+  correct_answer: 1
+  explanation: A presigned URL grants time-limited access to one object without opening the bucket.
+- question: A lifecycle rule moves objects to Glacier after 90 days. What is the trade-off?
+  options:
+  - Higher storage cost
+  - Retrieval takes minutes to hours instead of milliseconds
+  - Objects become public
+  - Versioning is disabled
+  correct_answer: 1
+  explanation: Glacier trades retrieval time for very low storage cost.
+xp_reward: 200
+prerequisites:
+- fundamentals

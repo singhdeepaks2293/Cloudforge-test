@@ -1,0 +1,221 @@
+id: monitoring
+title: Monitoring & Observability
+description: 'CloudWatch metrics, logs and alarms: know your system is broken before your users tell you,
+  and find the cause fast.'
+difficulty: intermediate
+estimated_hours: 4
+learning_objectives:
+- Collect metrics and logs from instances and functions
+- Build dashboards that show system health at a glance
+- Create alarms that page on real problems, not noise
+- Trace a request across services
+- Run a structured incident response from an alarm
+modules:
+- id: mon-observe
+  title: Metrics, Logs and Traces
+  lessons:
+  - id: three-pillars
+    title: Metrics, Logs and Traces
+    theory: 'Observability rests on three kinds of telemetry. Metrics are numbers over time — CPU utilisation,
+      request count, error rate, queue depth — cheap to store, easy to alert on, and the first thing you
+      look at when something is wrong. Logs are timestamped text records of discrete events, rich in detail
+      but expensive to search at scale. Traces follow a single request across services, showing where
+      its time went and which call failed. The three complement each other: a metric tells you error rate
+      rose, a trace tells you which service and which downstream call, and logs tell you exactly what
+      the failing call said. The discipline is to emit all three with a shared correlation ID, so one
+      identifier connects a metric spike to a trace to the log lines that explain it. CloudForge collects
+      metrics from the Rust engine, logs from every service, and traces across the Go API and the engine,
+      all keyed by the same request ID you see in the API responses.'
+    key_points:
+    - 'Metrics: numbers over time, cheap, alertable'
+    - 'Logs: detailed event records, expensive to search'
+    - 'Traces: one request''s path across services'
+    - A shared correlation ID connects all three
+    - Metrics show something is wrong; traces and logs show why
+    architecture_diagram_mermaid: "flowchart TD\n    Req[Request - X-Request-ID] --> M[Metrics - error\
+      \ rate up]\n    Req --> T[Trace - slow call in service B]\n    Req --> L[Logs - timeout in service\
+      \ B]"
+  - id: cloudwatch-metrics
+    title: CloudWatch Metrics and Dashboards
+    theory: 'CloudWatch collects metrics from AWS services automatically — EC2 CPU, Lambda invocations
+      and errors, SQS queue depth, RDS connections — and accepts custom metrics from your applications
+      via the PutMetricData API or the embedded metric format in logs. A metric has a namespace, a name,
+      dimensions such as instance ID, and a statistic such as average or maximum over a period. Dashboards
+      assemble the metrics that matter for a service onto one screen: request rate, error rate, latency
+      percentiles and saturation, the four golden signals, plus the business metrics such as orders per
+      minute. The dashboard is the first thing an on-call engineer opens, so it should answer in seconds
+      whether the system is healthy and where it is not. The common failure is a dashboard full of vanity
+      metrics and no error rate, which looks busy while telling you nothing. CloudForge exposes the same
+      model: engine metrics for the lab network, API metrics for the control plane, and a dashboard you
+      build yourself in the lab.'
+    key_points:
+    - CloudWatch collects service metrics automatically
+    - Custom metrics come from PutMetricData or embedded metric format
+    - A metric has namespace, name, dimensions and a statistic
+    - 'Golden signals: latency, traffic, errors, saturation'
+    - A dashboard must answer in seconds whether the system is healthy
+    architecture_diagram_mermaid: "flowchart LR\n    EC2[EC2] --> CW[CloudWatch]\n    Lam[Lambda] -->\
+      \ CW\n    SQS[SQS] --> CW\n    CW --> Dash[Dashboard - golden signals]"
+  - id: logs-insights
+    title: Logs and CloudWatch Logs Insights
+    theory: 'Logs are only useful if you can find the needle. CloudWatch Logs groups log streams by service,
+      and Logs Insights lets you query them with a SQL-like language: filter by field, aggregate by time,
+      count errors by message. The practice that makes this work is structured logging — emitting JSON
+      with consistent fields such as timestamp, level, request_id, service and message — instead of free-form
+      text, because structured fields are filterable and aggregatable. Log retention is a cost decision:
+      keep production logs for weeks or months, keep debug logs for days, and export to S3 for long-term
+      retention. Never log secrets, credentials or full request bodies containing personal data; the log
+      store becomes a second copy of every mistake. In CloudForge, every lab resource emits structured
+      logs to the same store, and the break-and-fix scenarios are solved largely by querying them. The
+      habit to build is to include the request ID in every log line your code emits, so a single identifier
+      carries you from an alarm to the exact lines that explain it.'
+    key_points:
+    - Structured JSON logs with consistent fields are queryable
+    - Logs Insights filters and aggregates by field and time
+    - Retention is a cost decision; export to S3 for long-term storage
+    - Never log secrets or personal data
+    - Logs are where break-and-fix diagnosis happens
+    architecture_diagram_mermaid: "flowchart TD\n    Svc[Service] -->|JSON logs| LG[Log group]\n    LG\
+      \ --> Q[Logs Insights query]\n    Q --> Ans[Errors by request_id]"
+- id: mon-alarms
+  title: Alarms and Incidents
+  lessons:
+  - id: alarms
+    title: Alarms That Page on Real Problems
+    theory: 'An alarm turns a metric into an action: when error rate exceeds a threshold for a sustained
+      period, notify the on-call engineer. The art is in the threshold and the duration. Alerting on a
+      single data point produces false pages from brief spikes; requiring five minutes of breach delays
+      a real page. Alert on symptoms users feel — error rate and latency — rather than on causes such
+      as CPU, which can be high while users are fine. Use anomaly detection for metrics with a daily pattern
+      instead of a fixed threshold. And keep the alarm count low: an on-call engineer who is paged ten
+      times a night stops responding to pages, which is how real outages get missed. Every alarm needs
+      a runbook — the link in the alarm that says what to check first — and a regular review that deletes
+      alarms nobody acts on. In CloudForge you will write alarms for your lab services, trigger them with
+      a fault injection, and grade them on whether they fired for the real failure and stayed silent for
+      the noise.'
+    key_points:
+    - 'Alert on user-facing symptoms: error rate and latency'
+    - Require a sustained breach to avoid paging on spikes
+    - Anomaly detection fits metrics with daily patterns
+    - Too many alarms cause alert fatigue and missed pages
+    - Every alarm needs a runbook and a regular review
+    architecture_diagram_mermaid: "flowchart TD\n    Metric[Error rate > 5% for 5 min] --> Alarm[CloudWatch\
+      \ alarm]\n    Alarm --> SNS[SNS topic]\n    SNS --> Page[Page on-call]\n    SNS --> Run[Runbook\
+      \ link]"
+  - id: incident-response
+    title: Incident Response from an Alarm
+    theory: 'An alarm is the start of an incident, not the end of it. The response follows a structure:
+      acknowledge the page and declare the incident, establish the impact and the blast radius, mitigate
+      first and diagnose second — restoring service matters more than understanding the cause while users
+      are affected — communicate status at regular intervals, and only after service is restored, run
+      a blameless post-mortem that asks what the system allowed to happen rather than who pressed the
+      button. The most common failure in incident response is silent debugging: one person investigating
+      alone while nobody knows the status. The second is fixing the symptom without recording what was
+      changed, so the same incident repeats. CloudForge''s break-and-fix scenarios are miniature incidents
+      with the same shape: a symptom, a time pressure, a fix, and a validator that confirms the service
+      is actually restored. The post-mortem''s output is a concrete change — a runbook update, an alarm
+      fix, a code change — tracked until it lands, not a document that is written and forgotten.'
+    key_points:
+    - Acknowledge, declare impact, mitigate first, diagnose second
+    - Communicate status at regular intervals
+    - Blameless post-mortems ask what the system allowed
+    - Silent solo debugging is the most common failure
+    - Record what changed so the incident does not repeat
+    architecture_diagram_mermaid: "flowchart TD\n    Page[Page] --> Ack[Acknowledge + declare]\n    Ack\
+      \ --> Mit[Mitigate - restore service]\n    Mit --> Diag[Diagnose root cause]\n    Diag --> Post[Blameless\
+      \ post-mortem]"
+guided_lab:
+  lab_definition_id: lab-monitoring-alarms
+  title: Alarm on a Real Failure
+  tasks:
+  - Build a dashboard with error rate, latency and queue depth
+  - Create an alarm on error rate above 5% for 5 minutes
+  - Inject a fault that breaks the service and verify the alarm fires
+  - Resolve the fault and verify the alarm clears
+  validation_rules:
+  - rule: dashboard_exists
+    description: Dashboard service-health exists
+    params:
+      name: service-health
+  - rule: metric_alarm_exists
+    description: Alarm on error rate above 5% exists
+    params:
+      metric: error_rate
+      threshold: 5
+  - rule: alarm_fired
+    description: The alarm fired during the injected fault
+    params:
+      alarm: error-rate-alarm
+  - rule: alarm_cleared
+    description: The alarm cleared after the fix
+    params:
+      alarm: error-rate-alarm
+challenge:
+  title: Silent failure detector
+  task: A service fails silently — no errors, but requests stop completing. Build an alarm that detects
+    it from a metric the service does emit, and prove it fires when the failure is injected.
+  validation_rules:
+  - rule: metric_alarm_exists
+    description: An alarm exists that fires when request count drops to zero
+    params:
+      metric: request_count
+      threshold: 0
+  - rule: alarm_fired
+    description: The alarm fired during the silent failure
+    params:
+      alarm: silent-failure-alarm
+assessment:
+- question: Error rate spikes for 30 seconds, then recovers. Should the on-call engineer be paged?
+  options:
+  - Yes, immediately
+  - No — require a sustained breach so brief spikes do not page
+  - Only if CPU is also high
+  - Only on weekdays
+  correct_answer: 1
+  explanation: A sustained-breach requirement filters transient spikes while still catching real failures.
+- question: Which golden signal is missing from CPU utilisation, memory and disk?
+  options:
+  - Latency
+  - Uptime
+  - Cost
+  - All are present
+  correct_answer: 0
+  explanation: The golden signals are latency, traffic, errors and saturation; CPU is a cause, not a symptom.
+- question: A metric shows error rate is up. What tells you which service and call failed?
+  options:
+  - Another metric
+  - A trace of the failing request
+  - A dashboard
+  - An alarm
+  correct_answer: 1
+  explanation: Traces follow one request across services and show where its time went and which call failed.
+- question: Why should logs be structured JSON rather than free-form text?
+  options:
+  - JSON is smaller
+  - Structured fields are filterable and aggregatable in queries
+  - Free text cannot be stored
+  - JSON logs are encrypted
+  correct_answer: 1
+  explanation: Consistent fields let Logs Insights filter and aggregate; free text must be parsed first.
+- question: What is the first priority during an incident?
+  options:
+  - Find the root cause
+  - Mitigate and restore service
+  - Write the post-mortem
+  - Assign blame
+  correct_answer: 1
+  explanation: Mitigation comes before diagnosis while users are affected.
+- question: What makes an alarm review valuable?
+  options:
+  - It adds more alarms
+  - It deletes alarms nobody acts on and keeps the signal high
+  - It raises all thresholds
+  - It disables paging
+  correct_answer: 1
+  explanation: Reviewing removes noisy, unactioned alarms, which protects the on-call engineer from alert
+    fatigue.
+xp_reward: 150
+prerequisites:
+- fundamentals
+- ec2
+- networking

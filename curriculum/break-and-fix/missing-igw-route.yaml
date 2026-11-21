@@ -1,0 +1,33 @@
+id: missing-igw-route
+title: The Gateway Exists but Nobody Uses It
+symptom: A brand-new VPC has an internet gateway attached, but nothing in it can reach the internet. The
+  load balancer's health checks fail and the web tier is unreachable from outside.
+injected_fault:
+  kind: route-blackhole
+  target: route_table
+  parameters:
+    route_table_id: rtb-public
+    destination: 0.0.0.0/0
+    action: drop
+    note: 'simulates a missing IGW route: the 0.0.0.0/0 entry is absent'
+diagnosis_hints:
+- Verify the internet gateway is actually attached to the VPC.
+- List the routes in the subnet's route table — is there a 0.0.0.0/0 entry at all?
+- 'Remember: a gateway does nothing until a route table points at it.'
+- Check whether the subnet is using the VPC main route table instead of its own.
+fix_steps:
+- Confirm the internet gateway is attached to the VPC.
+- Add a 0.0.0.0/0 route to the public subnets' route table targeting the gateway.
+- Verify the load balancer health checks turn green.
+- Confirm an instance in the public subnet can reach the internet.
+validation_rules:
+- rule: route_to_igw
+  description: Public subnets route 0.0.0.0/0 to the internet gateway
+  params:
+    subnet_type: public
+- rule: load_balancer_healthy_targets
+  description: Load balancer has at least one healthy target
+  params:
+    service: web-service
+    min_count: 1
+xp_reward: 120

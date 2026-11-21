@@ -1,0 +1,234 @@
+id: architecture
+title: Solutions Architecture & Well-Architected
+description: 'Design complete systems: the five pillars of the Well-Architected Framework, trade-offs,
+  and a capstone design review.'
+difficulty: advanced
+estimated_hours: 6
+learning_objectives:
+- Apply the five Well-Architected pillars to a design
+- Design a three-tier application for availability and scale
+- Make explicit trade-offs between cost, performance and reliability
+- Design for failure with runbooks and recovery objectives
+- Present and defend an architecture in a design review
+modules:
+- id: arch-waf
+  title: The Well-Architected Framework
+  lessons:
+  - id: waf-pillars
+    title: The Five Pillars
+    theory: 'The Well-Architected Framework evaluates a system on five pillars. Operational excellence
+      is running and improving the system: runbooks, automation, and learning from incidents. Security
+      is protecting data and systems: least privilege, encryption, and detection. Reliability is recovering
+      from failure: multi-AZ design, backups, and tested recovery. Performance efficiency is using the
+      right resources: the right instance types, caching, and scaling. Cost optimisation is avoiding unnecessary
+      spend: rightsizing, lifecycle rules, and shutting down idle resources. Sustainability was later
+      added as a sixth pillar: minimising the environmental impact of a workload. The pillars trade against
+      each other constantly — more Availability Zones cost more money, stricter security slows developers
+      down — and the framework''s value is that it makes those trade-offs explicit and reviewable instead
+      of accidental. A Well-Architected Review is a structured conversation with those trade-offs as the
+      agenda, and the CloudForge capstone is exactly that: you will defend your design against questions
+      from each pillar.'
+    key_points:
+    - 'Operational excellence: runbooks, automation, learning from incidents'
+    - 'Security: least privilege, encryption, detection'
+    - 'Reliability: multi-AZ, backups, tested recovery'
+    - 'Performance efficiency: right resources, caching, scaling'
+    - 'Cost optimisation: rightsizing, lifecycle rules, no idle spend'
+    - The pillars trade against each other; the review makes it explicit
+    architecture_diagram_mermaid: "flowchart TD\n    Arch[Architecture] --> Op[Operational excellence]\n\
+      \    Arch --> Sec[Security]\n    Arch --> Rel[Reliability]\n    Arch --> Perf[Performance efficiency]\n\
+      \    Arch --> Cost[Cost optimisation]"
+  - id: designing-ha
+    title: Designing for High Availability
+    theory: 'Availability is designed, not added later. The starting point is the failure domain: what
+      breaks together? A single instance breaks alone, a single Availability Zone breaks everything in
+      it, a single Region breaks everything in it. The design removes single points of failure at the
+      level the business requires: two instances behind a load balancer across two zones for most applications,
+      a second Region only when the business case justifies it. Statelessness is the enabler — state in
+      a database or a cache, never on the instance — because stateless components can be replaced and
+      scaled without coordination. Recovery objectives make the requirement concrete: RTO is how long
+      recovery may take, RPO is how much data may be lost, and both are business numbers, not technical
+      ones. The discipline is to test the failure modes you designed for: kill an instance, lose a zone,
+      restore a backup, and prove the recovery objectives are met before the failure happens for real.'
+    key_points:
+    - 'Design starts from failure domains: instance, zone, Region'
+    - Remove single points of failure at the level the business requires
+    - Stateless components can be replaced and scaled freely
+    - RTO is recovery time; RPO is acceptable data loss
+    - Test the failures you designed for before they happen for real
+    architecture_diagram_mermaid: "flowchart TD\n    User[Users] --> LB[Load balancer]\n    LB --> A1[App\
+      \ - AZ-a]\n    LB --> A2[App - AZ-b]\n    A1 --> DB[(DB - Multi-AZ)]\n    A2 --> DB"
+  - id: trade-offs
+    title: Making Explicit Trade-Offs
+    theory: 'Every architecture decision is a trade-off, and the skill is making it explicitly and recording
+      it. Consistency versus availability: a strongly consistent database is simpler to reason about but
+      fails when a partition occurs; an eventually consistent store stays available but returns stale
+      reads. Cost versus reliability: three Availability Zones cost more than one. Latency versus durability:
+      synchronous replication is slower but loses no data. Build versus buy: a managed service costs more
+      per unit but removes operational work. The mechanism for recording decisions is the Architecture
+      Decision Record — a short document with the context, the options considered, the decision, and the
+      consequences — stored in the repository next to the code it governs. Decisions without records are
+      forgotten and re-litigated; decisions with records can be revisited when the context changes. In
+      the capstone you will write ADRs for your three most consequential choices and defend them in review.'
+    key_points:
+    - Consistency vs availability, cost vs reliability, latency vs durability
+    - 'Build vs buy: managed services trade money for operational work'
+    - Record decisions in Architecture Decision Records
+    - An ADR holds context, options, decision and consequences
+    - Recorded decisions can be revisited when context changes
+    architecture_diagram_mermaid: "flowchart TD\n    D[Decision] --> C1[Consistency]\n    D --> C2[Cost]\n\
+      \    D --> C3[Latency]\n    D --> ADR[ADR - recorded, reviewable]"
+- id: arch-capstone
+  title: Three-Tier Design and Capstone
+  lessons:
+  - id: three-tier
+    title: The Three-Tier Reference Architecture
+    theory: 'The three-tier pattern is the default shape of a web application: a presentation tier of
+      load balancers and web servers in public subnets, an application tier of business logic in private
+      subnets, and a data tier of databases and caches in isolated private subnets. Traffic flows inward
+      through the load balancer, and each tier talks only to the next one down, enforced by security groups
+      that reference each other rather than by IP ranges. The tiers scale independently — more web servers
+      for traffic, more application servers for compute, read replicas for reads — and fail independently,
+      since a tier can lose an instance or a zone without taking the others down. Static content is served
+      from S3 and CloudFront rather than from the web tier, and asynchronous work is pushed to queues
+      and processed by workers in the application tier. This is the architecture the CloudForge capstone
+      asks you to build: the whole platform exists to let you construct it for real, tier by tier, and
+      to break it and fix it when it goes wrong.'
+    key_points:
+    - 'Presentation tier: load balancers and web servers, public subnets'
+    - 'Application tier: business logic, private subnets'
+    - 'Data tier: databases and caches, isolated private subnets'
+    - Security groups reference tiers, not IP ranges
+    - Tiers scale and fail independently; static content goes to S3 and CloudFront
+    architecture_diagram_mermaid: "flowchart TD\n    User[Users] --> CF[CloudFront + S3 - static]\n  \
+      \  User --> ALB[Application load balancer]\n    ALB --> Web[Web tier - public]\n    Web --> App[App\
+      \ tier - private]\n    App --> DB[(Data tier - isolated)]\n    App --> Q[Queue - async work]"
+  - id: capstone-review
+    title: The Capstone Design Review
+    theory: 'The capstone is a design review, not a build exercise. You will present a complete architecture
+      for a realistic brief — a multi-tenant e-commerce platform with a traffic spike, a compliance requirement
+      and a budget — and defend it against questions from each Well-Architected pillar. The review tests
+      whether you can reason about the system as a whole: why this Region and not another, why this database
+      and not that one, what happens when an Availability Zone fails, what the monthly cost is and where
+      it could be cut, and what the runbook says when the alarm fires at 3 a.m. The grading is not about
+      finding the one right answer — there is not one — but about whether the trade-offs are explicit,
+      the failure modes are handled, and the design is honest about its weaknesses. A good answer names
+      what the design does not do well and why that is acceptable; a weak answer claims it does everything
+      well. The deliverable is the architecture diagram, the ADRs, the cost estimate and the runbook,
+      all of which the validators check for completeness before the review begins.'
+    key_points:
+    - A design review tests reasoning about the whole system
+    - Defend choices against every Well-Architected pillar
+    - There is no single right answer; trade-offs must be explicit
+    - A good design names its weaknesses honestly
+    - 'Deliverables: diagram, ADRs, cost estimate and runbook'
+    architecture_diagram_mermaid: "flowchart TD\n    Brief[Brief - e-commerce, spike, compliance, budget]\
+      \ --> Design[Architecture + ADRs]\n    Design --> Review[Design review - five pillars]\n    Review\
+      \ --> Verdict[Approved / revise]"
+guided_lab:
+  lab_definition_id: lab-architecture-three-tier
+  title: Build the Three-Tier Reference Architecture
+  tasks:
+  - Design the three-tier architecture and record ADRs for the key choices
+  - 'Build it with Terraform: ALB, web and app tiers, Multi-AZ database'
+  - Prove the app tier cannot be reached from the internet
+  - Kill one AZ's instances and prove the application stays up
+  validation_rules:
+  - rule: vpc_exists
+    description: VPC 10.5.0.0/16 exists
+    params:
+      cidr: 10.5.0.0/16
+  - rule: subnet_count
+    description: At least six subnets exist across three tiers
+    params:
+      operator: '>='
+      value: 6
+  - rule: load_balancer_healthy_targets
+    description: Load balancer has at least two healthy targets
+    params:
+      service: web-service
+      min_count: 2
+  - rule: database_exists
+    description: A PostgreSQL database instance exists
+    params:
+      engine: postgres
+  - rule: database_private
+    description: Database has no public endpoint
+  - rule: no_route_to_internet
+    description: Application subnets have no direct internet route
+    params:
+      subnet_type: application
+challenge:
+  title: Defend your design
+  task: 'Present your three-tier architecture in a design review: diagram, ADRs, monthly cost estimate
+    and a runbook for the 3 a.m. alarm. Revise the design in response to one reviewer challenge — a Region
+    outage — and record the revised ADR.'
+  validation_rules:
+  - rule: architecture_doc_exists
+    description: Design review document exists
+    params:
+      kind: design-review
+  - rule: adr_count
+    description: At least three Architecture Decision Records exist
+    params:
+      operator: '>='
+      value: 3
+  - rule: cost_estimate_exists
+    description: A monthly cost estimate exists
+assessment:
+- question: Which pillar covers backups and tested recovery?
+  options:
+  - Security
+  - Reliability
+  - Cost optimisation
+  - Performance efficiency
+  correct_answer: 1
+  explanation: 'Reliability is recovering from failure: multi-AZ design, backups and tested recovery.'
+- question: What is the main enabler of replacing and scaling application servers freely?
+  options:
+  - Larger instances
+  - Statelessness — state lives in the database or cache, not on the instance
+  - More subnets
+  - Faster disks
+  correct_answer: 1
+  explanation: Stateless components can be replaced and scaled without coordination; stateful ones cannot.
+- question: RTO is 1 hour and RPO is 5 minutes. What does that mean?
+  options:
+  - Recovery must complete within 1 hour and lose at most 5 minutes of data
+  - The system must never fail
+  - Backups run every hour
+  - Recovery takes 5 minutes
+  correct_answer: 0
+  explanation: RTO is the maximum acceptable recovery time; RPO is the maximum acceptable data loss.
+- question: In a three-tier design, what may the application tier talk to?
+  options:
+  - The internet directly
+  - The web tier above it and the data tier below it
+  - Only the database
+  - Any tier
+  correct_answer: 1
+  explanation: Tiers talk only to adjacent tiers, enforced by security groups that reference each other.
+- question: What should an Architecture Decision Record contain?
+  options:
+  - Only the decision
+  - Context, options considered, decision and consequences
+  - The code diff
+  - The cost estimate only
+  correct_answer: 1
+  explanation: An ADR records why a decision was made so it can be revisited when context changes.
+- question: A design claims to be excellent on every pillar. How should a reviewer respond?
+  options:
+  - Accept it
+  - Be sceptical — pillars trade against each other, so a good design names its weaknesses
+  - Ask for more AZs
+  - Reject it outright
+  correct_answer: 1
+  explanation: Every real design trades something; an honest design names what it does not do well and
+    why that is acceptable.
+xp_reward: 300
+prerequisites:
+- networking
+- databases
+- serverless
+- monitoring
+- terraform

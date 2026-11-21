@@ -1,0 +1,231 @@
+id: iam
+title: IAM & Security
+description: Users, groups, roles and policies. Learn least privilege by writing policies and watching
+  them allow or deny real operations.
+difficulty: beginner
+estimated_hours: 5
+learning_objectives:
+- Create users, groups and roles and explain when each is appropriate
+- Write JSON IAM policies with effect, action and resource
+- Apply least privilege and test a policy with the simulator
+- Replace long-lived credentials with roles
+- Diagnose an AccessDenied error from its cause
+modules:
+- id: iam-core
+  title: Identity Basics
+  lessons:
+  - id: users-groups-roles
+    title: Users, Groups and Roles
+    theory: 'IAM identity comes in three forms, and mixing them up is the most common beginner error.
+      A user is a long-lived identity for a person or an application, authenticated with a password for
+      the console or access keys for the API. A group is a collection of users that share permissions
+      — you attach a policy to the group once instead of to every user, which is how you keep permissions
+      manageable as a team grows. A role is an identity that nobody logs in as directly; instead, a user,
+      a service or an application assumes the role and receives temporary credentials that expire. Roles
+      are how EC2 instances get permissions: the instance assumes a role, so no access key ever has to
+      live on the disk. The rule is simple: people get users, teams get groups, and everything that runs
+      code — instances, Lambda functions, services — gets a role. In CloudForge the IAM simulator enforces
+      these identities against real lab operations, so attaching the wrong policy produces a genuine denial
+      you can inspect, not a textbook example.'
+    key_points:
+    - 'User: long-lived identity for a person or application'
+    - 'Group: shared permissions for a set of users'
+    - 'Role: assumed identity with temporary credentials'
+    - EC2 instances and Lambda functions use roles, not access keys
+    - People get users, teams get groups, code gets roles
+    architecture_diagram_mermaid: "flowchart TD\n    Person[Person] --> User[IAM user]\n    User --> Group[IAM\
+      \ group]\n    Group --> Policy[Policy]\n    EC2[EC2 instance] --> Role[IAM role]\n    Role --> Policy"
+  - id: writing-policies
+    title: Writing IAM Policies
+    theory: 'An IAM policy is a JSON document that answers one question: is this principal allowed to
+      perform this action on this resource? Each statement has an Effect, Allow or Deny, an Action such
+      as s3:GetObject, a Resource such as an ARN identifying a bucket, and optionally a Condition such
+      as requiring the request to come from a specific IP range. Evaluation follows a strict order: an
+      explicit Deny always wins, then an explicit Allow grants access, and if no statement matches the
+      request is implicitly denied. That default-deny behaviour is the security foundation — nothing is
+      allowed unless a policy says so. Wildcards are the sharp edge: Action s3:* on Resource * is effectively
+      full S3 access, and beginners reach for it because it makes things work quickly, then forget it
+      exists. Write the narrowest policy that works, test it with the policy simulator before attaching
+      it, and prefer managed policies maintained by AWS for common jobs such as read-only access. In CloudForge
+      you will write policies against the simulator and watch real lab operations succeed or fail as you
+      tighten each statement.'
+    key_points:
+    - Effect, Action, Resource and optional Condition per statement
+    - Explicit Deny beats Allow; no match means implicit deny
+    - 'Default deny: nothing is allowed unless a policy says so'
+    - Wildcards grant broad access — use them sparingly
+    - Test with the policy simulator before attaching
+    architecture_diagram_mermaid: "flowchart TD\n    Req[Request] --> Deny{Explicit Deny?}\n    Deny -->|yes|\
+      \ No[Denied]\n    Deny -->|no| Allow{Explicit Allow?}\n    Allow -->|yes| Yes[Allowed]\n    Allow\
+      \ -->|no| No"
+  - id: least-privilege
+    title: Least Privilege in Practice
+    theory: 'Least privilege means every identity gets exactly the permissions it needs to do its job
+      and nothing more. It sounds obvious and it is hard in practice, because the exact permissions a
+      job needs are rarely known in advance. The workable approach is to start narrow, observe, and expand
+      only with evidence. AWS helps with Access Advisor, which shows when a policy''s permissions were
+      last used, and with CloudTrail, which records every API call, so you can find permissions that were
+      granted but never exercised and remove them. A second technique is to scope resources by ARN rather
+      than by wildcard: allow s3:GetObject on one bucket, not on every bucket. A third is to use conditions,
+      such as requiring MFA or restricting by source IP or by tag. The payoff is blast radius: when credentials
+      leak — and eventually some will — a least-privilege identity can do little damage, while an over-privileged
+      one can delete infrastructure. CloudForge labs enforce this by grading your policies: a lab passes
+      when the workload works, and passes with full marks only when the policy grants no unused permissions.'
+    key_points:
+    - Grant exactly what the job needs, nothing more
+    - Start narrow, observe with CloudTrail and Access Advisor, expand with evidence
+    - Scope resources by ARN, not by wildcard
+    - Conditions such as MFA and source IP narrow access further
+    - Least privilege limits blast radius when credentials leak
+    architecture_diagram_mermaid: "flowchart LR\n    Start[Start narrow] --> Observe[Observe with CloudTrail]\n\
+      \    Observe --> Trim[Remove unused permissions]\n    Trim --> Observe"
+- id: iam-advanced
+  title: Credentials and Troubleshooting
+  lessons:
+  - id: roles-vs-credentials
+    title: Roles vs Long-Lived Credentials
+    theory: 'Long-lived access keys are the most dangerous credential in a cloud account. They never expire,
+      they can be copied into a file, committed to a repository, pasted into a chat message or stolen
+      from a laptop, and they keep working until someone notices and revokes them. Roles solve this by
+      issuing temporary credentials: when an EC2 instance assumes a role, the metadata service hands it
+      credentials that expire within hours and are rotated automatically, so there is nothing permanent
+      to steal. The same applies to Lambda functions, ECS tasks and cross-account access: each assumes
+      a role with a trust policy that says who may assume it, and a permissions policy that says what
+      the role may do. Human users should also avoid long-lived keys where possible, using identity federation
+      or SSO for short-lived console and CLI sessions instead. If a long-lived key must exist, rotate
+      it regularly, never embed it in code, and delete it the moment it is no longer needed. CloudForge
+      issues only temporary credentials to lab resources, and the break-and-fix scenarios include a leaked-key
+      incident so you can practise the rotation and revocation workflow before it happens for real.'
+    key_points:
+    - Access keys never expire and can be copied anywhere
+    - Roles issue temporary credentials that rotate automatically
+    - EC2, Lambda and ECS should use roles, never keys on disk
+    - Trust policy controls who may assume a role
+    - Humans should use federation or SSO, not long-lived keys
+    architecture_diagram_mermaid: "flowchart TD\n    App[Application] -->|assumes| Role[IAM role]\n  \
+      \  Role --> Temp[Temporary credentials - expire in hours]\n    Bad[Access key in code] --> Leak[Leaked\
+      \ key works forever]"
+  - id: troubleshooting-access
+    title: Troubleshooting Access Denied
+    theory: 'AccessDenied is the most common IAM error and the most misleading, because it does not tell
+      you which policy blocked the request. The systematic approach starts with the request itself: who
+      is making it, what action, on which resource, and from where — then check each layer. First, the
+      identity''s own policies: does any attached policy allow the action on that resource? Second, permissions
+      boundaries and service control policies, which can cap what an identity may do even if a policy
+      allows it. Third, resource-based policies such as bucket policies, which can deny access regardless
+      of identity policies. Fourth, conditions: a policy may allow the action only with MFA or only from
+      a VPC endpoint. CloudTrail is the definitive record — it logs the call, the identity and the error,
+      and the policy simulator lets you replay the exact request against the exact policies to find the
+      blocking statement. Work the layers in order, change one thing at a time, and re-test. In CloudForge
+      the simulator''s denial messages include which statement matched, so you can practise the same diagnosis
+      loop on real lab failures.'
+    key_points:
+    - AccessDenied never says which policy blocked the request
+    - Check identity policies, boundaries, SCPs and resource policies in order
+    - Conditions such as MFA or source IP can silently block a call
+    - CloudTrail records the call; the simulator replays it
+    - Change one thing at a time and re-test
+    architecture_diagram_mermaid: "flowchart TD\n    Err[AccessDenied] --> Id[Identity policies?]\n  \
+      \  Id --> Bound[Boundary / SCP?]\n    Bound --> Res[Resource policy?]\n    Res --> Cond[Conditions\
+      \ - MFA, IP?]\n    Cond --> Sim[Replay in policy simulator]"
+guided_lab:
+  lab_definition_id: lab-iam-least-privilege
+  title: Least Privilege for a Web Application
+  tasks:
+  - Create a role for an EC2 instance with read-only S3 access to one bucket
+  - Attach the role and verify the instance can read but not write
+  - Tighten the policy until no unused permission remains
+  validation_rules:
+  - rule: iam_role_exists
+    description: Role web-app-role exists
+    params:
+      role_name: web-app-role
+  - rule: iam_policy_allows
+    description: Role allows s3:GetObject on the app-assets bucket
+    params:
+      role: web-app-role
+      action: s3:GetObject
+      resource: arn:cloudforge:s3:::app-assets
+  - rule: iam_policy_denies
+    description: Role does not allow s3:PutObject
+    params:
+      role: web-app-role
+      action: s3:PutObject
+challenge:
+  title: Find the over-privileged identity
+  task: An audit found a user with an attached AdministratorAccess policy. Replace it with the minimum
+    policy that still lets the user read objects from one bucket and list EC2 instances, then delete the
+    user's long-lived access key.
+  validation_rules:
+  - rule: iam_policy_denies
+    description: User no longer has wildcard access
+    params:
+      user: audited-user
+      action: '*'
+  - rule: iam_policy_allows
+    description: User can still read the app-assets bucket
+    params:
+      user: audited-user
+      action: s3:GetObject
+      resource: arn:cloudforge:s3:::app-assets
+  - rule: iam_access_key_absent
+    description: No long-lived access key remains for the user
+    params:
+      user: audited-user
+assessment:
+- question: A user needs permissions shared with five colleagues. What is the best approach?
+  options:
+  - Attach a policy to each user
+  - Put the users in a group and attach the policy to the group
+  - Give each user the AdministratorAccess policy
+  - Share one user's access key
+  correct_answer: 1
+  explanation: Groups attach a policy once for all members; per-user policies drift, and sharing keys
+    is never acceptable.
+- question: A policy has an explicit Allow for s3:GetObject and an explicit Deny for s3:* on the same
+    bucket. What happens?
+  options:
+  - Allow wins
+  - Deny wins
+  - The first statement wins
+  - Access is granted on alternate days
+  correct_answer: 1
+  explanation: An explicit Deny always overrides an Allow in IAM evaluation.
+- question: No policy statement matches a request. What is the result?
+  options:
+  - Allowed by default
+  - Implicitly denied
+  - Allowed if the user is in a group
+  - Prompted for MFA
+  correct_answer: 1
+  explanation: IAM defaults to deny; nothing is allowed unless a policy explicitly allows it.
+- question: An EC2 instance needs to read from S3. What should it use?
+  options:
+  - An access key stored in /etc/passwd
+  - An IAM role assumed by the instance
+  - The root user's credentials
+  - A shared user account
+  correct_answer: 1
+  explanation: Roles give the instance temporary, automatically rotated credentials; keys on disk can
+    be stolen.
+- question: Which tool shows whether a policy's permissions were actually used?
+  options:
+  - CloudFront
+  - Access Advisor
+  - Route 53
+  - CloudFormation
+  correct_answer: 1
+  explanation: Access Advisor reports when each permission was last exercised, which drives least-privilege
+    trimming.
+- question: What does a role's trust policy control?
+  options:
+  - Which actions the role may perform
+  - Who is allowed to assume the role
+  - Which Regions the role works in
+  - How long credentials last
+  correct_answer: 1
+  explanation: The trust policy defines who may assume the role; the permissions policy defines what it
+    may do.
+xp_reward: 150
+prerequisites:
+- fundamentals

@@ -1,0 +1,36 @@
+id: broken-nat
+title: Private Instances Lost Their Way Out
+symptom: Instances in private subnets cannot download packages or call external APIs, but the public subnet
+  works fine. Application logs show connection timeouts to every external endpoint.
+injected_fault:
+  kind: loss
+  target: nat_gateway
+  parameters:
+    nat_gateway_id: nat-1
+    loss_percent: 100
+    direction: egress
+diagnosis_hints:
+- 'Confirm the split: public subnets work, private subnets do not — the fault is on the private path.'
+- 'Trace the private subnet''s default route: where does 0.0.0.0/0 point?'
+- Check the NAT gateway's status and its CloudWatch error metrics.
+- Verify the NAT gateway sits in a public subnet with its own route to the internet gateway.
+fix_steps:
+- Inspect the NAT gateway state and its metrics for errors.
+- If the gateway is failed, replace it with a new NAT gateway in the same public subnet.
+- Update the private route tables to point at the new gateway.
+- Re-test outbound connectivity from a private instance.
+validation_rules:
+- rule: nat_gateway_exists
+  description: At least one NAT gateway exists and is available
+  params:
+    min_count: 1
+- rule: route_to_nat
+  description: Private subnets route 0.0.0.0/0 to a NAT gateway
+  params:
+    subnet_type: private
+- rule: instance_reachable
+  description: A private instance can reach the internet
+  params:
+    protocol: http
+    port: 80
+xp_reward: 150
