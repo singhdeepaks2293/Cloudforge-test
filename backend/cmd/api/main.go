@@ -130,6 +130,28 @@ func main() {
 		asyncProv = true
 	}
 
+	// Lightweight mode: persist the lite per-role limits so
+	// GET /api/v1/admin/quotas shows what is actually enforced.
+	// Enforcement does not depend on this seed — httpapi.roleLimits
+	// caps stored rows at quota.LiteLimits whenever Lite is on, so
+	// a database seeded with full-mode defaults is still capped.
+	// An admin can raise limits afterwards with PUT /admin/quotas,
+	// but the lite cap still applies while Lite is on.
+	if cfg.Lite {
+		for _, role := range quota.ValidRoles {
+			l := quota.LiteLimits(role)
+			if err := quotas.UpsertQuota(context.Background(), &store.QuotaSet{
+				Role: role, MaxLabs: l.MaxLabs, MaxCPU: l.MaxCPU,
+				MaxMemoryMB: l.MaxMemoryMB, MaxDiskGB: l.MaxDiskGB,
+				MaxLabHours: l.MaxLabHours, MaxLabMinutes: l.MaxLabMinutes,
+			}); err != nil {
+				logger.Warn("could not seed lite quotas", "role", role, "error", err)
+			}
+		}
+		logger.Info("lightweight mode: lite quotas seeded (learner 1 lab / Micro / 30 min)",
+			"host_agent_mode", cfg.HostAgentMode)
+	}
+
 	// M9 Part 3: the store-level lab ceiling is a backstop for the
 	// highest configured role limit; the API enforces each role's
 	// own limit (see httpapi.checkLabQuotas). Without this, the
@@ -243,7 +265,7 @@ func main() {
 		Curriculum:  curr, CurriculumDir: cfg.CurriculumDir,
 		DBHealth:    dbHealth,
 		AuthLimiter: authLimiter, APILimiter: apiLimiter,
-		Quotas: quotas,
+		Quotas: quotas, Lite: cfg.Lite,
 	})
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,

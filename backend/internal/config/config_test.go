@@ -85,6 +85,84 @@ func TestLoadHostAgentDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadLiteFlag(t *testing.T) {
+	t.Setenv("CLOUDFORGE_LITE", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Lite {
+		t.Fatal("lite must default to off")
+	}
+	t.Setenv("CLOUDFORGE_LITE", "true")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Lite {
+		t.Fatal("CLOUDFORGE_LITE=true must enable lite mode")
+	}
+	if s := cfg.String(); !strings.Contains(s, "lite=true") {
+		t.Fatalf("config string must report lite mode: %q", s)
+	}
+	for _, v := range []string{"1", "yes", "on"} {
+		t.Setenv("CLOUDFORGE_LITE", v)
+		cfg, err = Load()
+		if err != nil || !cfg.Lite {
+			t.Fatalf("CLOUDFORGE_LITE=%q must enable lite mode (err=%v)", v, err)
+		}
+	}
+	t.Setenv("CLOUDFORGE_LITE", "tru")
+	if _, err := Load(); err == nil {
+		t.Fatal("CLOUDFORGE_LITE=tru must be rejected, not silently ignored")
+	}
+}
+
+func TestLoadModeFlag(t *testing.T) {
+	// CLOUDFORGE_MODE is the documented switch; full is the
+	// default, so existing behaviour does not change.
+	t.Setenv("CLOUDFORGE_MODE", "")
+	t.Setenv("CLOUDFORGE_LITE", "")
+	cfg, err := Load()
+	if err != nil || cfg.Lite {
+		t.Fatalf("default mode must be full (lite off): %+v %v", cfg, err)
+	}
+	t.Setenv("CLOUDFORGE_MODE", "full")
+	cfg, err = Load()
+	if err != nil || cfg.Lite {
+		t.Fatalf("MODE=full must be full mode: %+v %v", cfg, err)
+	}
+	t.Setenv("CLOUDFORGE_MODE", "lite")
+	t.Setenv("CLOUDFORGE_LITE", "")
+	cfg, err = Load()
+	if err != nil || !cfg.Lite {
+		t.Fatalf("MODE=lite must enable lite mode: %+v %v", cfg, err)
+	}
+	t.Setenv("CLOUDFORGE_MODE", "medium")
+	if _, err := Load(); err == nil {
+		t.Fatal("MODE=medium must be rejected")
+	}
+	// Both switches set and disagreeing must fail fast, not
+	// silently pick one.
+	t.Setenv("CLOUDFORGE_MODE", "full")
+	t.Setenv("CLOUDFORGE_LITE", "true")
+	if _, err := Load(); err == nil {
+		t.Fatal("MODE=full + LITE=true must be rejected")
+	}
+	t.Setenv("CLOUDFORGE_MODE", "lite")
+	t.Setenv("CLOUDFORGE_LITE", "false")
+	if _, err := Load(); err == nil {
+		t.Fatal("MODE=lite + LITE=false must be rejected")
+	}
+	// Agreeing is fine.
+	t.Setenv("CLOUDFORGE_MODE", "lite")
+	t.Setenv("CLOUDFORGE_LITE", "true")
+	cfg, err = Load()
+	if err != nil || !cfg.Lite {
+		t.Fatalf("MODE=lite + LITE=true must enable lite mode: %+v %v", cfg, err)
+	}
+}
+
 func TestMain(m *testing.M) {
 	// Ensure tests do not leak env between cases (t.Setenv handles it).
 	os.Exit(m.Run())

@@ -935,3 +935,127 @@ change: `go test ./...` all backend packages passing.
 - User count in the live Postgres is 20 after cleanup (all
   throwaway E2E/metric-check users and labs deleted; no stray
   processes left running).
+
+## Lightweight mode (2026-11-21, after M9) — lite as an option alongside full
+
+The user asked for a lightweight mode for education. Lite is an
+ADDITION, not a replacement: full/heavy mode is unchanged
+(`make up` / `docker-compose.yml` — Prometheus, Grafana, MinIO,
+KVM VMs, Terraform containers, real netlink, all M9 features).
+`docker-compose.yml` was not edited (mtime 2026-11-21 18:08,
+before this work; still 8 services, `NET_ADMIN` only on the
+engine, no limits added). `make up` still resolves to the full
+file; `make up-lite` is the new lite entry point.
+
+### Files created
+
+- `deployments/compose/docker-compose.light.yml` — standalone
+  compose file (not an override): frontend, api, **worker** (the
+  full file defines no worker service; lite runs one so labs
+  actually provision), network-engine (SIMULATED, no
+  capabilities), postgres, redis. No prometheus/grafana/minio/
+  emulator. Per-service `deploy.resources.limits`: api 256 MiB /
+  0.5 CPU, worker 128 MiB / 0.25, engine 128 MiB / 0.25, frontend
+  128 MiB / 0.25, postgres 512 MiB / 0.5, redis 128 MiB / 0.25 —
+  1,280 MiB total. Postgres low-memory command
+  (shared_buffers=64MB, work_mem=4MB, maintenance_work_mem=64MB,
+  max_connections=20, effective_cache_size=256MB). Redis
+  `--appendonly no --maxmemory 128mb --maxmemory-policy
+  allkeys-lru`. Lite-specific volumes/networks
+  (`cloudforge_lite_*`) so lite and full keep separate databases.
+- `docs/operations/lightweight.md` — mode table, resource table
+  with the reason for each limit, measured memory, what is
+  disabled/changed vs full, run instructions, honest caveats.
+
+### Files changed
+
+- `backend/internal/quota/quota.go` — `MaxLabMinutes` on
+  `Limits` (wins over `MaxLabHours` when > 0; both zero =
+  unlimited), `LiteMaxLabMinutes = 30`, `LiteLimits(role)`
+  (learner 1 lab / 1 CPU / 1024 MiB / 8 GB / 30 min; instructor
+  2 / 1 / 1024 / 8 / 60; admin 3 / 2 / 2048 / 16 / 120),
+  `LimitsFor(role, lite)`, `CapAt(cap)`, `DurationMinutes()`;
+  `CheckLabDuration` now reports minutes.
+- `backend/internal/quota/quota_test.go` — `TestLiteLimits`,
+  `TestLimitsCapAt`.
+- `backend/internal/store/store.go`, `postgres_quotas.go`,
+  `memory.go` — `QuotaSet.MaxLabMinutes` threaded through.
+- `backend/migrations/007_lite_lab_minutes.sql` — adds
+  `quotas.max_lab_minutes` (default 0 = hour-based behaviour, so
+  full mode is unchanged for existing rows).
+- `backend/internal/config/config.go` — `Lite bool`,
+  `CLOUDFORGE_LITE` (1/0, true/false, yes/no, on/off; anything
+  else is a startup error) and **`CLOUDFORGE_MODE=lite|full`**
+  (default full). Both switches accepted; setting them to
+  different modes, or an unknown mode, fails startup. Tests:
+  `TestLoadLiteFlag`, `TestLoadModeFlag`.
+- `backend/internal/httpapi/` — `Deps`/`Server` gain `Lite`;
+  `roleLimits` caps stored rows at `LiteLimits` when lite (so a
+  DB seeded with full defaults is still capped); `PUT /admin/
+  quotas` accepts `max_lab_minutes` (0–10080); `/api/v1/health`
+  reports `"lite"`. Test `TestLiteModeCapsQuotas` (60-min lab →
+  429, 30-min lab allowed, second lab → 429).
+- `backend/cmd/api/main.go` — in lite mode, upserts lite limits
+  for every role at startup and logs it.
+- `Makefile` — `up-lite`, `down-lite`, `logs-lite`, `ps-lite`
+  (`COMPOSE_LITE`, lite file); `up`/`down`/`logs`/`ps` unchanged
+  (full file). `make -n` verified both resolve correctly.
+- `.env.example` — `CLOUDFORGE_MODE=full` (default) with the lite
+  explanation; `CLOUDFORGE_LITE=true` noted as an alias.
+- `backend/README.md` — env rows for `CLOUDFORGE_MODE` /
+  `CLOUDFORGE_LITE`.
+- `README.md` — "Choose a mode first: Lite or Full" table at the
+  top of "How to run"; `make up-lite` documented next to
+  `make up`.
+
+### Verification (this sandbox, 2026-11-21, 4 CPU / 7.7 GiB)
+
+- `gofmt -l .` clean; `go vet ./...` clean.
+- `go test ./...` (backend): **all 19 packages pass** (incl.
+  `TestLiteLimits`, `TestLimitsCapAt`, `TestLoadLiteFlag`,
+  `TestLoadModeFlag`, `TestLiteModeCapsQuotas`).
+  Note: the full `httpapi` package run initially failed only
+  `TestAuthRateLimitTriggers`, `TestAPIRateLimitTriggers`,
+  `TestAuthRateLimitIsPerIP` with Redis connection-refused —
+  the sandbox VM had been replaced and the Postgres/Redis
+  server packages were gone (only client libs remained). This
+  was environmental, not caused by the lite changes: after
+  `apt-get install postgresql redis-server` and starting both,
+  all three pass.
+- Frontend: `npm run build` pass, **51/51 tests pass**,
+  `npm run lint` 0 warnings / 0 errors.
+- Lite compose file: YAML-parses; every service has the
+  documented limits; no `cap_add` anywhere. `docker compose
+  config` / `up` **not run — no Docker in this sandbox**.
+- Lite stack run live here (API + worker + Rust engine +
+  frontend dev server against Postgres 16.15 / Redis 7.0.15,
+  `CLOUDFORGE_MODE=lite`): health reports `"lite":true`,
+  engine `backend=SIMULATED`; migration 007 applied and lite
+  quota rows seeded (learner 1/1/1024/8/30 min); registered a
+  learner — `vpc-fundamentals` (60 min) → 429,
+  `ec2-basics` (30 min) → created, worker-provisioned to READY
+  in ~6 s, second lab → 429, destroy → 200; frontend served
+  HTTP 200 on :5173. All lite processes stopped afterwards.
+- Measured RSS (per-process, the reliable numbers): api ~90 MiB,
+  worker ~21 MiB, network-engine ~6 MiB, postgres (stock host
+  settings, not lite-tuned) ~144 MiB total, redis ~6 MiB,
+  vite dev server ~200 MiB (dev-only; Docker frontend is nginx).
+  Platform total excluding the dev server: **~267 MiB**.
+  `free -m` available fell 1,110 → 854 MiB, but the box was
+  already heavily loaded by other work, so that delta is noisy.
+
+### Honest limitations
+
+- `docker compose config` / `up` for the lite file never ran
+  (no Docker here); the file is YAML-valid and follows the full
+  file's structure, but it has never been booted by Docker.
+- Real container RSS under the cgroup limits was not measured.
+- Per-lab Micro memory (~0.5–1 GiB) is the profile's allocation,
+  not a live measurement (the lab ran with the simulated host
+  agent; no real container/VM started).
+- The 4 GB RAM minimum for lite is an extrapolation from the
+  ~267 MiB measured platform + ~1 GiB lab + ~1 GiB OS — it was
+  never run on a 4 GiB machine. Test on classroom hardware first.
+- Only 30-minute lab definitions work in lite (`ec2-basics`,
+  `iam-security`); `vpc-fundamentals` (60 min) and
+  `three-tier-app` (120 min) are refused with 429 in lite mode.

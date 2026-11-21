@@ -21,7 +21,7 @@ func NewPostgresQuotaStore(db *database.DB) *PostgresQuotaStore {
 	return &PostgresQuotaStore{db: db}
 }
 
-const quotaSelect = `SELECT role, max_labs, max_cpu, max_memory_mb, max_disk_gb, max_lab_hours, updated_at FROM quotas`
+const quotaSelect = `SELECT role, max_labs, max_cpu, max_memory_mb, max_disk_gb, max_lab_hours, max_lab_minutes, updated_at FROM quotas`
 
 func (p *PostgresQuotaStore) GetQuotas(ctx context.Context) ([]*QuotaSet, error) {
 	rows, err := p.db.Pool.Query(ctx, quotaSelect+` ORDER BY role`)
@@ -32,7 +32,7 @@ func (p *PostgresQuotaStore) GetQuotas(ctx context.Context) ([]*QuotaSet, error)
 	var out []*QuotaSet
 	for rows.Next() {
 		var q QuotaSet
-		if err := rows.Scan(&q.Role, &q.MaxLabs, &q.MaxCPU, &q.MaxMemoryMB, &q.MaxDiskGB, &q.MaxLabHours, &q.UpdatedAt); err != nil {
+		if err := rows.Scan(&q.Role, &q.MaxLabs, &q.MaxCPU, &q.MaxMemoryMB, &q.MaxDiskGB, &q.MaxLabHours, &q.MaxLabMinutes, &q.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, &q)
@@ -43,7 +43,7 @@ func (p *PostgresQuotaStore) GetQuotas(ctx context.Context) ([]*QuotaSet, error)
 func (p *PostgresQuotaStore) GetQuota(ctx context.Context, role string) (*QuotaSet, error) {
 	var q QuotaSet
 	err := p.db.Pool.QueryRow(ctx, quotaSelect+` WHERE role=$1`, role).
-		Scan(&q.Role, &q.MaxLabs, &q.MaxCPU, &q.MaxMemoryMB, &q.MaxDiskGB, &q.MaxLabHours, &q.UpdatedAt)
+		Scan(&q.Role, &q.MaxLabs, &q.MaxCPU, &q.MaxMemoryMB, &q.MaxDiskGB, &q.MaxLabHours, &q.MaxLabMinutes, &q.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -57,12 +57,12 @@ func (p *PostgresQuotaStore) UpsertQuota(ctx context.Context, q *QuotaSet) error
 	if q == nil || q.Role == "" {
 		return ErrInvalidInput
 	}
-	_, err := p.db.Pool.Exec(ctx, `INSERT INTO quotas (role, max_labs, max_cpu, max_memory_mb, max_disk_gb, max_lab_hours, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, now())
+	_, err := p.db.Pool.Exec(ctx, `INSERT INTO quotas (role, max_labs, max_cpu, max_memory_mb, max_disk_gb, max_lab_hours, max_lab_minutes, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 		ON CONFLICT (role) DO UPDATE SET max_labs=EXCLUDED.max_labs, max_cpu=EXCLUDED.max_cpu,
 			max_memory_mb=EXCLUDED.max_memory_mb, max_disk_gb=EXCLUDED.max_disk_gb,
-			max_lab_hours=EXCLUDED.max_lab_hours, updated_at=now()`,
-		q.Role, q.MaxLabs, q.MaxCPU, q.MaxMemoryMB, q.MaxDiskGB, q.MaxLabHours)
+			max_lab_hours=EXCLUDED.max_lab_hours, max_lab_minutes=EXCLUDED.max_lab_minutes, updated_at=now()`,
+		q.Role, q.MaxLabs, q.MaxCPU, q.MaxMemoryMB, q.MaxDiskGB, q.MaxLabHours, q.MaxLabMinutes)
 	return err
 }
 

@@ -1,0 +1,274 @@
+# CloudForge — LIGHTWEIGHT mode (classroom laptops).
+#
+# A complete, standalone compose file — NOT an override of
+# docker-compose.yml. Start it with `make up-lite` from the repo root
+# (or `docker compose -f docker-compose.light.yml up -d --build`
+# from this directory). It runs the same code as the full mode, but
+# trimmed for a 2–4 core / 4 GB RAM laptop:
+#
+#   Services: frontend, api, worker, network-engine, postgres, redis.
+#   NOT included: prometheus, grafana, minio, the AWS emulator, and
+#   any KVM/libvirt VM. Networking is the Rust engine's SIMULATED
+#   backend (no NET_ADMIN capability anywhere in this file), the
+#   host agent runs in simulated mode, and labs are containers-first
+#   (see docs/operations/lightweight.md). KVM VMs, Terraform
+#   containers and real netlink are full-mode features — use
+#   docker-compose.yml (`make up`) for those.
+#
+# Resource limits (deploy.resources.limits) — why each value:
+#   api            256 MiB / 0.50 CPU — Go control plane; the M9
+#                  binary idles at ~30–60 MiB RSS. 256 MiB leaves
+#                  headroom for request bursts and the JWT/Argon2id
+#                  login path without letting one process eat the
+#                  laptop.
+#   worker         128 MiB / 0.25 CPU — same binary, mostly idle
+#                  between job polls (2 s interval).
+#   network-engine 128 MiB / 0.25 CPU — Rust engine, simulated
+#                  backend holds topology state in memory only.
+#   frontend       128 MiB / 0.25 CPU — nginx serving static files.
+#   postgres       512 MiB / 0.50 CPU — the biggest consumer. The
+#                  command below also tunes Postgres itself down
+#                  (shared_buffers 64 MB, work_mem 4 MB,
+#                  maintenance_work_mem 64 MB, max_connections 20,
+#                  effective_cache_size 256 MB); stock Postgres
+#                  defaults assume a server and would happily use
+#                  far more shared memory on a small machine.
+#   redis          128 MiB / 0.25 CPU — cache + rate-limit counters
+#                  only (no durable data); --maxmemory 128mb with
+#                  allkeys-lru eviction and --appendonly no, so
+#                  Redis can never grow past its limit and never
+#                  writes an AOF file to disk.
+#   Platform total: 1,280 MiB limits / ~1.25 GiB, plus one Micro lab
+#   (~512 MiB–1 GiB). A 4 GiB laptop can run the platform + one lab;
+#   an 8 GiB laptop can run two labs. Limits are enforced by the
+#   Docker daemon (cgroups) — a runaway service is killed, it does
+#   not take the host down with it.
+#
+# Lite defaults (CLOUDFORGE_LITE=true / CLOUDFORGE_MODE=lite):
+#   learner 1 active lab, Micro profile only (1 vCPU / 1 GiB / 8 GB),
+#   30-minute labs. Enforced in code (quota.LiteLimits + the
+#   httpapi lite cap), not just by these compose settings — running
+#   the API with CLOUDFORGE_LITE=true outside Docker gives the same
+#   limits.
+#
+# Volumes use lite-specific names (cloudforge_lite_pgdata /
+# cloudforge_lite_redisdata) so lite and full mode keep separate
+# databases on the same host. Do NOT point both modes at the same
+# volume: the schema is the same, but the quota rows differ (lite
+# seeds 1-lab/Micro/30-min limits at startup).
+#
+# Pinned images only; no :latest anywhere (same policy as the full
+# compose file). Only the network-engine service in the FULL file
+# carries NET_ADMIN; this lite file carries no capabilities at all.
+
+services:
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    image: cloudforge-api:0.1.0
+    container_name: cloudforge-api-lite
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cloudforge}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-cloudforge}?sslmode=disable
+      REDIS_ADDR: redis:6379
+      NETWORK_ENGINE_ADDR: network-engine:50051
+      CLOUDFORGE_JWT_SECRET: ${CLOUDFORGE_JWT_SECRET:?set CLOUDFORGE_JWT_SECRET in .env}
+      CLOUDFORGE_LITE: "true"
+      CLOUDFORGE_MODE: lite
+      HOST_AGENT_MODE: simulated
+      API_PORT: "8080"
+    ports:
+      - "${API_PORT:-8080}:8080"
+    networks:
+      - frontend_net
+      - backend_net
+      - management_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.50"
+    healthcheck:
+      test: ["CMD", "/app/api", "--health-check"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  # The full compose file has no worker service (the worker binary
+  # ships in the api image but is not run by compose). Lite runs it:
+  # lab provisioning/destroy/expiry are worker jobs, and without a
+  # worker a lite lab would sit in CREATED forever.
+  worker:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    image: cloudforge-api:0.1.0
+    container_name: cloudforge-worker-lite
+    restart: unless-stopped
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cloudforge}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-cloudforge}?sslmode=disable
+      REDIS_ADDR: redis:6379
+      NETWORK_ENGINE_ADDR: network-engine:50051
+      CLOUDFORGE_JWT_SECRET: ${CLOUDFORGE_JWT_SECRET:?set CLOUDFORGE_JWT_SECRET in .env}
+      CLOUDFORGE_LITE: "true"
+      CLOUDFORGE_MODE: lite
+      HOST_AGENT_MODE: simulated
+    networks:
+      - backend_net
+      - management_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+
+  network-engine:
+    build:
+      context: ../..
+      dockerfile: rust-network-engine/Dockerfile
+    image: cloudforge-network-engine:0.1.0
+    container_name: cloudforge-network-engine-lite
+    restart: unless-stopped
+    # No cap_add here: the SIMULATED backend needs no privileges.
+    # (Full mode adds NET_ADMIN for the real netlink backend.)
+    environment:
+      NETWORK_ENGINE_ADDR: "0.0.0.0:50051"
+      NETWORK_ENGINE_BACKEND: simulated
+    ports:
+      - "50051:50051"
+    networks:
+      - management_net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/50051'"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    image: cloudforge-frontend:0.1.0
+    container_name: cloudforge-frontend-lite
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-80}:8080"
+    networks:
+      - frontend_net
+    depends_on:
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16.4
+    container_name: cloudforge-postgres-lite
+    restart: unless-stopped
+    # Low-memory Postgres tuning for a laptop. Stock defaults
+    # (shared_buffers 128 MB, work_mem 4 MB per sort, up to 100
+    # connections) are sized for a server; these keep the database
+    # small while still running all 7 migrations + the curriculum
+    # seed comfortably.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=64MB"
+      - "-c"
+      - "work_mem=4MB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      - "-c"
+      - "max_connections=20"
+      - "-c"
+      - "effective_cache_size=256MB"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cloudforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-cloudforge}
+    volumes:
+      - pgdata-lite:/var/lib/postgresql/data
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cloudforge} -d ${POSTGRES_DB:-cloudforge}"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  redis:
+    image: redis:7.4
+    container_name: cloudforge-redis-lite
+    restart: unless-stopped
+    # Cache + rate-limit counters only; nothing durable lives here.
+    # --appendonly no avoids disk writes; the 128 MB cap + LRU
+    # eviction match the container memory limit, so Redis cannot
+    # be OOM-killed for growing past it — it evicts instead.
+    command: ["redis-server", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata-lite:/data
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 5
+
+networks:
+  frontend_net:
+    name: cloudforge_lite_frontend_net
+  backend_net:
+    name: cloudforge_lite_backend_net
+    internal: true
+  management_net:
+    name: cloudforge_lite_management_net
+    internal: true
+
+volumes:
+  pgdata-lite:
+    name: cloudforge_lite_pgdata
+  redisdata-lite:
+    name: cloudforge_lite_redisdata

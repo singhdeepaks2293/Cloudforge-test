@@ -51,6 +51,12 @@ type Config struct {
 	AuthRateWindow time.Duration // auth window (default 5m)
 	APIRateLimit   int           // API requests per window per IP (default 300)
 	APIRateWindow  time.Duration // API window (default 1m)
+	// Lightweight mode (classroom laptops): CLOUDFORGE_LITE=true
+	// caps per-role quotas at quota.LiteLimits (learner: 1 lab,
+	// Micro profile only, 30 min), defaults the host agent to
+	// simulated (no KVM required), and is reported in /api/v1/health
+	// via the lite flag on the server. Full mode is unchanged.
+	Lite bool
 }
 
 // DefaultDatabaseURL is the local-dev Postgres DSN.
@@ -61,6 +67,24 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envBool parses a 1/0, true/false, yes/no, on/off flag; empty
+// means the default. Anything else is a startup error, so a typo
+// like CLOUDFORGE_LITE=tru cannot silently run the wrong mode.
+func envBool(key string, def bool) (bool, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid %s %q: must be 1/0, true/false, yes/no or on/off", key, v)
+	}
 }
 
 func envDuration(key string, def time.Duration) (time.Duration, error) {
@@ -144,6 +168,30 @@ func Load() (*Config, error) {
 	if addr == "" {
 		addr = ":" + envOr("PORT", "8080")
 	}
+	// Mode selection: CLOUDFORGE_MODE=lite|full (default full) is
+	// the documented switch; CLOUDFORGE_LITE=true is accepted as
+	// an alias for MODE=lite. If both are set and disagree, fail
+	// fast — silently picking one would run the wrong mode.
+	lite, err := envBool("CLOUDFORGE_LITE", false)
+	if err != nil {
+		return nil, err
+	}
+	liteSet := os.Getenv("CLOUDFORGE_LITE") != ""
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("CLOUDFORGE_MODE")))
+	switch mode {
+	case "", "full":
+		if mode == "full" && liteSet && lite {
+			return nil, fmt.Errorf("CLOUDFORGE_MODE=full conflicts with CLOUDFORGE_LITE=true: pick one mode")
+		}
+		// lite stays as CLOUDFORGE_LITE said.
+	case "lite":
+		if liteSet && !lite {
+			return nil, fmt.Errorf("CLOUDFORGE_MODE=lite conflicts with CLOUDFORGE_LITE=false: pick one mode")
+		}
+		lite = true
+	default:
+		return nil, fmt.Errorf("invalid CLOUDFORGE_MODE %q: must be lite or full", os.Getenv("CLOUDFORGE_MODE"))
+	}
 	// CURRICULUM_SEED defaults to on (dev default): only an
 	// explicit 0/false disables startup seeding.
 	curriculumSeed := true
@@ -186,6 +234,7 @@ func Load() (*Config, error) {
 		AuthRateWindow:       authRateWindow,
 		APIRateLimit:         apiRateLimit,
 		APIRateWindow:        apiRateWindow,
+		Lite:                 lite,
 	}, nil
 }
 
@@ -199,8 +248,8 @@ func (c *Config) String() string {
 	if c.HostAgentToken != "" {
 		hostAgentToken = "<set>"
 	}
-	return fmt.Sprintf("addr=%s worker_addr=%s database=%s redis=%s network_engine=%s jwt_secret=%s token_ttl=%s host_agent_mode=%s host_agent_addr=%s host_agent_token=%s minio=%s dynamodb=%s emulator=%s",
-		c.Addr, c.WorkerAddr, redactDSN(c.DatabaseURL), c.RedisAddr, c.NetworkEngineAddr, secret, c.TokenTTL, c.HostAgentMode, c.HostAgentAddr, hostAgentToken, c.MinIOEndpoint, c.DynamoDBEndpoint, c.EmulatorEndpoint)
+	return fmt.Sprintf("addr=%s worker_addr=%s database=%s redis=%s network_engine=%s jwt_secret=%s token_ttl=%s host_agent_mode=%s host_agent_addr=%s host_agent_token=%s minio=%s dynamodb=%s emulator=%s lite=%v",
+		c.Addr, c.WorkerAddr, redactDSN(c.DatabaseURL), c.RedisAddr, c.NetworkEngineAddr, secret, c.TokenTTL, c.HostAgentMode, c.HostAgentAddr, hostAgentToken, c.MinIOEndpoint, c.DynamoDBEndpoint, c.EmulatorEndpoint, c.Lite)
 }
 
 // redactDSN removes the password from a Postgres DSN for logging.

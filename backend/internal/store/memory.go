@@ -830,7 +830,8 @@ func NewMemoryQuotaStore() *MemoryQuotaStore {
 		m.quotas[role] = &QuotaSet{
 			Role: role, MaxLabs: l.MaxLabs, MaxCPU: l.MaxCPU,
 			MaxMemoryMB: l.MaxMemoryMB, MaxDiskGB: l.MaxDiskGB,
-			MaxLabHours: l.MaxLabHours, UpdatedAt: time.Now().UTC(),
+			MaxLabHours: l.MaxLabHours, MaxLabMinutes: l.MaxLabMinutes,
+			UpdatedAt: time.Now().UTC(),
 		}
 	}
 	return m

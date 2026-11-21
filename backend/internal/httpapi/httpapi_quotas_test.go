@@ -4,10 +4,74 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/cloudforge/cloudforge/backend/internal/auth"
+	"github.com/cloudforge/cloudforge/backend/internal/cache"
+	"github.com/cloudforge/cloudforge/backend/internal/labs"
+	"github.com/cloudforge/cloudforge/backend/internal/networkclient"
+	"github.com/cloudforge/cloudforge/backend/internal/providers"
+	"github.com/cloudforge/cloudforge/backend/internal/quota"
 	"github.com/cloudforge/cloudforge/backend/internal/store"
 )
+
+// Lightweight mode: a server built with Lite=true must enforce the
+// lite limits even though its quota store is seeded with the
+// full-mode defaults (3 labs / 4 CPU / 8 GiB / 50 GB / 8 h).
+func TestLiteModeCapsQuotas(t *testing.T) {
+	users := auth.NewStore("test-secret")
+	labStore := labs.NewStore()
+	labStore.ProvisionDelay = 5 * time.Millisecond
+	labStore.CheckNetwork = func() bool { return true }
+	srv := NewServerWithDeps(Deps{
+		Users: users, Labs: store.NewMemoryLabStore(labStore),
+		Courses: store.NewMemoryCourseStore(), Audit: store.NewMemoryAuditStore(),
+		Cache: &cache.Cache{}, Registry: providers.NewRegistry(),
+		Network: networkclient.New("127.0.0.1:1"), Logger: nil,
+		AdminEmail: "admin@example.com", Lite: true,
+	})
+	ts := httptest.NewServer(srv.Routes())
+	t.Cleanup(ts.Close)
+
+	// The stored row is the full default; roleLimits must cap it.
+	l := srv.roleLimits(context.Background(), "learner")
+	if l.MaxLabs != 1 || l.MaxCPU != 1 || l.MaxMemoryMB != 1024 ||
+		l.MaxDiskGB != 8 || l.DurationMinutes() != quota.LiteMaxLabMinutes {
+		t.Fatalf("lite roleLimits must cap full defaults at lite limits: %+v", l)
+	}
+
+	// /api/v1/health reports lite mode honestly.
+	if status, body := do(t, "GET", ts.URL+"/api/v1/health", "", nil); status != http.StatusOK {
+		t.Fatalf("health: got %d", status)
+	} else if body["lite"] != true {
+		t.Fatalf("health must report lite=true in lite mode: %v", body)
+	}
+
+	learnerToken := registerAs(t, ts, "learner@example.com")
+
+	// Duration: vpc-fundamentals is a 60 min lab, over the 30 min
+	// lite cap — refused before anything is provisioned.
+	if status, body := do(t, "POST", ts.URL+"/api/v1/labs", learnerToken, map[string]any{
+		"definition_id": "vpc-fundamentals", "name": "too-long",
+	}); status != http.StatusTooManyRequests {
+		t.Fatalf("60 min lab over the lite 30 min cap: got %d, want 429: %v", status, body)
+	}
+	// ec2-basics is a 30 min lab: allowed, and it fills the single
+	// lite lab slot.
+	if _, body := createLab(t, ts.URL, learnerToken, "ec2-basics"); body == nil {
+		t.Fatal("30 min lab must be allowed in lite mode")
+	}
+	// Count: a second lab is refused even though it is also 30 min.
+	if status, body := do(t, "POST", ts.URL+"/api/v1/labs", learnerToken, map[string]any{
+		"definition_id": "iam-security", "name": "second",
+	}); status != http.StatusTooManyRequests {
+		t.Fatalf("second lab over the lite 1-lab cap: got %d, want 429: %v", status, body)
+	} else if body["error"].(map[string]any)["code"] != "quota_exceeded" {
+		t.Fatalf("quota error must carry code quota_exceeded: %v", body)
+	}
+}
 
 func TestAdminQuotas(t *testing.T) {
 	srv, ts := m2Server(t)

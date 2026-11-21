@@ -203,6 +203,34 @@ architecture (see `docs/security/model.md`,
 
 ## How to run (Milestone 1)
 
+### Choose a mode first: Lite or Full
+
+CloudForge ships two modes. **Both are fully supported; lite is an
+addition, not a replacement.** Full mode is the default — if you
+ignore this section you get full mode.
+
+|  | **Lite — classroom laptop** | **Full — lab server (default)** |
+| --- | --- | --- |
+| Start with | `make up-lite` | `make up` |
+| Compose file | `deployments/compose/docker-compose.light.yml` | `deployments/compose/docker-compose.yml` |
+| Mode switch | `CLOUDFORGE_MODE=lite` in `.env` | `CLOUDFORGE_MODE=full` (default; unset = full) |
+| Hardware | 2–4 cores / 4 GB RAM / 20 GB disk | 8+ cores / 24–32 GB RAM / 250 GB SSD |
+| KVM needed? | **No** — simulated networking, containers-first | **Yes** — real VMs via KVM/libvirt |
+| Stack | api, worker, network-engine, postgres, redis | + Prometheus, Grafana, MinIO, AWS emulator |
+| Limits | api 256 MiB, worker 128 MiB, engine 128 MiB, frontend 128 MiB, postgres 512 MiB, redis 128 MiB (total ≈ 1.25 GiB) | none set (see `docs/operations/runbook.md`) |
+| Labs | 1 active lab / learner, Micro profile only, 30 min | up to the admin-configured quota (default 3 labs, 8 h) |
+| Monitoring | none (health endpoint only) | Prometheus `/metrics`, Grafana dashboards |
+| Terraform | containers only if Docker is present; no KVM VMs | Terraform containers + KVM VMs |
+
+**Lite is recommended for education** — a classroom laptop can run
+the platform plus one Micro lab. See
+[`docs/operations/lightweight.md`](docs/operations/lightweight.md)
+for the resource table, what is disabled vs full mode, measured
+memory, and step-by-step instructions. The minimum-hardware claim
+for lite (4 GB RAM) is an extrapolation from measurements on a
+7.7 GB machine, not a verified 4 GB run — test before a classroom
+rollout.
+
 ### 0. Check the host (Ubuntu 24.04 LTS target)
 
 ```bash
@@ -223,8 +251,14 @@ cp .env.example .env
 ### 2. Start the stack
 
 ```bash
+# Full mode (default):
+make up
+# Lightweight mode (classroom laptop):
+make up-lite
+# Or from deployments/compose directly:
 cd deployments/compose
 docker compose up --build -d
+docker compose -f docker-compose.light.yml up --build -d
 # Dev overrides (published postgres/redis ports, no restarts):
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 # Optional MinIO (S3 adapter, M5):

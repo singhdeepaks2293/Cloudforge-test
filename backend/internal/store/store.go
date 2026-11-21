@@ -168,13 +168,14 @@ type LabStore interface {
 // value means "no limit" except MaxLabs, where 0 means the built-in
 // default — see quota.Limits.
 type QuotaSet struct {
-	Role        string    `json:"role"`
-	MaxLabs     int       `json:"max_labs"`
-	MaxCPU      int       `json:"max_cpu"`
-	MaxMemoryMB int       `json:"max_memory_mb"`
-	MaxDiskGB   int       `json:"max_disk_gb"`
-	MaxLabHours int       `json:"max_lab_hours"`
-	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	Role          string    `json:"role"`
+	MaxLabs       int       `json:"max_labs"`
+	MaxCPU        int       `json:"max_cpu"`
+	MaxMemoryMB   int       `json:"max_memory_mb"`
+	MaxDiskGB     int       `json:"max_disk_gb"`
+	MaxLabHours   int       `json:"max_lab_hours"`
+	MaxLabMinutes int       `json:"max_lab_minutes"` // > 0 wins over MaxLabHours (migration 007; lite mode)
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
 // QuotaStore persists per-role quota sets. GetQuota returns

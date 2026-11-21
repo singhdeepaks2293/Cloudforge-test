@@ -107,6 +107,9 @@ type Deps struct {
 	// in-memory default (seeded with quota.DefaultLimits) in
 	// NewServerWithDeps.
 	Quotas store.QuotaStore
+	// Lightweight mode (CLOUDFORGE_LITE): role limits are capped
+	// at quota.LiteLimits (see roleLimits in quotas.go).
+	Lite bool
 	// Milestone 9, Part 3: cleanup reconciler. Nil means the
 	// handler builds a jobs.Service from this server's own
 	// stores/engine/host-agent on demand.
@@ -146,6 +149,7 @@ type Server struct {
 	APILimiter       *ratelimit.Limiter
 	Quotas           store.QuotaStore
 	Reconciler       jobs.Reconciler
+	Lite             bool // lightweight mode: cap role limits at quota.LiteLimits
 }
 
 // NewServer builds a Server from the M1 concrete stores (in-memory).
@@ -233,7 +237,7 @@ func NewServerWithDeps(d Deps) *Server {
 		Curriculum:  d.Curriculum, CurriculumDir: d.CurriculumDir,
 		DBHealth:    d.DBHealth,
 		AuthLimiter: d.AuthLimiter, APILimiter: d.APILimiter,
-		Quotas: d.Quotas, Reconciler: d.Reconciler,
+		Quotas: d.Quotas, Reconciler: d.Reconciler, Lite: d.Lite,
 	}
 }
 
@@ -636,6 +640,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"network_engine_tcp_detail": tcpDetail,
 		"database_connected":        s.DBConnected,
 		"redis_connected":           redisConnected,
+		"lite":                      s.Lite,
 		"host_agent":                s.hostAgentHealth(r),
 	})
 }

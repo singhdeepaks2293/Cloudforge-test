@@ -95,6 +95,8 @@ DATABASE_URL=postgres://cloudforge:cloudforge@localhost:5432/cloudforge?sslmode=
 | `CLOUDFORGE_AUTH_RATE_WINDOW` | `5m` | Auth rate-limit window |
 | `CLOUDFORGE_API_RATE_LIMIT` | `300` | General `/api/v1` requests per window per client IP (M9, fail-open on Redis error) |
 | `CLOUDFORGE_API_RATE_WINDOW` | `1m` | General API rate-limit window |
+| `CLOUDFORGE_MODE` | `full` | Mode switch: `lite` \| `full`. Lite = classroom laptop (see `docs/operations/lightweight.md`): caps quotas at 1 lab / Micro / 30 min for learners, simulated host agent, no KVM required. Full is the default and changes nothing. `CLOUDFORGE_LITE=true` is an alias for `MODE=lite`; setting both to different modes fails startup. |
+| `CLOUDFORGE_LITE` | _(unset)_ | Alias for `CLOUDFORGE_MODE=lite` (`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`). |
 | `CLOUDFORGE_ADMIN_EMAIL` | _(unset)_ | The first user registering with this email is promoted to `admin` (bootstrap) |
 | `WORKER_ADDR` | `:8081` | Worker listen address |
 | `WORKER_POLL_INTERVAL` | `2s` | Jobs poll interval |

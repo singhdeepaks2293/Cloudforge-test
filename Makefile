@@ -12,11 +12,18 @@
 # GOTOOLCHAIN=local keeps the build from downloading a toolchain.
 SHELL := /bin/bash
 COMPOSE := docker compose -f deployments/compose/docker-compose.yml
+# Lightweight mode (classroom laptops): a separate compose file with
+# the trimmed stack (no Prometheus/Grafana/MinIO, tuned-down
+# Postgres/Redis, simulated networking, no KVM). `make up` is always
+# the full mode; `make up-lite` is always lite. CLOUDFORGE_MODE in
+# .env (lite|full, default full) is the in-app switch — the Makefile
+# does not read it for `up`, so the two targets can never be confused.
+COMPOSE_LITE := docker compose -f deployments/compose/docker-compose.light.yml
 GO ?= $(shell command -v go 2>/dev/null || ls $(HOME)/go/pkg/mod/golang.org/toolchain@*/bin/go 2>/dev/null | sort | tail -n 1)
 CARGO ?= $(shell command -v cargo 2>/dev/null || echo $(HOME)/.cargo/bin/cargo)
 export GOTOOLCHAIN := local
 
-.PHONY: help proto backend-build backend-vet backend-test engine-build engine-test frontend-install frontend-build frontend-test frontend-lint verify up down logs ps fmt clean check-go check-docker
+.PHONY: help proto backend-build backend-vet backend-test engine-build engine-test frontend-install frontend-build frontend-test frontend-lint verify up down logs ps up-lite down-lite logs-lite ps-lite fmt clean check-go check-docker
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -63,7 +70,7 @@ frontend-lint: ## Lint the frontend
 
 verify: backend-vet backend-test engine-test frontend-build frontend-lint frontend-test ## Run every local check (no Docker needed)
 
-up: check-docker ## Build and start the full stack
+up: check-docker ## Build and start the full stack (full mode)
 	$(COMPOSE) up -d --build
 
 down: check-docker ## Stop the stack (volumes are kept)
@@ -74,6 +81,18 @@ logs: check-docker ## Follow stack logs
 
 ps: check-docker ## Show stack status
 	$(COMPOSE) ps
+
+up-lite: check-docker ## Build and start the lightweight stack (classroom laptops)
+	$(COMPOSE_LITE) up -d --build
+
+down-lite: check-docker ## Stop the lightweight stack (volumes are kept)
+	$(COMPOSE_LITE) down
+
+logs-lite: check-docker ## Follow lightweight stack logs
+	$(COMPOSE_LITE) logs -f
+
+ps-lite: check-docker ## Show lightweight stack status
+	$(COMPOSE_LITE) ps
 
 fmt: check-go ## Format Go and Rust sources
 	cd backend && $(GO)fmt -w .

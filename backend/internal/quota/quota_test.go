@@ -79,3 +79,53 @@ func TestLimitsCheckLabDuration(t *testing.T) {
 		t.Fatalf("zero MaxLabHours must mean unlimited: %v", err)
 	}
 }
+
+func TestLiteLimits(t *testing.T) {
+	learner := LiteLimits("learner")
+	if learner.MaxLabs != 1 || learner.MaxCPU != 1 || learner.MaxMemoryMB != 1024 ||
+		learner.MaxDiskGB != 8 || learner.MaxLabMinutes != LiteMaxLabMinutes {
+		t.Fatalf("lite learner limits: %+v", learner)
+	}
+	if LiteMaxLabMinutes != 30 {
+		t.Fatalf("lite lab duration must be 30 minutes, got %d", LiteMaxLabMinutes)
+	}
+	// The Micro profile (1 vCPU / 1 GiB / 8 GiB) is the only profile
+	// that fits the lite learner limits; Small (2 vCPU) must not.
+	if err := learner.CheckProfile(1, 1024, 8); err != nil {
+		t.Fatalf("micro profile must fit lite learner limits: %v", err)
+	}
+	if err := learner.CheckProfile(2, 2048, 16); err == nil {
+		t.Fatal("small profile must exceed lite learner limits")
+	}
+	// 30-minute labs: a 30 min lab fits, a 31 min lab does not.
+	if err := learner.CheckLabDuration(30); err != nil {
+		t.Fatalf("30 min must fit the lite cap: %v", err)
+	}
+	if err := learner.CheckLabDuration(31); err == nil {
+		t.Fatal("31 min must exceed the lite 30 min cap")
+	}
+	if got := LimitsFor("learner", true); got != learner {
+		t.Fatalf("LimitsFor(lite) must return lite limits: %+v", got)
+	}
+	if got := LimitsFor("learner", false); got != DefaultLimits("learner") {
+		t.Fatalf("LimitsFor(full) must return full defaults: %+v", got)
+	}
+}
+
+func TestLimitsCapAt(t *testing.T) {
+	full := DefaultLimits("learner") // 3 labs / 4 CPU / 8 GiB / 50 GB / 8 h
+	capped := full.CapAt(LiteLimits("learner"))
+	if capped.MaxLabs != 1 || capped.MaxCPU != 1 || capped.MaxMemoryMB != 1024 ||
+		capped.MaxDiskGB != 8 || capped.DurationMinutes() != 30 {
+		t.Fatalf("capping full learner limits at lite must give lite limits: %+v", capped)
+	}
+	// Capping must never raise a limit that is already below the cap.
+	small := Limits{MaxLabs: 1, MaxCPU: 1, MaxMemoryMB: 512, MaxDiskGB: 4, MaxLabMinutes: 15}
+	if got := small.CapAt(LiteLimits("learner")); got.MaxMemoryMB != 512 || got.DurationMinutes() != 15 {
+		t.Fatalf("cap must not raise already-smaller limits: %+v", got)
+	}
+	// An unlimited duration capped at lite becomes 30 minutes.
+	if got := (Limits{MaxLabHours: 0}).CapAt(LiteLimits("learner")); got.DurationMinutes() != 30 {
+		t.Fatalf("unlimited duration capped at lite must be 30 min: %+v", got)
+	}
+}
