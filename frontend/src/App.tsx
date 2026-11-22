@@ -26,7 +26,7 @@ import { BedrockConsole, SageMakerConsole } from './pages/MlConsoles.tsx'
 import { DataSyncConsole, DmsConsole, MigrationHubConsole, TransferConsole } from './pages/MigrationConsoles.tsx'
 import { ConfigConsole, GuardDutyConsole, InspectorConsole, KmsConsole, SecretsConsole, SecurityHubConsole, WafConsole } from './pages/SecurityConsoles.tsx'
 import { FlowLogsConsole, NetworkFirewallConsole, VpcEndpointsConsole, VpcPeeringConsole } from './pages/NetworkingConsoles.tsx'
-import { CostExplorerConsole, OrganizationsConsole, SsmConsole, TrustedAdvisorConsole } from './pages/ManagementConsoles.tsx'
+import { CostExplorerConsole, BudgetsConsole, OrganizationsConsole, SsmConsole, TrustedAdvisorConsole } from './pages/ManagementConsoles.tsx'
 import { CodeBuildConsole } from './pages/CodeBuildConsole.tsx'
 import { CodeDeployConsole } from './pages/CodeDeployConsole.tsx'
 import { CodePipelineConsole } from './pages/CodePipelineConsole.tsx'
@@ -38,7 +38,7 @@ import { Route53Console } from './pages/Route53Console.tsx'
 import { S3Console } from './pages/S3Console.tsx'
 import { SnsConsole } from './pages/SnsConsole.tsx'
 import { SqsConsole } from './pages/SqsConsole.tsx'
-import { LiteServiceConsole } from './pages/LiteServiceConsole.tsx'
+import { AuroraConsole, BackupConsole, MacieConsole, AuditManagerConsole, ArtifactConsole, CloudFrontConsole, EfsConsole, FsxConsole, ShieldConsole, ControlTowerConsole, IdentityCenterConsole, RamConsole, DirectConnectConsole, GlobalAcceleratorConsole, MgnConsole, ComputeOptimizerConsole, SavingsPlansConsole } from './pages/ExamServiceConsoles.tsx'
 import { TerraformLearning } from './pages/TerraformLearning.tsx'
 import { Advanced } from './pages/Advanced.tsx'
 import { AdvancedJobReady } from './pages/AdvancedJobReady.tsx'
@@ -77,6 +77,7 @@ export default function App() {
             <Route path="services/ec2" element={<Ec2Console initialSection="home" />} />
             <Route path="services/s3" element={<S3Console initialSection="buckets" />} />  // survey: S3 lands on the Buckets list, not a dashboard
             <Route path="services/vpc" element={<VpcConsole />} />
+            <Route path="services/nacl" element={<Navigate to="/services/vpc?section=nacls" replace />} />  // survey 2026-11-22: Network ACLs is the VPC console's Security section
             <Route path="services/iam" element={<IamConsole initialSection="roles" />} />  // survey: IAM lands on Roles
             <Route path="services/cloudwatch" element={<CloudWatchConsole />} />
             <Route path="services/cloudtrail" element={<CloudTrailConsole initialSection="home" />} />
@@ -126,30 +127,30 @@ export default function App() {
             <Route path="services/ssm" element={<SsmConsole />} />
             <Route path="services/trustedadvisor" element={<TrustedAdvisorConsole initialSection="home" />} />
             <Route path="services/costexplorer" element={<CostExplorerConsole initialSection="home" />} />
+            <Route path="services/budgets" element={<BudgetsConsole />} />  // survey 2026-11-22: Budgets is the Billing console's Budgets tab — same table as in Cost Explorer
             <Route path="services/organizations" element={<OrganizationsConsole initialSection="home" />} />
-            {/* v3 lite exam set — generic services with no dedicated console
-                get the full Home + list + detail treatment in
-                LiteServiceConsole (honest UNSUPPORTED, no faked actions). */}
+            {/* v3.2 lite exam set — the 17 formerly generic services now
+                have dedicated consoles in ExamServiceConsoles.tsx. */}
             <Route path="services/autoscaling" element={<Navigate to="/services/ec2?section=autoscaling" replace />} />  // survey 2026-11-22: Auto Scaling is the EC2 console's Auto Scaling section
-            <Route path="services/aurora" element={<LiteServiceConsole />} />
-            <Route path="services/backup" element={<LiteServiceConsole />} />
-            <Route path="services/macie" element={<LiteServiceConsole />} />
-            <Route path="services/auditmanager" element={<LiteServiceConsole />} />
-            <Route path="services/artifact" element={<LiteServiceConsole />} />
-            <Route path="services/cloudfront" element={<LiteServiceConsole />} />
+            <Route path="services/aurora" element={<AuroraConsole />} />
+            <Route path="services/backup" element={<BackupConsole />} />
+            <Route path="services/macie" element={<MacieConsole />} />
+            <Route path="services/auditmanager" element={<AuditManagerConsole />} />
+            <Route path="services/artifact" element={<ArtifactConsole />} />
+            <Route path="services/cloudfront" element={<CloudFrontConsole />} />
             <Route path="services/ebs" element={<Navigate to="/services/ec2?section=volumes" replace />} />  // survey 2026-11-22: EBS is the EC2 console's Elastic Block Store section
-            <Route path="services/efs" element={<LiteServiceConsole />} />
-            <Route path="services/fsx" element={<LiteServiceConsole />} />
-            <Route path="services/shield" element={<LiteServiceConsole />} />
-            <Route path="services/controltower" element={<LiteServiceConsole />} />
-            <Route path="services/identitycenter" element={<LiteServiceConsole />} />
-            <Route path="services/ram" element={<LiteServiceConsole />} />
+            <Route path="services/efs" element={<EfsConsole />} />
+            <Route path="services/fsx" element={<FsxConsole />} />
+            <Route path="services/shield" element={<ShieldConsole />} />
+            <Route path="services/controltower" element={<ControlTowerConsole />} />
+            <Route path="services/identitycenter" element={<IdentityCenterConsole />} />
+            <Route path="services/ram" element={<RamConsole />} />
             <Route path="services/vpn" element={<Navigate to="/services/vpc?section=vpn" replace />} />  // survey 2026-11-22: VPN is a VPC console section
-            <Route path="services/directconnect" element={<LiteServiceConsole />} />
-            <Route path="services/globalaccelerator" element={<LiteServiceConsole />} />
-            <Route path="services/mgn" element={<LiteServiceConsole />} />
-            <Route path="services/computeoptimizer" element={<LiteServiceConsole />} />
-            <Route path="services/savingsplans" element={<LiteServiceConsole />} />
+            <Route path="services/directconnect" element={<DirectConnectConsole />} />
+            <Route path="services/globalaccelerator" element={<GlobalAcceleratorConsole />} />
+            <Route path="services/mgn" element={<MgnConsole />} />
+            <Route path="services/computeoptimizer" element={<ComputeOptimizerConsole />} />
+            <Route path="services/savingsplans" element={<SavingsPlansConsole />} />
             <Route path="services/fargate" element={<EcsConsole initialSection="home" />} />
             <Route path="terraform-learning" element={<TerraformLearning />} />
             <Route path="services/terraform-learning" element={<TerraformLearning />} />

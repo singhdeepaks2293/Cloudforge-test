@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { AwsCard } from '../components/AwsCard.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
@@ -45,6 +45,21 @@ import type { S3Bucket, S3Object } from '../types/index.ts'
  * browser→MinIO credentials). Versioning is a real toggle where the
  * adapter supports it; object ACLs are NOT exposed by minio-go and
  * the tab says so. MinIO down is an honest 503.
+ *
+ * Second half of the AWS S3 left nav (2026-11-22 survey): Files,
+ * Access Grants, IAM Access Analyzer, Storage Lens and Storage
+ * management and insights are sections of their own. The survey
+ * records each nav item only — no table columns and no detail tabs
+ * were recorded for any of them, so no AWS columns are claimed here.
+ * Files / Access Grants / Analyzer / Storage Lens are honest
+ * UNSUPPORTED empty states (no backend API exists for any of them);
+ * Storage management and insights is a PARTIAL real table of per-bucket
+ * management state (versioning is real; replication/lifecycle/
+ * inventory honestly have no API). Access Points, Object Lambda
+ * access points, Batch operations and Replication have no backend
+ * operation either (see backend/internal/httpapi/httpapi.go — the S3
+ * routes are buckets, objects, versioning and policy only), so they
+ * stay disabled in the nav with the reason shown under the label.
  */
 const CREATE_STEPS = ['General configuration', 'Ownership', 'Block Public Access', 'Versioning', 'Summary']
 
@@ -102,7 +117,12 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
       subNav={[
         { id: 'home', label: 'S3 dashboard' },
         { id: 'buckets', label: 'Buckets' },
-        { id: 'access-points', label: 'Access points', disabledReason: 'Not supported by the local adapter' },
+        { id: 'files', label: 'Files' },
+        { id: 'access-points', label: 'Access points', group: 'Access management and security', disabledReason: 'Not supported by the local adapter' },
+        { id: 'access-grants', label: 'Access Grants', group: 'Access management and security' },
+        { id: 'analyzer', label: 'IAM Access Analyzer', group: 'Access management and security' },
+        { id: 'storage-management', label: 'Storage management and insights' },
+        { id: 'storage-lens', label: 'Storage Lens' },
         { id: 'object-lambda', label: 'Object Lambda access points', disabledReason: 'Not modelled' },
         { id: 'batch', label: 'Batch operations', disabledReason: 'Not modelled' },
         { id: 'bpa', label: 'Block Public Access settings' },
@@ -385,6 +405,141 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
               </div>
             </AwsCard>
           )}
+        </div>
+      )}
+
+      {activeSub === 'files' && (
+        <div className="space-y-4">
+          <AwsCard title="File systems">
+            <p className="text-sm text-aws-muted">
+              Files is <strong>UNSUPPORTED</strong> in CloudForge — the local MinIO adapter exposes buckets and
+              objects only. There is no S3 file-system endpoint: no file system exists, nothing can be mounted, and
+              the backend implements no file-system API. The 2026-11-22 survey records &ldquo;Files (File
+              systems)&rdquo; as an S3 left-nav item only — no table columns were recorded, so no table is shown
+              here and no file system is invented.
+            </p>
+            <div className="mt-3">
+              <AwsButton disabled title="Files is UNSUPPORTED — no file-system API.">
+                Create file system
+              </AwsButton>
+            </div>
+          </AwsCard>
+          <AwsCard title="What you can do instead">
+            <ul className="space-y-1 text-sm">
+              <li>
+                <Link to="/services/efs" className="text-aws-link hover:underline">EFS</Link>
+                <span className="text-aws-muted"> — file systems recorded as teaching records (no real NFS mount).</span>
+              </li>
+              <li>
+                <Link to="/services/fsx" className="text-aws-link hover:underline">FSx</Link>
+                <span className="text-aws-muted"> — file systems recorded as teaching records (no real volume exists).</span>
+              </li>
+              <li>
+                <button type="button" className="text-aws-link hover:underline" onClick={() => setActiveSub('buckets')}>
+                  Buckets
+                </button>
+                <span className="text-aws-muted"> — objects in local MinIO buckets are the real storage in this deployment.</span>
+              </li>
+            </ul>
+          </AwsCard>
+        </div>
+      )}
+
+      {activeSub === 'access-grants' && (
+        <div className="space-y-4">
+          <AwsCard title="Access Grants">
+            <p className="text-sm text-aws-muted">
+              Access Grants is <strong>UNSUPPORTED</strong> in CloudForge — the backend has no access-grants API.
+              No grant exists, no grant can be created, and grants do not change access to any bucket. The
+              2026-11-22 survey records &ldquo;Access Grants&rdquo; as an S3 left-nav item only — no table columns
+              were recorded, so no grant list is shown here and no grant is invented.
+            </p>
+            <div className="mt-3">
+              <AwsButton disabled title="Access Grants is UNSUPPORTED — no access-grants API.">
+                Create access grant
+              </AwsButton>
+            </div>
+          </AwsCard>
+          <AwsCard title="How bucket access works here instead">
+            <ul className="list-disc space-y-1 pl-5 text-sm text-aws-muted">
+              <li>Bucket policies are per-bucket, on each bucket&apos;s Permissions tab (real MinIO operation).</li>
+              <li>The backend enforces authentication on every object request; there is no public bucket endpoint.</li>
+              <li>
+                Identities are managed in the{' '}
+                <Link to="/services/iam" className="text-aws-link hover:underline">IAM console</Link>.
+              </li>
+            </ul>
+          </AwsCard>
+        </div>
+      )}
+
+      {activeSub === 'analyzer' && (
+        <div className="space-y-4">
+          <AwsCard title="IAM Access Analyzer">
+            <p className="text-sm text-aws-muted">
+              IAM Access Analyzer is <strong>UNSUPPORTED</strong> in CloudForge — no analyzer runs in this
+              deployment and no findings exist. The Buckets table&apos;s IAM Access Analyzer column is always
+              &ldquo;Not available&rdquo; for the same reason. The 2026-11-22 survey records &ldquo;IAM Access
+              Analyzer&rdquo; as an S3 left-nav item only — no findings table was recorded, so no findings are
+              shown here and none are invented.
+            </p>
+            <div className="mt-3">
+              <AwsButton disabled title="IAM Access Analyzer is UNSUPPORTED — no analyzer runs.">
+                Create analyzer
+              </AwsButton>
+            </div>
+          </AwsCard>
+          <AwsCard title="What you can check instead">
+            <ul className="list-disc space-y-1 pl-5 text-sm text-aws-muted">
+              <li>
+                Each bucket&apos;s policy is visible on its{' '}
+                <button type="button" className="text-aws-link hover:underline" onClick={() => setActiveSub('buckets')}>
+                  Buckets
+                </button>{' '}
+                detail Permissions tab — review it for public access.
+              </li>
+              <li>
+                The{' '}
+                <Link to="/services/securityhub" className="text-aws-link hover:underline">Security Hub console</Link>{' '}
+                lists findings from real checks, including public S3 bucket policies.
+              </li>
+            </ul>
+          </AwsCard>
+        </div>
+      )}
+
+      {activeSub === 'storage-management' && <StorageManagementSection />}
+
+      {activeSub === 'storage-lens' && (
+        <div className="space-y-4">
+          <AwsCard title="Storage Lens">
+            <p className="text-sm text-aws-muted">
+              Storage Lens is <strong>UNSUPPORTED</strong> in CloudForge — there is no metrics pipeline for bucket
+              storage in this deployment, so no Storage Lens dashboard can be built and no storage metrics are
+              collected. The 2026-11-22 survey records &ldquo;Storage Lens&rdquo; as an S3 left-nav item only — no
+              dashboard layout was recorded, so no dashboard is shown here and no metrics are invented.
+            </p>
+            <div className="mt-3">
+              <AwsButton disabled title="Storage Lens is UNSUPPORTED — no storage-metrics pipeline.">
+                Create dashboard
+              </AwsButton>
+            </div>
+          </AwsCard>
+          <AwsCard title="What you can check instead">
+            <ul className="list-disc space-y-1 pl-5 text-sm text-aws-muted">
+              <li>
+                Per-bucket object counts and sizes are on each bucket&apos;s{' '}
+                <button type="button" className="text-aws-link hover:underline" onClick={() => setActiveSub('buckets')}>
+                  Buckets
+                </button>{' '}
+                detail Objects tab.
+              </li>
+              <li>
+                Control-plane metrics are on the{' '}
+                <Link to="/services/cloudwatch" className="text-aws-link hover:underline">CloudWatch console</Link>.
+              </li>
+            </ul>
+          </AwsCard>
         </div>
       )}
 
@@ -678,6 +833,71 @@ function ManagementTab({ bucket }: { bucket: string }) {
       <p className="text-aws-muted">
         No replication or lifecycle rules: MinIO defaults apply and there is no lifecycle API in this deployment.
       </p>
+    </div>
+  )
+}
+
+/**
+ * Storage management and insights — PARTIAL. A real per-bucket table:
+ * versioning is a real backend read per bucket; replication, lifecycle
+ * and inventory honestly have no API, so those columns say so instead
+ * of inventing rules. The survey records this nav item only — no AWS
+ * columns were recorded, so these columns are CloudForge's own and are
+ * not claimed to match AWS.
+ */
+function StorageManagementSection() {
+  const queryClient = useQueryClient()
+  const buckets = useQuery({ queryKey: ['s3-buckets'], queryFn: fetchS3Buckets, retry: 1 })
+  const rows = (buckets.data ?? []).map((b) => ({ ...b, id: b.name }))
+  const versioning = useQueries({
+    queries: rows.map((b) => ({
+      queryKey: ['s3-versioning', b.name],
+      queryFn: () => fetchS3Versioning(b.name),
+      retry: 1,
+    })),
+  })
+  const versioningByBucket = new Map(rows.map((b, i) => [b.name, versioning[i]]))
+  return (
+    <div className="space-y-4">
+      <AwsCard title="Storage management and insights">
+        <p className="mb-3 text-sm text-aws-muted">
+          Management state per bucket. Versioning is real (read from the backend per bucket; toggle it on the
+          bucket&apos;s Properties tab). Replication, lifecycle rules and inventory have no API in this deployment,
+          so those columns say so — no rules are invented.
+        </p>
+        <AwsToolbar
+          right={<AwsRefreshButton onClick={() => void queryClient.invalidateQueries({ queryKey: ['s3-buckets'] })} busy={buckets.isFetching} />}
+        >
+          <span className="text-sm text-aws-muted">PARTIAL — versioning real; replication / lifecycle / inventory not available.</span>
+        </AwsToolbar>
+        {buckets.isPending && <Loading label="Loading buckets" />}
+        {buckets.isError && (
+          <ErrorBox message={`Bucket management state could not be loaded (${buckets.error.message}).`} />
+        )}
+        {buckets.data && (
+          <AwsTable<S3Bucket & { id: string }>
+            caption="Bucket storage management"
+            emptyMessage="No buckets yet — management state is listed per bucket once one exists."
+            rows={rows}
+            totalCount={rows.length}
+            columns={[
+              { header: 'Bucket', render: (b) => b.name },
+              {
+                header: 'Versioning',
+                render: (b) => {
+                  const v = versioningByBucket.get(b.name)
+                  if (v?.isPending) return 'Loading…'
+                  if (v?.isError) return 'Not available'
+                  return v?.data ? 'Enabled' : 'Suspended'
+                },
+              },
+              { header: 'Replication rules', render: () => 'None — no replication API' },
+              { header: 'Lifecycle rules', render: () => 'None — no lifecycle API' },
+              { header: 'Inventory', render: () => 'Not available — no inventory' },
+            ]}
+          />
+        )}
+      </AwsCard>
     </div>
   )
 }

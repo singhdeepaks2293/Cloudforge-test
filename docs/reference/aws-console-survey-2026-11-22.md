@@ -344,19 +344,48 @@ its console home path returned Page Not Found (that path was a guess, not
 an observed link) and was not pursued. No layout captured. Use public
 console documentation as the reference when building it later.
 
-## Not yet checked
+## DataSync — CHECKED 2026-11-22 (retry, fresh browser session)
 
-### DataSync — NOT YET CHECKED
-Last remaining service when the browser became unavailable (repeated
-"chrome_unavailable" read failures, tab still on Console Home). No
-DataSync page was reached. Retry in a fresh browser session; do not
-assume its layout.
+DataSync loaded normally and was not restricted or unsupported.
+Left nav, in order: Dashboard (with a "New" badge), Task executions,
+Tasks, Locations, Agents. Panel headed "DataSync".
+
+Landing page (#/getStarted): "Welcome to AWS DataSync", action buttons
+Create task / Create location / Create agent, "Your DataSync tasks"
+(No tasks found), three cards (Transfer data between storage systems,
+Copy data between AWS Regions, Transfer data using object tags), How it
+works (Create locations, Create tasks, Execute tasks), Additional
+resources. No table on landing page.
+
+Dashboard (#/dashboard): Create task button; Service overview tiles
+(Tasks 0, Locations 0, Agents 0, Data throughput 0 B/s); Task executions
+table; Total transferred by task table (Task, Data transferred, Files
+transferred); Task execution status chart (No data available).
+
+Task executions table: checkbox, Execution ID, Start time, Duration,
+Status, Data throughput, File throughput, Task, Mode. Buttons Edit /
+Stop (disabled with nothing selected), Find task executions search,
+Preferences, pagination.
+
+Tasks table: checkbox, Task ID, Name, Status, Mode, Schedule, Source,
+Destination, Created. Buttons Actions (disabled), Create task.
+
+Locations table: checkbox, Location ID, Host, Path, Type, Created,
+Tasks, Agents. Buttons Delete (disabled), Create location.
+
+Agents table: checkbox, Agent ID, Name, Service endpoint, Status,
+Created, Tasks. Buttons Edit / Delete (disabled), Create agent; status
+filter dropdown (Any status).
+
+Detail tabs: none observed — all four tables were empty (0 rows), so no
+row could be opened and no detail-tab set was visible. Do not infer
+detail-tab names from this survey.
 
 ## Coverage
 
-45 of 46 services checked (all 29 lite services, 16 of 17 backup
+46 of 46 services checked (all 29 lite services, all 17 backup
 services, counting restricted / not-accessible ones as checked with the
-outcome above). Only DataSync remains unchecked.
+outcome above). Nothing remains unchecked.
 
 ## Survey applied (Workstream 1b, 2026-11-22)
 

@@ -220,19 +220,22 @@ function costBreakdown(lines: Record<string, unknown>[]): (Record<string, unknow
  * / Budgets screens. Costs are computed from real usage at
  * published teaching rates and are labelled educational estimates,
  * never an AWS bill.
+ *
+ * The Budgets table lives here and is shared with the standalone
+ * Budgets console (BudgetsConsole below, route /services/budgets):
+ * one table, one component, so the two URLs never drift apart.
+ * Survey columns: Name, Thresholds, Budget, Amount used, Forecasted
+ * amount ("Not available" — no forecasting), Current vs. budgeted,
+ * Forecasted vs. budgeted.
  */
-export function CostExplorerConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
+export function BudgetsListContent() {
   const queryClient = useQueryClient()
   const [budgetName, setBudgetName] = useState('')
   const [budgetLimit, setBudgetLimit] = useState(10)
   const [notice, setNotice] = useState('')
-  const costs = useQuery({ queryKey: ['costs'], queryFn: () => request<Rec>('/api/v1/aws/costexplorer/costs'), retry: 1 })
   const budgets = useQuery({ queryKey: ['cost-budgets'], queryFn: () => request<Rec>('/api/v1/aws/costexplorer/budgets'), retry: 1 })
   const budgetRows = listOf(budgets.data, 'budgets')
-  const lines = Array.isArray(costs.data?.lines) ? (costs.data?.lines as Record<string, unknown>[]) : []
-  const pricing = (costs.data?.pricing ?? {}) as Record<string, unknown>
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ['costs'] })
     void queryClient.invalidateQueries({ queryKey: ['cost-budgets'] })
   }
   const create = useMutation({
@@ -245,6 +248,74 @@ export function CostExplorerConsole({ initialSection }: { initialSection?: 'home
     onSuccess: () => { setNotice('Budget deleted.'); refresh() },
     onError: (e: Error) => setNotice(`Delete failed: ${e.message}`),
   })
+  return (
+    <>
+      <Notice text={notice} />
+      {budgets.isPending && <Loading label="Loading budgets" />}
+      {budgets.isError && <ErrorBox message={`Budgets could not be loaded (${budgets.error.message}).`} />}
+      <AwsCard title="Budgets">
+        <form
+          className="mb-3 flex flex-wrap items-center gap-2"
+          onSubmit={(e) => { e.preventDefault(); if (budgetName.trim() !== '') create.mutate() }}
+        >
+          <input value={budgetName} onChange={(e) => setBudgetName(e.target.value)} placeholder="Budget name" className={inputCls} />
+          <label className="text-sm">
+            Limit (USD)
+            <input type="number" min={0} step={0.01} value={budgetLimit} onChange={(e) => setBudgetLimit(Number(e.target.value))} className={`ml-2 w-24 ${inputCls}`} />
+          </label>
+          <AwsButton variant="primary" type="submit">Create budget</AwsButton>
+        </form>
+        <AwsTable
+          columns={[
+            { header: 'Name', render: (r) => str(r, 'name') },
+            { header: 'Thresholds', render: (r) => (r.alert === true ? 'ALERT — cost has reached 100% of budget' : 'Alert at 100% of budget') },
+            { header: 'Budget', render: (r) => `$${Number(r.limit_usd ?? 0).toFixed(2)}` },
+            { header: 'Amount used', render: (r) => `$${Number(r.current_cost_usd ?? 0).toFixed(4)}` },
+            { header: 'Forecasted amount', render: () => <span title="CloudForge does not forecast costs">Not available</span> },
+            { header: 'Current vs. budgeted', render: (r) => `${Number(r.usage_percent ?? 0).toFixed(1)}% of budget` },
+            { header: 'Forecasted vs. budgeted', render: () => <span title="CloudForge does not forecast costs">Not available</span> },
+            {
+              header: 'Actions',
+              render: (r) => <AwsButton onClick={() => del.mutate(str(r, 'id'))}>Delete</AwsButton>,
+            },
+          ]}
+          rows={budgetRows}
+          emptyMessage="No budgets yet."
+        />
+        <p className="mt-2 text-xs text-aws-muted">Alert state is evaluated on every read against the current real cost.</p>
+      </AwsCard>
+    </>
+  )
+}
+
+/**
+ * Budgets console — the Billing console's Budgets tab as its own
+ * route (/services/budgets, 2026-11-22 survey: Budgets / Reports
+ * tabs, Create budget button, the 8-column table). It renders the
+ * same BudgetsListContent as Cost Explorer, so /services/budgets
+ * and Cost Explorer show the same table, not two different pages.
+ */
+export function BudgetsConsole() {
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Management', to: '/services' }, { label: 'Budgets' }]}
+        title="Budgets"
+        description="Budgets evaluated against the real cost model on every read. This is the Billing console's Budgets table — the same table shown inside Cost Explorer."
+        actions={<FidelityBadge fidelity="PARTIAL" footnote="evaluated on every read · no forecasting · no email alerts" />}
+      />
+      <BudgetsListContent />
+    </div>
+  )
+}
+
+export function CostExplorerConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
+  const queryClient = useQueryClient()
+  const costs = useQuery({ queryKey: ['costs'], queryFn: () => request<Rec>('/api/v1/aws/costexplorer/costs'), retry: 1 })
+  const budgets = useQuery({ queryKey: ['cost-budgets'], queryFn: () => request<Rec>('/api/v1/aws/costexplorer/budgets'), retry: 1 })
+  const budgetRows = listOf(budgets.data, 'budgets')
+  const lines = Array.isArray(costs.data?.lines) ? (costs.data?.lines as Record<string, unknown>[]) : []
+  const pricing = (costs.data?.pricing ?? {}) as Record<string, unknown>
   return (
     <ConsoleWithHome
       icon="layers"
@@ -281,13 +352,12 @@ export function CostExplorerConsole({ initialSection }: { initialSection?: 'home
             ]}
             info={[
               { label: 'Learning Center — monitoring track', to: '/learn' },
-            { label: 'Budgets (this console)', to: '/services/costexplorer' },
+            { label: 'Budgets', to: '/services/budgets' },
             { label: 'Savings Plans (unsupported — exam concept)', to: '/services/savingsplans' },
             ]}
           />
         )}
     >
-      <Notice text={notice} />
       {costs.isPending && <Loading label="Loading costs" />}
       {costs.isError && <ErrorBox message={`Costs could not be loaded (${costs.error.message}).`} />}
       {costs.data && (
@@ -339,37 +409,7 @@ export function CostExplorerConsole({ initialSection }: { initialSection?: 'home
           )}
         </AwsCard>
       )}
-      <AwsCard title="Budgets">
-        <form
-          className="mb-3 flex flex-wrap items-center gap-2"
-          onSubmit={(e) => { e.preventDefault(); if (budgetName.trim() !== '') create.mutate() }}
-        >
-          <input value={budgetName} onChange={(e) => setBudgetName(e.target.value)} placeholder="Budget name" className={inputCls} />
-          <label className="text-sm">
-            Limit (USD)
-            <input type="number" min={0} step={0.01} value={budgetLimit} onChange={(e) => setBudgetLimit(Number(e.target.value))} className={`ml-2 w-24 ${inputCls}`} />
-          </label>
-          <AwsButton variant="primary" type="submit">Create budget</AwsButton>
-        </form>
-        <AwsTable
-          columns={[
-            { header: 'Name', render: (r) => str(r, 'name') },
-            { header: 'Thresholds', render: (r) => (r.alert === true ? 'ALERT — cost has reached 100% of budget' : 'Alert at 100% of budget') },
-            { header: 'Budget', render: (r) => `$${Number(r.limit_usd ?? 0).toFixed(2)}` },
-            { header: 'Amount used', render: (r) => `$${Number(r.current_cost_usd ?? 0).toFixed(4)}` },
-            { header: 'Forecasted amount', render: () => <span title="CloudForge does not forecast costs">Not available</span> },
-            { header: 'Current vs. budgeted', render: (r) => `${Number(r.usage_percent ?? 0).toFixed(1)}% of budget` },
-            { header: 'Forecasted vs. budgeted', render: () => <span title="CloudForge does not forecast costs">Not available</span> },
-            {
-              header: 'Actions',
-              render: (r) => <AwsButton onClick={() => del.mutate(str(r, 'id'))}>Delete</AwsButton>,
-            },
-          ]}
-          rows={budgetRows}
-          emptyMessage="No budgets yet."
-        />
-        <p className="mt-2 text-xs text-aws-muted">Alert state is evaluated on every read against the current real cost.</p>
-      </AwsCard>
+      <BudgetsListContent />
     </ConsoleWithHome>
   )
 }

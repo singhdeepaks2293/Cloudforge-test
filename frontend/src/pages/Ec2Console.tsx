@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AwsCard } from '../components/AwsCard.tsx'
@@ -42,6 +43,17 @@ import type { Lab, LabResource } from '../types/index.ts'
  * filters, detail tabs Details / Security / Networking / Storage /
  * Monitoring / Status Checks / Logs / Tags / Events, and a multi-step
  * Launch instance wizard.
+ *
+ * The long tail of the AWS EC2 left nav (2026-11-22 survey) is covered
+ * too: Spot Requests, Reserved Instances, Dedicated Hosts, Capacity
+ * Reservations, AMI Catalog, Public Images, Placement Groups, Key
+ * Pairs and Network Interfaces are honest UNSUPPORTED empty states —
+ * the survey records those pages' names but no list columns, so no
+ * table with invented columns is shown. Launch Templates, Snapshots,
+ * Lifecycle Manager, Elastic IPs and Trust Stores render real sections
+ * of the same kind instead of label-only disabled nav items. Savings
+ * Plans, Systems Manager and Account settings are links to their real
+ * pages, not tabs.
  *
  * Instances here are lab sessions: a lab IS the instance, and its
  * instance-kind lab resources are the VMs inside it. Nothing is faked:
@@ -193,17 +205,30 @@ export function Ec2Console({ initialSection }: { initialSection?: string }) {
         { id: 'home', label: 'EC2 dashboard' },
         { id: 'instances', label: 'Instances' },
         { id: 'instance-types', label: 'Instance types' },
-        { id: 'launch-templates', label: 'Launch templates', disabledReason: 'Not modelled' },
-        { id: 'amis', label: 'AMIs' },
+        { id: 'launch-templates', label: 'Launch templates' },
+        { id: 'spot-requests', label: 'Spot Requests' },
+        { id: 'savings-plans', label: 'Savings Plans', to: '/services/savingsplans' },
+        { id: 'reserved-instances', label: 'Reserved Instances' },
+        { id: 'dedicated-hosts', label: 'Dedicated Hosts' },
+        { id: 'capacity-reservations', label: 'Capacity Reservations' },
+        { id: 'amis', label: 'AMIs', group: 'Images' },
+        { id: 'ami-catalog', label: 'AMI Catalog', group: 'Images' },
+        { id: 'ebs-snapshots', label: 'EBS Snapshots', group: 'Images' },
+        { id: 'public-images', label: 'Public Images', group: 'Images' },
         { id: 'volumes', label: 'Volumes', group: 'Elastic Block Store' },
-        { id: 'snapshots', label: 'Snapshots', group: 'Elastic Block Store', disabledReason: 'EBS unsupported — no snapshot API' },
-        { id: 'lifecycle', label: 'Lifecycle Manager', group: 'Elastic Block Store', disabledReason: 'EBS unsupported — no lifecycle API' },
+        { id: 'snapshots', label: 'Snapshots', group: 'Elastic Block Store' },
+        { id: 'lifecycle', label: 'Lifecycle Manager', group: 'Elastic Block Store' },
         { id: 'security-groups', label: 'Security groups', group: 'Network & Security' },
-        { id: 'elastic-ips', label: 'Elastic IPs', group: 'Network & Security', disabledReason: 'No Elastic IP operation' },
+        { id: 'elastic-ips', label: 'Elastic IPs', group: 'Network & Security' },
+        { id: 'placement-groups', label: 'Placement Groups', group: 'Network & Security' },
+        { id: 'key-pairs', label: 'Key Pairs', group: 'Network & Security' },
+        { id: 'network-interfaces', label: 'Network Interfaces', group: 'Network & Security' },
         { id: 'load-balancers', label: 'Load Balancers', group: 'Load Balancing' },
         { id: 'target-groups', label: 'Target Groups', group: 'Load Balancing' },
-        { id: 'trust-stores', label: 'Trust Stores', group: 'Load Balancing', disabledReason: 'Not modelled' },
+        { id: 'trust-stores', label: 'Trust Stores', group: 'Load Balancing' },
         { id: 'autoscaling', label: 'Auto Scaling Groups', group: 'Auto Scaling' },
+        { id: 'systems-manager', label: 'Systems Manager', to: '/services/ssm' },
+        { id: 'account-settings', label: 'Account settings', to: '/account' },
       ]}
       activeSub={activeSub}
       onSubChange={setActiveSub}
@@ -233,9 +258,9 @@ export function Ec2Console({ initialSection }: { initialSection?: string }) {
             { label: 'Volumes', count: 0, onSelect: () => setActiveSub('volumes'), note: 'EBS is UNSUPPORTED — no volume API; see the Volumes section.' },
             { label: 'Load Balancers', count: '—', onSelect: () => setActiveSub('load-balancers'), note: 'SIMULATED round-robin with real health probes' },
             { label: 'Auto Scaling Groups', count: 0, onSelect: () => setActiveSub('autoscaling'), note: 'Auto Scaling is UNSUPPORTED — no scaling API.' },
-            { label: 'Elastic IPs', count: 0, disabledReason: 'No Elastic IP operation.' },
+            { label: 'Elastic IPs', count: 0, onSelect: () => setActiveSub('elastic-ips'), note: 'No Elastic IP operation — see the Elastic IPs section.' },
             { label: 'Security Groups', count: '—', to: '/services/vpc', note: 'Managed on the VPC console' },
-            { label: 'Launch Templates', count: 0, disabledReason: 'Not modelled.' },
+            { label: 'Launch Templates', count: 0, onSelect: () => setActiveSub('launch-templates'), note: 'Launch templates are UNSUPPORTED — not modelled.' },
           ]}
           onRefresh={refresh}
           refreshing={instances.isFetching}
@@ -748,7 +773,216 @@ export function Ec2Console({ initialSection }: { initialSection?: string }) {
           </AwsCard>
         </div>
       )}
+
+      {activeSub === 'launch-templates' && (
+        <EmptySection title="Launch Templates" createLabel="Create launch template">
+          <p className="text-sm text-aws-muted">
+            Launch templates are <strong>UNSUPPORTED</strong> in CloudForge — they are not modelled and there is no
+            template API. Launching is done directly from the Instances page, where the lab definition plays the
+            template&apos;s role (image + instance type + network).
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'spot-requests' && (
+        <EmptySection title="Spot Requests" createLabel="Request Spot Instances">
+          <p className="text-sm text-aws-muted">
+            Spot Requests are <strong>UNSUPPORTED</strong> in CloudForge — there is no spot market, no spot pricing
+            and no bidding API. Labs are fixed lab sessions launched on demand; nothing here can be interrupted or
+            reclaimed the way Spot capacity can.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'reserved-instances' && (
+        <EmptySection title="Reserved Instances" createLabel="Purchase Reserved Instances">
+          <p className="text-sm text-aws-muted">
+            Reserved Instances are <strong>UNSUPPORTED</strong> in CloudForge — there is no reservation or billing
+            API and no usage billing to reserve against. Cost is reported only as teaching-rate lines on the Cost
+            Explorer console.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'dedicated-hosts' && (
+        <EmptySection title="Dedicated Hosts" createLabel="Allocate host">
+          <p className="text-sm text-aws-muted">
+            Dedicated Hosts are <strong>UNSUPPORTED</strong> in CloudForge — there is no host-allocation API. Labs
+            share the local host (or the simulated engine); no host can be reserved for one tenant.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'capacity-reservations' && (
+        <EmptySection title="Capacity Reservations" createLabel="Create Capacity Reservation">
+          <p className="text-sm text-aws-muted">
+            Capacity Reservations are <strong>UNSUPPORTED</strong> in CloudForge — there is no capacity-reservation
+            API. Capacity is the local host and, in lite mode, the one-lab quota; it cannot be reserved ahead of
+            time.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'ami-catalog' && (
+        <EmptySection
+          title="AMI Catalog"
+          instead={[{ label: 'AMIs — the lab definitions CloudForge can launch', onSelect: () => setActiveSub('amis'), note: 'the only launchable images' }]}
+        >
+          <p className="text-sm text-aws-muted">
+            The AMI Catalog is <strong>UNSUPPORTED</strong> in CloudForge — there is no public catalog of
+            AWS-published images and no AWS image is ever queried. The only images that exist here are the lab
+            definitions listed on the AMIs page.
+          </p>
+        </EmptySection>
+      )}
+
+      {(activeSub === 'snapshots' || activeSub === 'ebs-snapshots') && (
+        <EmptySection title="Snapshots">
+          <p className="text-sm text-aws-muted">
+            Snapshots are <strong>UNSUPPORTED</strong> in CloudForge — EBS is unsupported, so there is no snapshot
+            API and no snapshot can exist. The survey lists this list twice (EBS Snapshots under Images, Snapshots
+            under Elastic Block Store); it is one list, shown here from either nav item.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'public-images' && (
+        <EmptySection
+          title="Public Images"
+          instead={[{ label: 'AMIs — the lab definitions CloudForge can launch', onSelect: () => setActiveSub('amis'), note: 'no public or shared images exist' }]}
+        >
+          <p className="text-sm text-aws-muted">
+            Public Images are <strong>UNSUPPORTED</strong> in CloudForge — there are no public or shared images.
+            Only the lab definitions on the AMIs page can be launched.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'lifecycle' && (
+        <EmptySection title="Lifecycle Manager">
+          <p className="text-sm text-aws-muted">
+            Lifecycle Manager is <strong>UNSUPPORTED</strong> in CloudForge — there is no lifecycle-policy API.
+            There are no EBS volumes or snapshots for a policy to manage, so no policy can exist.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'elastic-ips' && (
+        <EmptySection
+          title="Elastic IPs"
+          instead={[{ label: 'VPC console', to: '/services/vpc', note: 'Elastic IPs are not modelled there either — see its disabled nav item' }]}
+        >
+          <p className="text-sm text-aws-muted">
+            Elastic IPs are <strong>UNSUPPORTED</strong> in CloudForge — there is no Elastic IP operation: no
+            allocate, associate, or release API, and labs get their addresses from the lab definition&apos;s own
+            networking. No address can exist to list.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'placement-groups' && (
+        <EmptySection title="Placement Groups" createLabel="Create placement group">
+          <p className="text-sm text-aws-muted">
+            Placement Groups are <strong>UNSUPPORTED</strong> in CloudForge — there is no placement-group API and
+            no placement strategy (cluster / spread / partition) is modelled. The engine places a lab&apos;s VMs;
+            that placement is not configurable.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'key-pairs' && (
+        <EmptySection title="Key Pairs" createLabel="Create key pair">
+          <p className="text-sm text-aws-muted">
+            Key Pairs are <strong>UNSUPPORTED</strong> in CloudForge — there is no key-pair API and no SSH key
+            injection into lab VMs. Connect to a lab through its workstation terminal instead of SSH.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'network-interfaces' && (
+        <EmptySection
+          title="Network Interfaces"
+          instead={[{ label: 'Instances — open an instance, then its Networking tab', onSelect: () => setActiveSub('instances'), note: 'a lab\u2019s networking resources are listed there' }]}
+        >
+          <p className="text-sm text-aws-muted">
+            Network Interfaces are <strong>UNSUPPORTED</strong> in CloudForge — there is no network-interface (ENI)
+            API and no ENI resource is modelled. A lab&apos;s networking exists only as its VPC, subnets and
+            gateways, listed on the instance&apos;s Networking tab.
+          </p>
+        </EmptySection>
+      )}
+
+      {activeSub === 'trust-stores' && (
+        <EmptySection
+          title="Trust Stores"
+          instead={[{ label: 'Load Balancers', onSelect: () => setActiveSub('load-balancers'), note: 'SIMULATED round-robin with real health probes' }]}
+        >
+          <p className="text-sm text-aws-muted">
+            Trust Stores are <strong>UNSUPPORTED</strong> in CloudForge — they are not modelled and there is no
+            trust-store API. The load balancer&apos;s listeners are simulated in-process, so there is no TLS trust
+            material to store.
+          </p>
+        </EmptySection>
+      )}
     </ServiceConsole>
+  )
+}
+
+/**
+ * Honest empty state for an EC2 nav page CloudForge does not build.
+ * The 2026-11-22 survey records these pages' names in the EC2 left nav
+ * but no list columns for any of them, so no table is rendered — a
+ * table with invented columns would be a fake list. The Create button,
+ * where AWS has one, is disabled with the reason.
+ */
+function EmptySection({
+  title,
+  createLabel,
+  instead,
+  children,
+}: {
+  title: string
+  createLabel?: string
+  instead?: { label: string; to?: string; onSelect?: () => void; note?: string }[]
+  children: ReactNode
+}) {
+  return (
+    <div className="space-y-4">
+      <AwsCard title={`${title} (0)`}>
+        {children}
+        <p className="mt-2 text-xs text-aws-muted">
+          The 2026-11-22 survey records this page&apos;s name in the EC2 left nav but no list columns, so no table
+          is shown here — an empty table with invented columns would be a fake list.
+        </p>
+        {createLabel !== undefined && (
+          <div className="mt-3">
+            <AwsButton disabled title={`${title} is UNSUPPORTED in CloudForge — no API.`}>
+              {createLabel}
+            </AwsButton>
+          </div>
+        )}
+      </AwsCard>
+      {instead !== undefined && instead.length > 0 && (
+        <AwsCard title="What you can do instead">
+          <ul className="space-y-1 text-sm">
+            {instead.map((l) => (
+              <li key={l.label}>
+                {l.to !== undefined ? (
+                  <Link to={l.to} className="text-aws-link hover:underline">
+                    {l.label}
+                  </Link>
+                ) : (
+                  <button type="button" onClick={l.onSelect} className="text-aws-link hover:underline">
+                    {l.label}
+                  </button>
+                )}
+                {l.note !== undefined && <span className="text-aws-muted"> — {l.note}</span>}
+              </li>
+            ))}
+          </ul>
+        </AwsCard>
+      )}
+    </div>
   )
 }
 

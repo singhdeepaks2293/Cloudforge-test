@@ -39,6 +39,17 @@ import type {
   IamSessionCreated,
   IamUser,
 } from '../types/index.ts'
+import {
+  POLICY_SERVICES,
+  SAMPLE_VISUAL_STATEMENTS,
+  blankStatement,
+  documentToVisual,
+  serviceById,
+  visualToDocument,
+  visualToJson,
+  visualValidationErrors,
+} from '../services/iamPolicyEditor.ts'
+import type { VisualStatement } from '../services/iamPolicyEditor.ts'
 
 /**
  * IAM console (Phase 2) — mirrors the AWS IAM console's left nav:
@@ -745,16 +756,58 @@ function PoliciesSection() {
   const { policies } = useIamData()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [doc, setDoc] = useState(SAMPLE_POLICY)
+  const [tab, setTab] = useState<'visual' | 'json'>('visual')
+  const [statements, setStatements] = useState<VisualStatement[]>(() => {
+    const parsed = documentToVisual(SAMPLE_POLICY)
+    return parsed.statements ?? SAMPLE_VISUAL_STATEMENTS
+  })
+  const [jsonText, setJsonText] = useState(SAMPLE_POLICY)
+  // Reasons the current JSON cannot be shown visually (empty = representable).
+  const [visualUnsupported, setVisualUnsupported] = useState<string[]>([])
+  const [jsonError, setJsonError] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const visualErrors = visualValidationErrors(statements)
+  const visualDisabled = jsonError !== null || visualUnsupported.length > 0
+
+  const analyseJson = (text: string) => {
+    const result = documentToVisual(text)
+    setJsonError(result.jsonError)
+    setVisualUnsupported(result.unsupported)
+    return result
+  }
+  const switchToJson = () => {
+    const generated = visualToJson(statements)
+    setJsonText(generated)
+    setJsonError(null)
+    setVisualUnsupported([])
+    setTab('json')
+  }
+  const switchToVisual = () => {
+    const result = analyseJson(jsonText)
+    if (result.statements) {
+      setStatements(result.statements)
+      setTab('visual')
+    }
+    // Otherwise the JSON stays exactly as typed and the Visual tab
+    // stays disabled; the warning names the unsupported feature.
+  }
+  const updateStatement = (index: number, patch: Partial<VisualStatement>) => {
+    setStatements((prev) => prev.map((st, i) => (i === index ? { ...st, ...patch } : st)))
+  }
   const create = useMutation({
     mutationFn: () => {
       let parsed: unknown
-      try {
-        parsed = JSON.parse(doc)
-      } catch {
-        throw new Error('Policy document is not valid JSON.')
+      if (tab === 'visual') {
+        const errors = visualValidationErrors(statements)
+        if (errors.length > 0) throw new Error(errors[0])
+        parsed = visualToDocument(statements)
+      } else {
+        try {
+          parsed = JSON.parse(jsonText)
+        } catch {
+          throw new Error('Policy document is not valid JSON.')
+        }
       }
       return createIamPolicy(name.trim(), parsed, description.trim() === '' ? undefined : description.trim())
     },
@@ -762,6 +815,12 @@ function PoliciesSection() {
       setNotice('Policy created — the backend validated and probe-evaluated it before storing.')
       setName('')
       setDescription('')
+      const parsed = documentToVisual(SAMPLE_POLICY)
+      setStatements(parsed.statements ?? SAMPLE_VISUAL_STATEMENTS)
+      setJsonText(SAMPLE_POLICY)
+      setJsonError(null)
+      setVisualUnsupported([])
+      setTab('visual')
       void queryClient.invalidateQueries({ queryKey: ['iam-policies'] })
     },
     onError: (e: Error) => setNotice(`Create failed: ${e.message}`),
@@ -793,13 +852,151 @@ function PoliciesSection() {
             <label htmlFor="iam-policy-desc" className="text-sm font-medium">Description</label>
             <input id="iam-policy-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
           </div>
-          <div>
-            <label htmlFor="iam-policy-doc" className="mb-1 block text-sm font-medium">
-              Policy document (JSON — validated before storage; unsupported features are rejected, never stored)
-            </label>
-            <textarea id="iam-policy-doc" value={doc} onChange={(e) => setDoc(e.target.value)} rows={12} className="w-full rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 font-mono text-xs focus:border-aws-link focus:outline-none" />
+          <div className="flex gap-2 text-sm" role="tablist" aria-label="Policy editor mode">
+            <button type="button" role="tab" aria-selected={tab === 'visual'} disabled={visualDisabled && tab === 'json'} title={visualDisabled ? 'The current JSON uses features the visual editor cannot show — fix it on the JSON tab first.' : undefined} onClick={() => { if (tab === 'json') switchToVisual(); else setTab('visual') }} className={`border-b-2 px-2 py-1 font-medium ${tab === 'visual' ? 'border-aws-orange text-aws-orange-dark' : 'border-transparent text-aws-muted'} ${visualDisabled && tab === 'json' ? 'cursor-not-allowed opacity-50' : ''}`}>Visual</button>
+            <button type="button" role="tab" aria-selected={tab === 'json'} onClick={switchToJson} className={`border-b-2 px-2 py-1 font-medium ${tab === 'json' ? 'border-aws-orange text-aws-orange-dark' : 'border-transparent text-aws-muted'}`}>JSON</button>
           </div>
-          <AwsButton type="submit" disabled={name.trim() === ''}>Create policy</AwsButton>
+          {tab === 'visual' && (
+            <div className="space-y-3">
+              <p className="text-sm text-aws-muted">
+                Build the policy with pickers. Only what the backend accepts is offered: Allow/Deny, actions per
+                service, resources, and a StringEquals condition on aws:username. The JSON preview below is what
+                will be sent to the backend.
+              </p>
+              {statements.map((st, i) => {
+                const service = serviceById(st.service)
+                const known = service?.actions ?? []
+                const extraActions = st.actions.filter((a) => !known.some((k) => k.toLowerCase() === a.toLowerCase()))
+                const allActions = st.customAction.trim() !== '' && st.customAction.trim().toLowerCase() === `${st.service.toLowerCase()}:*`
+                return (
+                  <div key={i} className="space-y-3 rounded-sm border border-aws-border bg-white p-3">
+                    <div className="flex items-center justify-between">
+                      <strong className="text-sm">Statement {i + 1}</strong>
+                      <AwsButton disabled={statements.length <= 1} onClick={() => setStatements((prev) => prev.filter((_, j) => j !== i))}>Remove statement</AwsButton>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <label className="text-sm">
+                        Effect
+                        <select value={st.effect} onChange={(e) => updateStatement(i, { effect: e.target.value as VisualStatement['effect'] })} className="ml-2 rounded-sm border border-aws-border-dark px-2 py-1 text-sm">
+                          <option value="Allow">Allow</option>
+                          <option value="Deny">Deny</option>
+                        </select>
+                      </label>
+                      <label className="text-sm">
+                        Service
+                        <select
+                          value={st.service}
+                          onChange={(e) => updateStatement(i, { service: e.target.value, actions: [], customAction: '' })}
+                          className="ml-2 rounded-sm border border-aws-border-dark px-2 py-1 text-sm"
+                        >
+                          {!service && <option value={st.service}>{st.service} (custom)</option>}
+                          {POLICY_SERVICES.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                        </select>
+                      </label>
+                    </div>
+                    <div>
+                      <span className="text-sm font-medium">Actions</span>
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                        <label className="text-sm">
+                          <input
+                            type="checkbox"
+                            checked={allActions}
+                            onChange={(e) => updateStatement(i, { customAction: e.target.checked ? `${st.service}:*` : '', actions: e.target.checked ? [] : st.actions })}
+                            className="mr-1"
+                          />
+                          All actions ({st.service}:*)
+                        </label>
+                        {known.map((action) => (
+                          <label key={action} className="text-sm">
+                            <input
+                              type="checkbox"
+                              checked={st.actions.some((a) => a.toLowerCase() === action.toLowerCase())}
+                              disabled={allActions}
+                              onChange={(e) => updateStatement(i, { actions: e.target.checked ? [...st.actions, action] : st.actions.filter((a) => a.toLowerCase() !== action.toLowerCase()) })}
+                              className="mr-1"
+                            />
+                            {action}
+                          </label>
+                        ))}
+                      </div>
+                      {extraActions.length > 0 && (
+                        <p className="mt-1 text-sm">
+                          Also included:{' '}
+                          {extraActions.map((a) => (
+                            <span key={a} className="mr-1 inline-flex items-center rounded-sm bg-[#f2f3f3] px-1.5 py-0.5 font-mono text-xs">
+                              {a}
+                              <button type="button" aria-label={`Remove ${a}`} onClick={() => updateStatement(i, { actions: st.actions.filter((x) => x !== a) })} className="ml-1 text-aws-link hover:underline">×</button>
+                            </span>
+                          ))}
+                        </p>
+                      )}
+                      <label className="mt-2 block text-sm">
+                        Custom action (e.g. {st.service}:* or {st.service}:GetBucketAcl)
+                        <input value={st.customAction} onChange={(e) => updateStatement(i, { customAction: e.target.value })} placeholder={`${st.service}:*`} className="ml-2 rounded-sm border border-aws-border-dark px-2 py-1 font-mono text-sm" />
+                      </label>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium" htmlFor={`iam-policy-resource-${i}`}>Resource</label>
+                      <input id={`iam-policy-resource-${i}`} value={st.resources} onChange={(e) => updateStatement(i, { resources: e.target.value })} placeholder="* — comma-separated for several resources" className="ml-2 w-full max-w-md rounded-sm border border-aws-border-dark px-2 py-1 font-mono text-sm sm:w-auto" />
+                      {(service?.resourcePatterns ?? ['*']).length > 1 && (
+                        <span className="ml-2 text-sm text-aws-muted">
+                          Try:{' '}
+                          {service?.resourcePatterns.filter((p) => p !== '*').map((p) => (
+                            <button key={p} type="button" onClick={() => updateStatement(i, { resources: p })} className="mr-1 font-mono text-xs text-aws-link hover:underline">{p}</button>
+                          ))}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium" htmlFor={`iam-policy-username-${i}`}>Condition — username (optional)</label>
+                      <input id={`iam-policy-username-${i}`} value={st.username} onChange={(e) => updateStatement(i, { username: e.target.value })} placeholder="ada" className="ml-2 rounded-sm border border-aws-border-dark px-2 py-1 text-sm" />
+                      <p className="mt-1 text-sm text-aws-muted">
+                        Only StringEquals on aws:username is evaluated by the backend — no other condition
+                        operators or keys.
+                      </p>
+                    </div>
+                  </div>
+                )
+              })}
+              <AwsButton onClick={() => setStatements((prev) => [...prev, blankStatement()])}>Add statement</AwsButton>
+              {visualErrors.length > 0 && (
+                <ul className="list-disc space-y-1 border border-aws-border bg-white px-4 py-2 text-sm text-red-800" role="alert">
+                  {visualErrors.map((err) => (<li key={err}>{err}</li>))}
+                </ul>
+              )}
+              <div>
+                <span className="mb-1 block text-sm font-medium">JSON preview</span>
+                <pre className="overflow-x-auto rounded-sm bg-[#f2f3f3] p-3 font-mono text-xs">{visualToJson(statements)}</pre>
+              </div>
+            </div>
+          )}
+          {tab === 'json' && (
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="iam-policy-doc" className="mb-1 block text-sm font-medium">
+                  Policy document (JSON — validated in the browser, then by the backend before storage; unsupported features are rejected, never stored)
+                </label>
+                <textarea id="iam-policy-doc" value={jsonText} onChange={(e) => { setJsonText(e.target.value); analyseJson(e.target.value) }} rows={12} className="w-full rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 font-mono text-xs focus:border-aws-link focus:outline-none" />
+              </div>
+              {jsonError !== null && (
+                <p className="border border-aws-border bg-white px-4 py-2 text-sm text-red-800" role="alert">Not valid JSON: {jsonError}</p>
+              )}
+              {visualUnsupported.length > 0 && (
+                <div className="border border-aws-border bg-white px-4 py-2 text-sm" role="alert">
+                  <p className="font-medium">This policy cannot be shown in the visual editor:</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {visualUnsupported.map((reason) => (<li key={reason}>{reason}</li>))}
+                  </ul>
+                  <p className="mt-1 text-aws-muted">
+                    Your JSON is kept as-is — the Visual tab stays disabled until the JSON only uses features the
+                    visual editor supports. You can still create the policy from JSON; the backend will reject it
+                    if it uses features it does not support.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          <AwsButton type="submit" disabled={name.trim() === '' || (tab === 'visual' && visualErrors.length > 0) || (tab === 'json' && jsonError !== null)}>Create policy</AwsButton>
         </form>
       </AwsCard>
       {policies.isPending && <Loading label="Loading IAM policies" />}

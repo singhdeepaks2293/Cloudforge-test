@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { fetchIamGroups, fetchIamPolicies, fetchIamRoles, fetchIamUsers, fetchS3Buckets, request } from '../services/api.ts'
+import { fetchIamGroups, fetchIamPolicies, fetchIamRoles, fetchIamUsers, fetchLabs, fetchS3Buckets, request } from '../services/api.ts'
 import { S3Console } from './S3Console.tsx'
 import { IamConsole } from './IamConsole.tsx'
 import { LambdaConsole } from './LambdaConsole.tsx'
@@ -19,7 +19,8 @@ import { ElbListContent } from './ElbConsole.tsx'
 import { Ec2Console } from './Ec2Console.tsx'
 import { VpcConsole } from './VpcConsole.tsx'
 import { TransitGatewayListContent } from './NetworkingConsoles.tsx'
-import { CostExplorerConsole } from './ManagementConsoles.tsx'
+import { CostExplorerConsole, BudgetsConsole } from './ManagementConsoles.tsx'
+import { DataSyncConsole } from './MigrationConsoles.tsx'
 import { CloudFormationConsole } from './CloudFormationConsole.tsx'
 import { CodeBuildConsole } from './CodeBuildConsole.tsx'
 import { CodePipelineConsole } from './CodePipelineConsole.tsx'
@@ -77,6 +78,8 @@ beforeEach(() => {
     if (u.includes('/api/v1/aws/codebuild/builds')) return Promise.resolve(okResponse({ builds: [{ id: 'b1', project_name: 'web-build', status: 'SUCCEEDED', created_at: '2026-11-22T02:00:00Z' }] }))
     if (u.includes('/api/v1/aws/codepipeline/pipelines')) return Promise.resolve(okResponse({ pipelines: [{ id: 'pl1', name: 'web-pipe', stages: [{ name: 'Source', type: 'source' }], created_at: '2026-11-22T00:00:00Z' }] }))
     if (u.includes('/api/v1/aws/codepipeline/executions')) return Promise.resolve(okResponse({ executions: [{ id: 'e1', pipeline_name: 'web-pipe', status: 'SUCCEEDED', created_at: '2026-11-22T03:00:00Z' }] }))
+    if (u.includes('/api/v1/aws/datasync/tasks')) return Promise.resolve(okResponse({ tasks: [{ id: 'ds-1', name: 'copy-docs', source: 'local:docs', destination: 's3:backup/docs', status: 'COMPLETED', files_copied: 3, bytes_copied: 900, files_verified: 3, created_at: '2026-11-22T00:00:00Z', started_at: '2026-11-22T00:00:00Z', completed_at: '2026-11-22T00:00:10Z' }] }))
+    if (u.includes('/api/v1/aws/nacl/acls')) return Promise.resolve(okResponse({ acls: [{ id: 'acl-1', name: 'main-acl', status: 'ACTIVE', rules: [{ rule_number: 100, direction: 'ingress', protocol: 'tcp', port_from: 0, port_to: 65535, cidr: '0.0.0.0/0', action: 'allow' }], created_at: '2026-11-22T00:00:00Z' }] }))
     if (u.includes('/api/v1/labs/lab-1/resources')) return Promise.resolve(okResponse({ resources: [] }))
     if (u.includes('/api/v1/labs')) return Promise.resolve(okResponse({ labs: [{ id: 'lab-1', name: 'lab-1', status: 'READY' }] }))
     return Promise.resolve(okResponse({}))
@@ -254,12 +257,156 @@ describe('Survey grouping (sections, not standalone consoles)', () => {
     expect(html).toContain('No VPN connections — VPN is UNSUPPORTED')
   })
 
-  it('VPC ?section=tgw renders the Transit Gateway list inside VPC', async () => {
-    const html = await renderSettled(<VpcConsole />, '/services/vpc?section=tgw', [
-      pf(['tgws'], '/api/v1/aws/transit-gateways'),
+describe('EC2 long tail (audit gap #4)', () => {
+  it('EC2 nav lists all 27 survey items and none is a label-only disabled tab', async () => {
+    const html = await renderSettled(<Ec2Console initialSection="home" />, '/services/ec2?section=instances', [])
+    for (const label of [
+      'EC2 dashboard',
+      'Instances',
+      'Instance types',
+      'Launch templates',
+      'Spot Requests',
+      'Savings Plans',
+      'Reserved Instances',
+      'Dedicated Hosts',
+      'Capacity Reservations',
+      'AMIs',
+      'AMI Catalog',
+      'EBS Snapshots',
+      'Public Images',
+      'Volumes',
+      'Snapshots',
+      'Lifecycle Manager',
+      'Security groups',
+      'Elastic IPs',
+      'Placement Groups',
+      'Key Pairs',
+      'Network Interfaces',
+      'Load Balancers',
+      'Target Groups',
+      'Trust Stores',
+      'Auto Scaling Groups',
+      'Systems Manager',
+      'Account settings',
+    ]) {
+      expect(html).toContain(label)
+    }
+    // The old label-only disabled reasons are gone from the nav.
+    expect(html).not.toContain('Not modelled')
+    expect(html).not.toContain('EBS unsupported — no snapshot API')
+    expect(html).not.toContain('EBS unsupported — no lifecycle API')
+    expect(html).not.toContain('No Elastic IP operation')
+  })
+
+  it('Savings Plans, Systems Manager and Account settings are links to real pages', async () => {
+    const html = await renderSettled(<Ec2Console initialSection="home" />, '/services/ec2?section=instances', [])
+    expect(html).toContain('href="/services/savingsplans"')
+    expect(html).toContain('href="/services/ssm"')
+    expect(html).toContain('href="/account"')
+  })
+
+  it.each([
+    ['spot-requests', 'Spot Requests are', 'Request Spot Instances'],
+    ['reserved-instances', 'Reserved Instances are', 'Purchase Reserved Instances'],
+    ['dedicated-hosts', 'Dedicated Hosts are', 'Allocate host'],
+    ['capacity-reservations', 'Capacity Reservations are', 'Create Capacity Reservation'],
+    ['ami-catalog', 'The AMI Catalog is', 'AMIs — the lab definitions'],
+    ['public-images', 'Public Images are', 'AMIs — the lab definitions'],
+    ['placement-groups', 'Placement Groups are', 'Create placement group'],
+    ['key-pairs', 'Key Pairs are', 'Create key pair'],
+    ['network-interfaces', 'Network Interfaces are', 'Networking tab'],
+    ['launch-templates', 'Launch templates are', 'Create launch template'],
+    ['snapshots', 'Snapshots are', 'EBS is unsupported'],
+    ['ebs-snapshots', 'Snapshots are', 'one list, shown here from either nav item'],
+    ['lifecycle', 'Lifecycle Manager is', 'no lifecycle-policy API'],
+    ['elastic-ips', 'Elastic IPs are', 'no Elastic IP operation'],
+    ['trust-stores', 'Trust Stores are', 'Load Balancers'],
+  ])('EC2 ?section=%s renders an honest UNSUPPORTED empty state, never a fake list', async (section, lead, extra) => {
+    const html = await renderSettled(<Ec2Console initialSection="home" />, `/services/ec2?section=${section}`, [])
+    expect(html).toContain(lead)
+    expect(html).toContain('UNSUPPORTED')
+    expect(html).toContain(extra)
+    expect(html).toContain('no list columns, so no table is shown here')
+  })
+
+  it('EC2 Instances section is intact (toolbar, filters, columns)', async () => {
+    const html = await renderSettled(<Ec2Console initialSection="home" />, '/services/ec2?section=instances', [
+      { key: ['ec2-instances'], fn: () => Promise.resolve([]) },
     ])
-    expect(html).toContain('Transit Gateways section')
-    expect(html).toContain('hub')
-    expect(html).toContain('Transit gateway attachment ID')
+    expect(html).toContain('Launch instances')
+    expect(html).toContain('Instance state')
+    expect(html).toContain('Instance ID')
+    expect(html).toContain('Availability Zone')
+  })
+})
+})
+
+describe('Audit gaps #1 (routing) and #2 (DataSync columns)', () => {
+  it('BudgetsConsole renders the real Budgets table with the survey columns', async () => {
+    const html = await renderSettled(<BudgetsConsole />, '/services/budgets', [
+      pf(['cost-budgets'], '/api/v1/aws/costexplorer/budgets'),
+    ])
+    expect(html).toContain('monthly')
+    expect(html).toContain('Thresholds')
+    expect(html).toContain('Amount used')
+    expect(html).toContain('Forecasted amount')
+    expect(html).toContain('Current vs. budgeted')
+    expect(html).toContain('Forecasted vs. budgeted')
+    expect(html).toContain('Not available')
+  })
+
+  it('VPC ?section=nacls renders the real Network ACLs section (not the UNSUPPORTED stub)', async () => {
+    const html = await renderSettled(<VpcConsole />, '/services/vpc?section=nacls', [
+      pf(['nacl-acls'], '/api/v1/aws/nacl/acls'),
+      { key: ['labs'], fn: fetchLabs },
+    ])
+    expect(html).toContain('Network ACLs')
+    expect(html).toContain('main-acl')
+    expect(html).toContain('Create network ACL')
+    expect(html).toContain('The old /services/nacl bookmark redirects here')
+    expect(html).toContain('lowest rule number first match')
+    expect(html).toContain('filters no live traffic')
+    expect(html).not.toContain('no NACL RPC')
+  })
+
+  it('DataSync Tasks uses the survey columns incl. Task ID, Mode, Schedule, Created', async () => {
+    const html = await renderSettled(<DataSyncConsole />, '/services/datasync', [
+      pf(['datasync-tasks'], '/api/v1/aws/datasync/tasks'),
+    ])
+    expect(html).toContain('copy-docs')
+    expect(html).toContain('ds-1')
+    expect(html).toContain('Task ID')
+    expect(html).toContain('Mode')
+    expect(html).toContain('Schedule')
+    expect(html).toContain('Created')
+    expect(html).toContain('2026-11-22T00:00:00Z')
+    expect(html).toContain('Not available')
+  })
+
+  it('DataSync Task executions, Locations and Agents use the survey columns', async () => {
+    const html = await renderSettled(<DataSyncConsole />, '/services/datasync', [
+      pf(['datasync-tasks'], '/api/v1/aws/datasync/tasks'),
+    ])
+    // Task executions, derived from the task's own run.
+    expect(html).toContain('Task executions')
+    expect(html).toContain('Execution ID')
+    expect(html).toContain('Start time')
+    expect(html).toContain('Duration')
+    expect(html).toContain('Data throughput')
+    expect(html).toContain('File throughput')
+    expect(html).toContain('10.0s')
+    expect(html).toContain('90.00 B/s')
+    expect(html).toContain('0.30 files/s')
+    // Locations, derived from the task's source/destination strings.
+    expect(html).toContain('Locations')
+    expect(html).toContain('Location ID')
+    expect(html).toContain('Host')
+    expect(html).toContain('Path')
+    expect(html).toContain('backup')
+    expect(html).toContain('/docs')
+    // Agents: honestly empty — CloudForge has no agent API.
+    expect(html).toContain('Agents (0)')
+    expect(html).toContain('Service endpoint')
+    expect(html).toContain('No DataSync agents')
   })
 })

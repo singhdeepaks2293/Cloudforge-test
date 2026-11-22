@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
 import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
@@ -199,10 +199,65 @@ export function DmsConsole({ initialSection }: { initialSection?: 'home' | 'list
   )
 }
 
+/** "Not available" cell with the reason the backend has no value for it. */
+function NotAvailable({ reason }: { reason: string }) {
+  return <span title={reason}>Not available</span>
+}
+
+/** Duration between two RFC 3339 timestamps, or null when either is missing/invalid. */
+function durationMs(start: string, end: string): number | null {
+  if (start === '' || end === '') return null
+  const ms = Date.parse(end) - Date.parse(start)
+  return Number.isFinite(ms) && ms >= 0 ? ms : null
+}
+
+function fmtDuration(ms: number | null): string {
+  if (ms === null) return 'Not available'
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)}s`
+  return `${(s / 60).toFixed(1)}m`
+}
+
+/** Throughput from a copied count over a run duration, or "Not available" when the run has no duration yet. */
+function fmtThroughput(count: number, ms: number | null, unit: string): string {
+  if (ms === null || ms <= 0) return 'Not available'
+  const perSec = count / (ms / 1000)
+  return `${perSec >= 100 ? Math.round(perSec).toString() : perSec.toFixed(2)} ${unit}/s`
+}
+
+/**
+ * Split a DataSync location string ("s3:<bucket>[/prefix]" or
+ * "local:<path>") into its surveyed Location columns. A location has
+ * no backend id and a local path has no host — both are honestly
+ * "Not available" in the table.
+ */
+function parseSyncLocation(raw: string): { type: string; host: string; path: string } {
+  if (raw.startsWith('s3:')) {
+    const rest = raw.slice(3)
+    const slash = rest.indexOf('/')
+    return { type: 'S3', host: slash === -1 ? rest : rest.slice(0, slash), path: slash === -1 ? '/' : rest.slice(slash) }
+  }
+  if (raw.startsWith('local:')) return { type: 'Local', host: 'Not available', path: raw.slice(6) === '' ? '/' : raw.slice(6) }
+  return { type: 'Not available', host: 'Not available', path: raw }
+}
+
 /**
  * DataSync console (Phase 6) — mirrors the AWS DataSync tasks
  * screens: real file/object copy between S3 buckets and local paths
  * under the workdir, with SHA-256 verification per file.
+ *
+ * Survey columns (2026-11-22, fresh session — DataSync was checked):
+ * Tasks: Task ID, Name, Status, Mode, Schedule, Source, Destination,
+ * Created. Task executions: Execution ID, Start time, Duration,
+ * Status, Data throughput, File throughput, Task, Mode. Locations:
+ * Location ID, Host, Path, Type, Created, Tasks, Agents. Agents:
+ * Agent ID, Name, Service endpoint, Status, Created, Tasks.
+ * The backend has no Mode, Schedule, executions, locations, or
+ * agents: Mode/Schedule are "Not available", executions and
+ * locations are derived from each task's own run (started/completed
+ * timestamps, copied counts, source/destination strings), and the
+ * Agents table is honestly empty. Files/Bytes/Verified/Error stay
+ * on the task detail view, not as list columns.
  */
 export function DataSyncConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
@@ -220,6 +275,42 @@ export function DataSyncConsole({ initialSection }: { initialSection?: 'home' | 
     retry: 1,
   })
   const logRows = listOf(logs.data, 'logs')
+  // Task executions: the backend has no executions API — each task
+  // runs once, so one execution row is derived from each task's own
+  // run (started/completed timestamps, copied counts). Execution ID
+  // and Mode have no backend value, so they are "Not available".
+  const executions = useMemo(
+    () =>
+      taskRows.map((t) => {
+        const started = str(t, 'started_at') || str(t, 'created_at')
+        const ms = durationMs(started, str(t, 'completed_at'))
+        return { ...t, started_at: started, duration_ms: ms }
+      }),
+    [taskRows],
+  )
+  // Locations: the backend has no locations API — the distinct
+  // source/destination strings of the tasks are the locations.
+  // Location ID and Agents have no backend value.
+  const locations = useMemo(() => {
+    const byLoc = new Map<string, Rec>()
+    for (const t of taskRows) {
+      for (const raw of [str(t, 'source'), str(t, 'destination')]) {
+        if (raw === '') continue
+        const p = parseSyncLocation(raw)
+        const created = str(t, 'created_at')
+        const prev = byLoc.get(raw)
+        if (!prev) {
+          byLoc.set(raw, { id: raw, location: raw, host: p.host, path: p.path, type: p.type, created_at: created, task_count: 1 })
+        } else {
+          prev.task_count = (typeof prev.task_count === 'number' ? prev.task_count : 0) + 1
+          if (created !== '' && (typeof prev.created_at !== 'string' || prev.created_at === '' || created < (prev.created_at as string))) {
+            prev.created_at = created
+          }
+        }
+      }
+    }
+    return [...byLoc.values()]
+  }, [taskRows])
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['datasync-tasks'] })
     void queryClient.invalidateQueries({ queryKey: ['datasync-logs', selected] })
@@ -244,20 +335,21 @@ export function DataSyncConsole({ initialSection }: { initialSection?: 'home' | 
       fidelity="PARTIAL"
       fidelityFootnote="local paths confined to the workdir"
       homeLabel="DataSync dashboard"
-      listLabel="Transfer tasks"
+      listLabel="Tasks"
       initialSection={initialSection}
       home={(goToList) => (
           <ServiceHomeDashboard
             serviceName="DataSync"
-            banner="Real copies between local workdir paths and S3 buckets with SHA-256 verification per file. Local paths are confined to the workdir root; S3 needs MinIO. No DataSync agents. Survey note: DataSync was NOT YET CHECKED in the 2026-11-22 survey (the browser became unavailable before its page was reached) — this layout is from public console documentation and is UNVERIFIED against the observed console. Do not treat it as an observed layout."
+            banner="Real copies between local workdir paths and S3 buckets with SHA-256 verification per file. Local paths are confined to the workdir root; S3 needs MinIO. No DataSync agents. Survey note: the 2026-11-22 survey (fresh session) records the DataSync left nav as Dashboard, Task executions, Tasks, Locations, Agents, with the columns used on each table below — executions and locations are derived from tasks, as noted on each table."
             actions={[
               { label: 'Create task', primary: true, onClick: goToList },
             { label: 'Open DMS', to: '/services/dms' },
             ]}
             cards={[
               { label: 'Transfer tasks', count: taskRows.length, onSelect: goToList },
+            { label: 'Task executions', count: taskRows.length, onSelect: goToList, note: 'One execution per task run (derived — no executions API)' },
+            { label: 'Locations', count: locations.length, onSelect: goToList, note: 'Distinct task source/destination locations (derived — no locations API)' },
             { label: 'Agents', count: 0, disabledReason: 'No DataSync agents.' },
-            { label: 'Locations', count: '—', onSelect: goToList, note: 's3:<bucket>[/prefix] or local:<path>' },
             { label: 'Transfer logs', count: selected !== '' ? logRows.length : '—', onSelect: goToList },
             ]}
             onRefresh={() => void queryClient.invalidateQueries()}
@@ -293,14 +385,14 @@ export function DataSyncConsole({ initialSection }: { initialSection?: 'home' | 
         <p className="mb-2 text-xs text-aws-muted">Local paths are confined to the workdir root; “..” segments are rejected. S3 locations need MinIO.</p>
         <AwsTable
           columns={[
+            { header: 'Task ID', render: (r) => <span className="font-mono text-xs">{r.id}</span> },
             { header: 'Name', render: (r) => str(r, 'name') },
+            { header: 'Status', render: (r) => str(r, 'status') },
+            { header: 'Mode', render: () => <NotAvailable reason="The backend stores no transfer mode for a task." /> },
+            { header: 'Schedule', render: () => <NotAvailable reason="The backend stores no schedule for a task — tasks run once on creation." /> },
             { header: 'Source', render: (r) => str(r, 'source') },
             { header: 'Destination', render: (r) => str(r, 'destination') },
-            { header: 'Status', render: (r) => str(r, 'status') },
-            { header: 'Files', render: (r) => String(num(r, 'files_copied')) },
-            { header: 'Bytes', render: (r) => String(num(r, 'bytes_copied')) },
-            { header: 'Verified', render: (r) => String(num(r, 'files_verified')) },
-            { header: 'Error', render: (r) => str(r, 'error') },
+            { header: 'Created', render: (r) => str(r, 'created_at') || '—' },
             {
               header: 'Actions',
               render: (r) => (
@@ -314,9 +406,90 @@ export function DataSyncConsole({ initialSection }: { initialSection?: 'home' | 
           rows={taskRows}
           emptyMessage="No transfer tasks yet."
         />
+        <p className="mt-2 text-xs text-aws-muted">
+          Survey columns: Task ID, Name, Status, Mode, Schedule, Source, Destination, Created. Mode and Schedule are
+          not modelled by the backend, so they are Not available. Files, bytes, verified count and error are on the
+          task detail view below, not list columns.
+        </p>
+      </AwsCard>
+      <AwsCard title={`Task executions (${executions.length})`}>
+        <AwsTable
+          columns={[
+            { header: 'Execution ID', render: () => <NotAvailable reason="The backend has no executions API — each task runs once, so the execution is the task's own run." /> },
+            { header: 'Start time', render: (r) => str(r, 'started_at') || '—' },
+            {
+              header: 'Duration',
+              render: (r) => fmtDuration(typeof r.duration_ms === 'number' ? (r.duration_ms as number) : null),
+            },
+            { header: 'Status', render: (r) => str(r, 'status') },
+            {
+              header: 'Data throughput',
+              render: (r) => fmtThroughput(num(r, 'bytes_copied'), typeof r.duration_ms === 'number' ? (r.duration_ms as number) : null, 'B'),
+            },
+            {
+              header: 'File throughput',
+              render: (r) => fmtThroughput(num(r, 'files_copied'), typeof r.duration_ms === 'number' ? (r.duration_ms as number) : null, 'files'),
+            },
+            { header: 'Task', render: (r) => str(r, 'name') },
+            { header: 'Mode', render: () => <NotAvailable reason="The backend stores no transfer mode for a task." /> },
+          ]}
+          rows={executions}
+          emptyMessage="No task executions yet — create a task first."
+        />
+        <p className="mt-2 text-xs text-aws-muted">
+          Survey columns: Execution ID, Start time, Duration, Status, Data throughput, File throughput, Task, Mode.
+          CloudForge has no separate executions API: one execution row is derived from each task&apos;s run, with
+          duration and throughput computed from its started/completed timestamps and copied counts (Not available
+          while a run has no completion timestamp). Execution ID and Mode have no backend value.
+        </p>
+      </AwsCard>
+      <AwsCard title={`Locations (${locations.length})`}>
+        <AwsTable
+          columns={[
+            { header: 'Location ID', render: () => <NotAvailable reason="The backend has no locations API — locations are derived from task source/destination strings, which carry no id." /> },
+            { header: 'Host', render: (r) => str(r, 'host') },
+            { header: 'Path', render: (r) => <span className="font-mono text-xs">{str(r, 'path')}</span> },
+            { header: 'Type', render: (r) => str(r, 'type') },
+            { header: 'Created', render: (r) => str(r, 'created_at') || '—' },
+            { header: 'Tasks', render: (r) => String(num(r, 'task_count')) },
+            { header: 'Agents', render: () => <NotAvailable reason="CloudForge has no DataSync agents." /> },
+          ]}
+          rows={locations}
+          emptyMessage="No locations yet — create a task first."
+        />
+        <p className="mt-2 text-xs text-aws-muted">
+          Survey columns: Location ID, Host, Path, Type, Created, Tasks, Agents. Locations are the distinct
+          source/destination strings of the tasks (s3:&lt;bucket&gt;[/prefix] or local:&lt;path&gt;); Created is the
+          earliest task using the location, Tasks is how many tasks use it. Location ID and Agents have no backend
+          value.
+        </p>
+      </AwsCard>
+      <AwsCard title="Agents (0)">
+        <AwsTable
+          columns={[
+            { header: 'Agent ID', render: () => '—' },
+            { header: 'Name', render: () => '—' },
+            { header: 'Service endpoint', render: () => '—' },
+            { header: 'Status', render: () => '—' },
+            { header: 'Created', render: () => '—' },
+            { header: 'Tasks', render: () => '—' },
+          ]}
+          rows={[]}
+          emptyMessage="No DataSync agents — CloudForge has no agent API."
+        />
+        <p className="mt-2 text-xs text-aws-muted">
+          Survey columns: Agent ID, Name, Service endpoint, Status, Created, Tasks. The table is empty by design:
+          CloudForge copies files directly and ships no DataSync agent.
+        </p>
       </AwsCard>
       {sel && (
         <AwsCard title={`Transfer log: ${str(sel, 'name')}`}>
+          <dl className="mb-3 grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+            <div><dt className="text-aws-muted">Files copied</dt><dd>{String(num(sel, 'files_copied'))}</dd></div>
+            <div><dt className="text-aws-muted">Bytes copied</dt><dd>{String(num(sel, 'bytes_copied'))}</dd></div>
+            <div><dt className="text-aws-muted">Files verified (SHA-256)</dt><dd>{String(num(sel, 'files_verified'))}</dd></div>
+            <div><dt className="text-aws-muted">Error</dt><dd>{str(sel, 'error') || '—'}</dd></div>
+          </dl>
           <AwsTable
             columns={[
               { header: 'File', render: (r) => str(r, 'file') },

@@ -29,6 +29,7 @@ import {
   detachGateway,
   fetchLabResources,
   fetchLabs,
+  request,
   setResourceTags,
 } from '../services/api.ts'
 import { getStoredRegion } from '../services/catalog.ts'
@@ -47,7 +48,9 @@ import type { LabResource } from '../types/index.ts'
  * firewall snapshot applied. IGW attach/detach is recorded
  * (SIMULATED — the engine has no IGW RPC). NAT gateways go through
  * the engine (real netlink where it supports it, SIMULATED in lite).
- * NACLs are UNSUPPORTED — the engine has no NACL RPC — and say so.
+ * NACLs are API_EMULATED exam resources — durable records with real
+ * stateless rule evaluation (lowest rule number first, default deny);
+ * the ACL is not attached to any subnet and filters no live traffic.
  */
 type Section = 'dashboard' | 'vpcs' | 'subnets' | 'routetables' | 'gateways' | 'nat' | 'securitygroups' | 'nacls' | 'vpn' | 'tgw'
 
@@ -78,7 +81,7 @@ export function VpcConsole() {
   const [searchParams] = useSearchParams()
   const [section, setSection] = useState<Section>(() => {
     const fromUrl = searchParams.get('section')
-    return fromUrl === 'vpn' || fromUrl === 'tgw' ? (fromUrl as Section) : 'dashboard'
+    return fromUrl === 'vpn' || fromUrl === 'tgw' || fromUrl === 'nacls' ? (fromUrl as Section) : 'dashboard'
   })
   const [labId, setLabId] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -134,7 +137,7 @@ export function VpcConsole() {
       title="VPC"
       description="Virtual private clouds from your labs — real lab resources on the Rust network engine (SIMULATED backend by default). CIDRs are local (10.x); there are no AWS availability zones. Pick a lab, then create and manage its networking."
       fidelity="PARTIAL"
-      fidelityFootnote="lab VPCs · engine default SIMULATED · NACLs UNSUPPORTED"
+      fidelityFootnote="lab VPCs · engine default SIMULATED · NACLs API_EMULATED (real rule evaluation, no live filtering)"
       subNav={[
         { id: 'dashboard', label: 'VPC dashboard' },
         // Grouped left nav, mirroring the real VPC console's panel:
@@ -201,12 +204,13 @@ export function VpcConsole() {
       {resources.isPending && activeLabId !== '' && <Loading label="Loading VPC resources" />}
       {resources.isError && <ErrorBox message={`VPC resources could not be loaded (${resources.error.message}).`} />}
       {section === 'nacls' && (
-        <AwsCard title="Network ACLs">
-          <p className="text-sm text-aws-muted">
-            Network ACLs are <strong>UNSUPPORTED</strong> — the Rust network engine exposes no NACL RPC, so there is
-            no API to build on and nothing is faked. Use security groups (stateful, rule-based) for lab firewalling.
-          </p>
-        </AwsCard>
+        <div className="space-y-4">
+          <AwsFlash tone="info">
+            Network ACLs is the VPC console&apos;s Security section — it has no standalone console (2026-11-22
+            survey). The old /services/nacl bookmark redirects here.
+          </AwsFlash>
+          <NaclSectionContent />
+        </div>
       )}
       {section === 'dashboard' && (
         <ServiceHomeDashboard
@@ -223,7 +227,7 @@ export function VpcConsole() {
             { label: 'Internet Gateways', count: all.filter((r) => r.kind === 'gateway' && cfgStr(r.config, 'gateway_type') !== 'nat').length, onSelect: () => setSection('gateways'), note: 'SIMULATED attach/detach — no engine IGW RPC' },
             { label: 'NAT Gateways', count: all.filter((r) => r.kind === 'gateway' && cfgStr(r.config, 'gateway_type') === 'nat').length, onSelect: () => setSection('nat'), note: 'Engine-backed; SIMULATED in lite mode' },
             { label: 'Security Groups', count: all.filter((r) => r.kind === 'security-group').length, onSelect: () => setSection('securitygroups') },
-            { label: 'Network ACLs', count: 0, onSelect: () => setSection('nacls'), disabledReason: 'UNSUPPORTED — the engine has no NACL RPC.' },
+            { label: 'Network ACLs', count: '—', onSelect: () => setSection('nacls'), note: 'Numbered rules, really evaluated (lowest number first, default deny); ACLs filter no live traffic' },
             { label: 'Elastic IPs', count: 0, disabledReason: 'No Elastic IP operation in CloudForge.' },
             { label: 'VPC Endpoints', count: '—', to: '/services/vpcendpoints', note: 'PrivateLink-style endpoints (SIMULATED)' },
             { label: 'Transit Gateways', count: '—', onSelect: () => setSection('tgw'), note: 'Attachments are real route-table entries (SIMULATED)' },
@@ -385,6 +389,249 @@ export function VpcConsole() {
   )
 }
 
+type NaclRec = Record<string, unknown> & { id: string }
+const naclStr = (r: Record<string, unknown>, k: string): string => (typeof r[k] === 'string' ? (r[k] as string) : '')
+const naclNum = (r: Record<string, unknown>, k: string): number => (typeof r[k] === 'number' ? (r[k] as number) : 0)
+const naclRowsOf = (v: unknown, key: string): NaclRec[] => {
+  const arr = Array.isArray((v as NaclRec)?.[key]) ? ((v as NaclRec)[key] as Record<string, unknown>[]) : []
+  return arr.map((r, i) => ({ ...r, id: typeof r.id === 'string' ? r.id : typeof r.name === 'string' ? r.name : `${key}-${i}` }))
+}
+const naclInputCls = 'rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm focus:border-aws-link focus:outline-none'
+
+/**
+ * Network ACLs section (VPC console, Security group) — the real
+ * exam backend: GET/POST /api/v1/aws/nacl/acls, numbered rules per
+ * direction, and POST .../evaluate, which really evaluates a packet
+ * (lowest rule number first, stateless, default deny). The survey
+ * records no NACL list columns (the VPC nav item only), so the ACL
+ * table columns are CloudForge's own. The ACL is not attached to
+ * any subnet and filters no live traffic — the UI says so.
+ */
+function NaclSectionContent() {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+  const [selectedId, setSelectedId] = useState('')
+  const [notice, setNotice] = useState('')
+  const [ruleNumber, setRuleNumber] = useState(100)
+  const [ruleDirection, setRuleDirection] = useState<'ingress' | 'egress'>('ingress')
+  const [ruleProtocol, setRuleProtocol] = useState('tcp')
+  const [portFrom, setPortFrom] = useState(0)
+  const [portTo, setPortTo] = useState(65535)
+  const [ruleCidr, setRuleCidr] = useState('0.0.0.0/0')
+  const [ruleAction, setRuleAction] = useState<'allow' | 'deny'>('allow')
+  const [evDirection, setEvDirection] = useState<'ingress' | 'egress'>('ingress')
+  const [evProtocol, setEvProtocol] = useState('tcp')
+  const [evPort, setEvPort] = useState(443)
+  const [evIp, setEvIp] = useState('10.0.0.5')
+  const [evResult, setEvResult] = useState<Record<string, unknown> | null>(null)
+
+  const acls = useQuery({ queryKey: ['nacl-acls'], queryFn: () => request<NaclRec>('/api/v1/aws/nacl/acls'), retry: 1 })
+  const aclRows = naclRowsOf(acls.data, 'acls')
+  const rules = useQuery({
+    queryKey: ['nacl-rules', selectedId],
+    queryFn: () => request<NaclRec>(`/api/v1/aws/nacl/acls/${selectedId}/rules`),
+    enabled: selectedId !== '',
+    retry: 1,
+  })
+  const ruleRows: NaclRec[] = Array.isArray(rules.data?.rules)
+    ? (rules.data.rules as Record<string, unknown>[]).map((r) => ({
+        ...r,
+        id: `${naclStr(r, 'direction')}-${naclNum(r, 'rule_number')}`,
+      }))
+    : []
+  const sel = aclRows.find((a) => a.id === selectedId) ?? null
+  const refreshAcls = () => { void queryClient.invalidateQueries({ queryKey: ['nacl-acls'] }) }
+  const refreshRules = () => { void queryClient.invalidateQueries({ queryKey: ['nacl-rules', selectedId] }) }
+  const create = useMutation({
+    mutationFn: () => request<NaclRec>('/api/v1/aws/nacl/acls', { method: 'POST', body: { name: name.trim() } }),
+    onSuccess: () => { setNotice('Network ACL created.'); setName(''); refreshAcls() },
+    onError: (e: Error) => setNotice(`Create failed: ${e.message}`),
+  })
+  const del = useMutation({
+    mutationFn: (id: string) => request<Record<string, unknown>>(`/api/v1/aws/nacl/acls/${id}`, { method: 'DELETE' }),
+    onSuccess: (_d, id) => { setNotice('Network ACL deleted.'); if (id === selectedId) setSelectedId(''); refreshAcls() },
+    onError: (e: Error) => setNotice(`Delete failed: ${e.message}`),
+  })
+  const addRule = useMutation({
+    mutationFn: () =>
+      request<NaclRec>(`/api/v1/aws/nacl/acls/${selectedId}/rules`, {
+        method: 'POST',
+        body: { rule_number: ruleNumber, direction: ruleDirection, protocol: ruleProtocol, port_from: portFrom, port_to: portTo, cidr: ruleCidr.trim(), action: ruleAction },
+      }),
+    onSuccess: () => { setNotice('Rule added.'); refreshRules(); refreshAcls() },
+    onError: (e: Error) => setNotice(`Add rule failed: ${e.message}`),
+  })
+  const delRule = useMutation({
+    mutationFn: (r: NaclRec) =>
+      request<Record<string, unknown>>(`/api/v1/aws/nacl/acls/${selectedId}/rules/${naclNum(r, 'rule_number')}?direction=${naclStr(r, 'direction')}`, { method: 'DELETE' }),
+    onSuccess: () => { setNotice('Rule deleted.'); refreshRules(); refreshAcls() },
+    onError: (e: Error) => setNotice(`Delete rule failed: ${e.message}`),
+  })
+  const evaluate = useMutation({
+    mutationFn: () =>
+      request<Record<string, unknown>>(`/api/v1/aws/nacl/acls/${selectedId}/evaluate`, {
+        method: 'POST',
+        body: { direction: evDirection, protocol: evProtocol, port: evPort, source_ip: evIp.trim() },
+      }),
+    onSuccess: (d) => { setEvResult(d); setNotice('') },
+    onError: (e: Error) => setNotice(`Evaluate failed: ${e.message}`),
+  })
+  return (
+    <div className="space-y-4">
+      {notice !== '' && (
+        <AwsFlash tone={notice.toLowerCase().includes('failed') ? 'error' : 'success'}>{notice}</AwsFlash>
+      )}
+      <AwsCard title={`Network ACLs (${aclRows.length})`}>
+        <p className="mb-3 text-sm text-aws-muted">
+          Stateless ACLs with numbered rules, really evaluated by the backend (lowest rule number first match,
+          ingress and egress evaluated independently, default deny). An ACL is not attached to any subnet and
+          filters no live traffic — evaluation describes a packet you supply. Use security groups for lab
+          firewalling that applies to instances.
+        </p>
+        <form
+          className="mb-3 flex flex-wrap items-center gap-2"
+          onSubmit={(e) => { e.preventDefault(); if (name.trim() !== '') create.mutate() }}
+        >
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ACL name" className={naclInputCls} aria-label="ACL name" />
+          <AwsButton variant="primary" type="submit">Create network ACL</AwsButton>
+        </form>
+        {acls.isPending && <Loading label="Loading network ACLs" />}
+        {acls.isError && <ErrorBox message={`Network ACLs could not be loaded (${acls.error.message}).`} />}
+        <AwsTable
+          columns={[
+            { header: 'Name', render: (r) => naclStr(r, 'name') },
+            { header: 'ID', render: (r) => <span className="font-mono text-xs">{r.id}</span> },
+            { header: 'Status', render: (r) => naclStr(r, 'status') || '—' },
+            { header: 'Rules', render: (r) => String(Array.isArray(r.rules) ? (r.rules as unknown[]).length : 0) },
+            { header: 'Created', render: (r) => naclStr(r, 'created_at') || '—' },
+            {
+              header: 'Actions',
+              render: (r) => (
+                <span className="flex gap-2">
+                  <AwsButton onClick={() => { setSelectedId(r.id); setEvResult(null) }}>Rules</AwsButton>
+                  <AwsButton onClick={() => del.mutate(r.id)}>Delete</AwsButton>
+                </span>
+              ),
+            },
+          ]}
+          rows={aclRows}
+          emptyMessage="No network ACLs yet — create one above."
+        />
+        <p className="mt-2 text-xs text-aws-muted">
+          The survey records no AWS Network ACL list columns, so these columns are CloudForge&apos;s own.
+        </p>
+      </AwsCard>
+      {sel && (
+        <>
+          <AwsCard title={`Rules: ${naclStr(sel, 'name')}`}>
+            <form
+              className="mb-3 flex flex-wrap items-center gap-2"
+              onSubmit={(e) => { e.preventDefault(); addRule.mutate() }}
+            >
+              <label className="text-sm">
+                Rule number
+                <input type="number" min={1} max={32766} value={ruleNumber} onChange={(e) => setRuleNumber(Number(e.target.value))} className={`ml-2 w-20 ${naclInputCls}`} />
+              </label>
+              <label className="text-sm">
+                Direction
+                <select value={ruleDirection} onChange={(e) => setRuleDirection(e.target.value as 'ingress' | 'egress')} className={`ml-2 ${naclInputCls}`}>
+                  <option value="ingress">Ingress</option>
+                  <option value="egress">Egress</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                Protocol
+                <select value={ruleProtocol} onChange={(e) => setRuleProtocol(e.target.value)} className={`ml-2 ${naclInputCls}`}>
+                  <option value="tcp">TCP</option>
+                  <option value="udp">UDP</option>
+                  <option value="icmp">ICMP</option>
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                Ports
+                <input type="number" min={0} max={65535} value={portFrom} onChange={(e) => setPortFrom(Number(e.target.value))} className={`ml-2 w-20 ${naclInputCls}`} aria-label="Port from" />
+                <span className="mx-1">–</span>
+                <input type="number" min={0} max={65535} value={portTo} onChange={(e) => setPortTo(Number(e.target.value))} className={`w-20 ${naclInputCls}`} aria-label="Port to" />
+              </label>
+              <label className="text-sm">
+                CIDR
+                <input value={ruleCidr} onChange={(e) => setRuleCidr(e.target.value)} className={`ml-2 ${naclInputCls}`} />
+              </label>
+              <label className="text-sm">
+                Action
+                <select value={ruleAction} onChange={(e) => setRuleAction(e.target.value as 'allow' | 'deny')} className={`ml-2 ${naclInputCls}`}>
+                  <option value="allow">Allow</option>
+                  <option value="deny">Deny</option>
+                </select>
+              </label>
+              <AwsButton variant="primary" type="submit">Add rule</AwsButton>
+            </form>
+            <p className="mb-2 text-xs text-aws-muted">Rule numbers are unique per direction (1–32766); the lowest number matching a packet wins.</p>
+            {rules.isPending && <Loading label="Loading rules" />}
+            {rules.isError && <ErrorBox message={`Rules could not be loaded (${rules.error.message}).`} />}
+            <AwsTable
+              columns={[
+                { header: 'Rule number', render: (r) => String(naclNum(r, 'rule_number')) },
+                { header: 'Direction', render: (r) => naclStr(r, 'direction') },
+                { header: 'Protocol', render: (r) => naclStr(r, 'protocol') },
+                { header: 'Ports', render: (r) => `${naclNum(r, 'port_from')}–${naclNum(r, 'port_to')}` },
+                { header: 'CIDR', render: (r) => <span className="font-mono text-xs">{naclStr(r, 'cidr')}</span> },
+                { header: 'Action', render: (r) => naclStr(r, 'action') },
+                { header: 'Actions', render: (r) => <AwsButton onClick={() => delRule.mutate(r)}>Delete</AwsButton> },
+              ]}
+              rows={ruleRows}
+              emptyMessage="No rules yet — add one above."
+            />
+          </AwsCard>
+          <AwsCard title={`Evaluate packet: ${naclStr(sel, 'name')}`}>
+            <form
+              className="mb-3 flex flex-wrap items-center gap-2"
+              onSubmit={(e) => { e.preventDefault(); evaluate.mutate() }}
+            >
+              <label className="text-sm">
+                Direction
+                <select value={evDirection} onChange={(e) => setEvDirection(e.target.value as 'ingress' | 'egress')} className={`ml-2 ${naclInputCls}`}>
+                  <option value="ingress">Ingress</option>
+                  <option value="egress">Egress</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                Protocol
+                <select value={evProtocol} onChange={(e) => setEvProtocol(e.target.value)} className={`ml-2 ${naclInputCls}`}>
+                  <option value="tcp">TCP</option>
+                  <option value="udp">UDP</option>
+                  <option value="icmp">ICMP</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                Port
+                <input type="number" min={0} max={65535} value={evPort} onChange={(e) => setEvPort(Number(e.target.value))} className={`ml-2 w-20 ${naclInputCls}`} />
+              </label>
+              <label className="text-sm">
+                Source IP
+                <input value={evIp} onChange={(e) => setEvIp(e.target.value)} className={`ml-2 ${naclInputCls}`} />
+              </label>
+              <AwsButton variant="primary" type="submit">Evaluate</AwsButton>
+            </form>
+            {evResult && (
+              <dl className="space-y-1 text-sm">
+                <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium">Decision</dt><dd><strong>{evResult.allowed === true ? 'ALLOW' : 'DENY'}</strong></dd></div>
+                <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium">Matched rule number</dt><dd>{typeof evResult.matched_rule_number === 'number' && (evResult.matched_rule_number as number) >= 0 ? String(evResult.matched_rule_number) : 'No rule matched — default deny'}</dd></div>
+                <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium">Action</dt><dd>{typeof evResult.action === 'string' ? (evResult.action as string) : '—'}</dd></div>
+                {typeof evResult.note === 'string' && evResult.note !== '' && (
+                  <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium">Note</dt><dd className="text-aws-muted">{evResult.note as string}</dd></div>
+                )}
+              </dl>
+            )}
+            {!evResult && <p className="text-sm text-aws-muted">Describe a packet above — the backend evaluates it against this ACL&apos;s stored rules.</p>}
+          </AwsCard>
+        </>
+      )}
+    </div>
+  )
+}
+
 function sectionLabel(section: Section): string {
   switch (section) {
     case 'dashboard': return 'VPC dashboard'
@@ -427,7 +674,7 @@ function CreateForm({ section, labId, vpcs, gateways, onCreated, onNotice }: {
         case 'securitygroups':
           return createLabResource(labId, { kind: 'security-group', name: name.trim() })
         case 'nacls':
-          throw new Error('Network ACLs are UNSUPPORTED.')
+          throw new Error('Network ACLs are created in the Network ACLs section, not this form.')
         case 'vpn':
           throw new Error('VPN connections are UNSUPPORTED.')
         case 'tgw':

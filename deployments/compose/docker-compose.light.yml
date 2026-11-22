@@ -139,7 +139,16 @@ services:
     image: cloudforge-api:0.1.0
     container_name: cloudforge-worker-lite
     restart: unless-stopped
-    command: ["/app/worker"]
+    # ENTRYPOINT in backend/Dockerfile is ["/app/api"], so a plain
+    # command: ["/app/worker"] runs "/app/api /app/worker" — a second
+    # API server, not the worker. No worker ever ran, so lab jobs
+    # (provision/destroy/expire) sat pending forever and labs stuck
+    # in DESTROYING. Override the entrypoint instead.
+    entrypoint: ["/app/worker"]
+    # The image healthcheck probes the API (/readyz on :8081); the
+    # worker listens on :8083 with /healthz, so disable it here.
+    healthcheck:
+      disable: true
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-cloudforge}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-cloudforge}?sslmode=disable
       REDIS_ADDR: redis:6379

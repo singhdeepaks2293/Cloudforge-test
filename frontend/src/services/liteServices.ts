@@ -12,36 +12,36 @@ export const LITE_GENERIC_SERVICES: Record<string, { alternatives: { label: stri
   },
   aurora: {
     alternatives: [{ label: 'RDS — DB instances', to: '/services/rds', note: 'Real Postgres databases on the platform Postgres.' }],
-    note: 'Aurora clusters are not built. RDS is the available managed-database practice.',
+    note: 'Dedicated Aurora console at /services/aurora — clusters, instances, endpoints and failover over the API-emulated backend.',
   },
   backup: {
     alternatives: [
       { label: 'RDS — Snapshots', to: '/services/rds', note: 'Real pg_dump snapshots with restore.' },
       { label: 'S3 — Buckets', to: '/services/s3', note: 'Object storage on local MinIO.' },
     ],
-    note: 'Backup in CloudForge is scripts/backup.sh and scripts/restore.sh (pg_dump -Fc / pg_restore) run on the host — there is no backup-plan API and no in-app Backup console, so no plan is created here.',
+    note: 'Dedicated Backup console at /services/backup — plans, vaults and jobs; a plan run is a real pg_dump via the API. Restore stays host-side: scripts/backup.sh and scripts/restore.sh.',
   },
   macie: {
     alternatives: [
       { label: 'GuardDuty — Findings', to: '/services/guardduty', note: 'Findings from the real audit log.' },
       { label: 'Security Hub — Findings', to: '/services/securityhub', note: 'Aggregated findings.' },
     ],
-    note: 'Macie sensitive-data discovery is not built. GuardDuty and Security Hub findings are the available detection practice.',
+    note: 'Dedicated Macie console at /services/macie — classification jobs, runs and findings over the API-emulated backend.',
   },
   auditmanager: {
     alternatives: [{ label: 'CloudTrail — Event history', to: '/services/cloudtrail', note: 'Audit-log export (CSV/JSON) is the available evidence surface.' }],
-    note: 'Audit Manager evidence collection is not built. Use the CloudTrail audit export for audit evidence.',
+    note: 'Dedicated Audit Manager console at /services/auditmanager — assessments and evidence collection over the API-emulated backend.',
   },
   artifact: {
     alternatives: [{ label: 'CloudTrail — Event history', to: '/services/cloudtrail', note: 'Audit-log export for compliance evidence.' }],
-    note: 'Artifact compliance reports and agreements are not built.',
+    note: 'Dedicated Artifact console at /services/artifact — reports catalogue and agreements.',
   },
   cloudfront: {
     alternatives: [
       { label: 'S3 — Buckets', to: '/services/s3', note: 'Object storage; compare origin behaviour with edge caching in the SAA lesson.' },
       { label: 'ElastiCache — Clusters', to: '/services/elasticache', note: 'In-memory caching practice.' },
     ],
-    note: 'CloudFront distributions are not built. The SAA caching lesson compares edge caching against these local services.',
+    note: 'Dedicated CloudFront console at /services/cloudfront — distributions (survey columns), invalidations and the other survey nav items.',
   },
   ebs: {
     alternatives: [{ label: 'EC2 — Instances', to: '/services/ec2', note: 'Lab instances carry their own disks; the Volumes tab states EBS is unsupported.' }],
@@ -52,38 +52,38 @@ export const LITE_GENERIC_SERVICES: Record<string, { alternatives: { label: stri
       { label: 'Cost Explorer — Costs & budgets', to: '/services/costexplorer', note: 'Educational cost estimates computed from real usage.' },
       { label: 'Trusted Advisor — Checks', to: '/services/trustedadvisor', note: 'Five real checks, including quota usage.' },
     ],
-    note: 'Compute Optimizer rightsizing recommendations are not built. Cost Explorer and Budgets are the available cost practice.',
+    note: 'Dedicated Compute Optimizer console at /services/computeoptimizer — recommendations computed from real lab state.',
   },
   efs: {
     alternatives: [{ label: 'S3 — Buckets', to: '/services/s3', note: 'Shared object storage on local MinIO.' }],
-    note: 'EFS file systems are not built.',
+    note: 'Dedicated EFS console at /services/efs — file systems and mount targets over the API-emulated backend.',
   },
   fsx: {
     alternatives: [{ label: 'S3 — Buckets', to: '/services/s3', note: 'Shared object storage on local MinIO.' }],
-    note: 'FSx file systems are not built.',
+    note: 'Dedicated FSx console at /services/fsx — file systems and mount targets over the API-emulated backend.',
   },
   shield: {
     alternatives: [{ label: 'WAF — Web ACLs', to: '/services/waf', note: 'Real rule evaluation (evaluation only, not inline).' }],
-    note: 'Shield DDoS protection is not built. WAF is the available web-protection practice.',
+    note: 'Dedicated Shield console at /services/shield — protection records over the API-emulated backend.',
   },
   controltower: {
     alternatives: [{ label: 'Organizations — Units', to: '/services/organizations', note: 'Organizational units over the real user store.' }],
-    note: 'Control Tower landing zones are not built. Organizations and SCP concepts are taught in the SAP track.',
+    note: 'Dedicated Control Tower console at /services/controltower — landing zones and guardrails.',
   },
   identitycenter: {
     alternatives: [{ label: 'IAM — Users, Roles, Policies', to: '/services/iam', note: 'Teaching IAM with a real policy evaluator (subset).' }],
-    note: 'IAM Identity Center (workforce SSO, permission sets) is not built. IAM users, roles and policy evaluation are available.',
+    note: 'Dedicated IAM Identity Center console at /services/identitycenter — permission sets and assignments.',
   },
   ram: {
     alternatives: [{ label: 'Organizations — Units', to: '/services/organizations', note: 'Organizational units over the real user store.' }],
-    note: 'Resource Access Manager cross-account sharing is not built.',
+    note: 'Dedicated Resource Access Manager console at /services/ram — resource shares and principals.',
   },
   savingsplans: {
     alternatives: [
       { label: 'Cost Explorer — Costs & budgets', to: '/services/costexplorer', note: 'Educational cost estimates computed from real usage.' },
       { label: 'Budgets (Cost Explorer console)', to: '/services/costexplorer', note: 'Budgets evaluated against the real cost model on every read.' },
     ],
-    note: 'Savings Plans commitment-based compute discounts are not built. Cost concepts are taught in the SAA track.',
+    note: 'Dedicated Savings Plans console at /services/savingsplans — plans with utilization computed from real lab hours.',
   },
   vpn: {
     alternatives: [
@@ -97,21 +97,21 @@ export const LITE_GENERIC_SERVICES: Record<string, { alternatives: { label: stri
       { label: 'VPN', to: '/services/vpn', note: 'Also unsupported — see the hybrid-networking alternatives there.' },
       { label: 'Transit Gateway', to: '/services/transitgateway', note: 'Hub attachments as real route-table entries (SIMULATED).' },
     ],
-    note: 'Direct Connect dedicated links are not built. VPN and Transit Gateway concepts are simulated in the VPC console.',
+    note: 'Dedicated Direct Connect console at /services/directconnect — connections with a confirm step.',
   },
   globalaccelerator: {
     alternatives: [
       { label: 'Route 53 — Hosted zones', to: '/services/route53', note: 'DNS records with a resolve endpoint.' },
       { label: 'ELB — Load balancers', to: '/services/elb', note: 'In-process round-robin with real health probes.' },
     ],
-    note: 'Global Accelerator is not built. Practise failover with Route 53-style DNS and load-balancer health rules.',
+    note: 'Dedicated Global Accelerator console at /services/globalaccelerator — accelerators, endpoint groups and failover.',
   },
   mgn: {
     alternatives: [
       { label: 'DMS — Replication tasks', to: '/services/dms', note: 'Real row copies between Postgres databases.' },
       { label: 'DataSync — Tasks', to: '/services/datasync', note: 'Real copies with SHA-256 verification.' },
     ],
-    note: 'Application Migration Service (lift-and-shift) is not built. DMS and DataSync are the available migration practice.',
+    note: 'Dedicated Application Migration console at /services/mgn — source servers with the replication lifecycle.',
   },
 }
 
