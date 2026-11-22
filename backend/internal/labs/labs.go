@@ -92,6 +92,8 @@ var Definitions = []Definition{
 	{ID: "iam-security", Title: "Fix a broken IAM policy", CourseID: "iam-security", Description: "Diagnose an access-denied error and apply least privilege.", DurationMin: 30},
 	{ID: "ec2-basics", Title: "Launch a Linux web server", CourseID: "ec2-basics", Description: "Launch a KVM-backed Linux instance and serve a web page.", DurationMin: 30},
 	{ID: "three-tier-app", Title: "Build a three-tier application", CourseID: "vpc-fundamentals", Description: "Web, application and database tiers across public and private subnets.", DurationMin: 120},
+	{ID: "saa-ha-web", Title: "Build a highly available web tier", CourseID: "aws-saa", Description: "Two Availability Zones, public and private subnets, resilient egress and a healthy load balancer.", DurationMin: 30},
+	{ID: "sap-hybrid-network", Title: "Build a segmented hybrid network", CourseID: "aws-sap", Description: "Segmented VPC, resilient NAT egress, private application tier and a healthy load balancer.", DurationMin: 30},
 }
 
 // GetDefinition returns a definition by ID.

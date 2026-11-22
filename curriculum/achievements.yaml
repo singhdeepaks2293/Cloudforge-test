@@ -46,11 +46,11 @@ achievements:
   xp: 100
 - id: fixer
   title: Fixer
-  description: Solve all break-and-fix scenarios.
+  description: Solve every break-and-fix scenario.
   trigger:
     type: break_fix_solved
     operator: '>='
-    value: 6
+    value: 10
   xp: 300
 - id: challenge-accepted
   title: Challenge Accepted
@@ -116,3 +116,34 @@ achievements:
     type: track_completed
     track: architecture
   xp: 300
+
+- id: saa-architect
+  title: Associate Architect
+  description: Complete the AWS Certified Solutions Architect - Associate track.
+  trigger:
+    type: track_completed
+    track: aws-saa
+  xp: 300
+- id: sap-architect
+  title: Professional Architect
+  description: Complete the AWS Certified Solutions Architect - Professional track.
+  trigger:
+    type: track_completed
+    track: aws-sap
+  xp: 400
+- id: incident-commander
+  title: Incident Commander
+  description: Solve every industry break-and-fix incident.
+  trigger:
+    type: break_fix_solved
+    operator: '>='
+    value: 10
+  xp: 350
+- id: certification-builder
+  title: Certification Builder
+  description: Complete three certification challenges without guided steps.
+  trigger:
+    type: challenges_completed
+    operator: '>='
+    value: 3
+  xp: 250

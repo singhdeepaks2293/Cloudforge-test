@@ -1,0 +1,34 @@
+id: hybrid-dns-outage
+title: 'Hybrid Split Brain: Internal Names Stop Resolving'
+symptom: >-
+  Workloads in the VPC can reach external APIs by IP address, but internal
+  service names such as payments.internal return NXDOMAIN. On-premises users
+  also cannot resolve newly created VPC names, and the incident began after a
+  resolver configuration change.
+injected_fault:
+  kind: dns
+  target: vpc_dns_resolver
+  parameters:
+    vpc_id: vpc-hybrid
+    failure_mode: nxdomain
+    affected: internal
+diagnosis_hints:
+- 'Test by IP first: if IP connectivity works, the fault is name resolution rather than routing.'
+- Check whether the VPC has DNS resolution and DNS hostnames enabled.
+- Inspect Route 53 Resolver rules and the inbound and outbound endpoint associations.
+- Compare the private hosted zone with the names that fail, and check the on-premises forwarder configuration.
+fix_steps:
+- Enable DNS resolution and DNS hostnames on the VPC.
+- Associate the correct private hosted zone with the VPC.
+- Verify resolver rules and endpoint health for the hybrid path.
+- Re-test the internal name from a VPC instance and from on-premises.
+validation_rules:
+- rule: dns_resolves
+  description: The internal payments name resolves for VPC workloads
+  params:
+    name: payments.internal
+- rule: route_to_nat
+  description: Private subnets retain their outbound path
+  params:
+    subnet_type: private
+xp_reward: 180

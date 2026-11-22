@@ -1,0 +1,39 @@
+id: nat-egress-collapse
+title: 'Silent Private Tier: NAT Egress Collapse'
+symptom: >-
+  Private application instances are healthy and serve internal traffic, but
+  every outbound call to a payment provider, package mirror or external API
+  times out. Public instances are unaffected, and the NAT gateway metrics show
+  no successful egress.
+injected_fault:
+  kind: loss
+  target: nat_gateway
+  parameters:
+    nat_gateway_id: nat-primary
+    loss_percent: 100
+    direction: egress
+diagnosis_hints:
+- 'Confirm the scope: internal service-to-service calls work, so the instances and security groups are not the whole story.'
+- Trace the private subnet default route and confirm it points at the expected NAT gateway.
+- Check the NAT gateway state, subnet placement and elastic IP association.
+- Compare private and public route tables to see where the paths diverge.
+fix_steps:
+- Inspect the NAT gateway and its subnet placement.
+- Replace a failed NAT gateway or correct the private route target.
+- Confirm the NAT gateway subnet has a route to the internet gateway.
+- Re-test an outbound HTTPS request from a private instance.
+validation_rules:
+- rule: nat_gateway_exists
+  description: At least one NAT gateway exists for private egress
+  params:
+    min_count: 1
+- rule: route_to_nat
+  description: Private subnets route 0.0.0.0/0 to a NAT gateway
+  params:
+    subnet_type: private
+- rule: instance_reachable
+  description: A private instance can reach an external endpoint
+  params:
+    protocol: http
+    port: 443
+xp_reward: 150

@@ -1,0 +1,36 @@
+id: checkout-sg-regression
+title: 'Checkout Blackout: A Security Group Regression'
+symptom: >-
+  The storefront homepage loads, but every checkout request times out. The
+  application team reports healthy processes, the load balancer shows targets
+  as healthy, and the change log shows a security-group update shortly before
+  the first alert.
+injected_fault:
+  kind: loss
+  target: security_group
+  parameters:
+    security_group_id: sg-checkout
+    port: 443
+    loss_percent: 100
+    direction: ingress
+diagnosis_hints:
+- 'Split the path: the homepage works, so DNS, the load balancer and the instance are probably reachable.'
+- Compare the checkout security group with the last known good revision and look for a removed or narrowed ingress rule.
+- Check VPC flow logs for rejected traffic on port 443 from the load balancer subnet.
+- Confirm the target health check uses a different port or path, which can hide an application-port failure.
+fix_steps:
+- Identify the security group attached to the checkout targets.
+- Restore the ingress rule that allows HTTPS from the load balancer security group.
+- Remove any overly broad rule added during troubleshooting.
+- Re-test checkout through the load balancer and confirm healthy targets.
+validation_rules:
+- rule: security_group_allows
+  description: The checkout security group allows HTTPS from the internet-facing path
+  params:
+    port: 443
+    source: 0.0.0.0/0
+- rule: load_balancer_healthy_targets
+  description: At least two checkout targets are healthy
+  params:
+    min_count: 2
+xp_reward: 160

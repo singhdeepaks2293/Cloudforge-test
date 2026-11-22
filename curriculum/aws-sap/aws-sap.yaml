@@ -1,0 +1,359 @@
+id: aws-sap
+title: AWS Certified Solutions Architect - Professional
+description: >-
+  Advanced, multi-account and hybrid architecture practice for SAP-C02. The
+  scenarios mirror enterprise programs: landing-zone governance, Transit
+  Gateway connectivity, large migrations and disaster recovery that has to be
+  proven, not assumed.
+difficulty: advanced
+estimated_hours: 20
+learning_objectives:
+- Design a multi-account landing zone with organization-wide guardrails
+- Plan hybrid connectivity and DNS that survives a Region or link failure
+- Choose a migration strategy and a cutover plan with a tested rollback
+- Select a disaster recovery pattern from business RTO and RPO
+- Defend enterprise trade-offs across security, operations and cost
+modules:
+- id: sap-governance
+  title: Multi-Account Governance
+  lessons:
+  - id: sap-landing-zone
+    title: Landing Zones, OUs and Service Control Policies
+    theory: |
+      A landing zone is the baseline every account inherits: identity, logging,
+      networking, guardrails and account provisioning. AWS Organizations groups
+      accounts into organizational units, and service control policies on an OU
+      set the maximum permissions for every principal in those accounts. Put
+      security and log-archive accounts in a dedicated OU that only the central
+      team can administer, and attach SCPs that deny leaving the organization,
+      disabling CloudTrail, or using unapproved Regions. Centralize CloudTrail,
+      VPC flow logs, Config history and GuardDuty findings in the log-archive
+      account so an compromised workload account cannot erase its own evidence.
+      Use AWS Control Tower or an equivalent pipeline to vend new accounts from
+      a template rather than hand-building them. In a forty-account enterprise
+      migration, the team first built the landing zone, then moved workloads in
+      waves; the guardrails caught a public S3 bucket and an unapproved Region
+      during the first week, before either reached production. The exam tests
+      whether you place a control at the right level: identity policy, resource
+      policy, permission boundary, SCP or network control.
+    key_points:
+    - Organizations and OUs let you apply policy at scale
+    - SCPs cap permissions for every principal in an account
+    - Centralize audit logs in a protected log-archive account
+    - Vendor accounts from a template instead of hand-building them
+    - 'Example: guardrails caught a public bucket before production in a 40-account migration'
+  - id: sap-identity-federation
+    title: Identity Federation and Cross-Account Access
+    theory: |
+      At enterprise scale, humans should not have IAM users in every account.
+      Federate the corporate identity provider into IAM Identity Center, assign
+      permission sets to groups, and let users assume roles in the accounts they
+      need. Permission sets become the reusable unit of access, and assignments
+      are auditable. Workloads should use cross-account IAM roles with external
+      IDs or trust policies scoped to specific principals, never copied access
+      keys. For third parties, require an external ID and a narrowly scoped
+      trust policy, and review the access continuously. Break-glass access should
+      be a separate, monitored role with a short session and an alarm on use.
+      In a financial-services program, the team removed hundreds of local IAM
+      users, mapped Active Directory groups to permission sets, and cut joiner,
+      mover and leaver effort from days to minutes. The trade-off is dependency
+      on the identity provider: design a documented break-glass path for when
+      federation is unavailable. The exam often contrasts IAM Identity Center
+      for workforce access with Cognito for customer identity, and cross-account
+      roles with resource policies for service-to-service access.
+    key_points:
+    - Federate workforce identity through IAM Identity Center permission sets
+    - Use cross-account roles, not copied access keys, for workloads
+    - Require external IDs and narrow trust for third parties
+    - Keep a monitored break-glass role for identity-provider outages
+    - 'Example: AD groups mapped to permission sets cut access changes to minutes'
+  - id: sap-guardrails-operations
+    title: Guardrails, Detection and Operating Model
+    theory: |
+      Governance only works when detection and response are part of the
+      operating model. AWS Config rules detect drift such as public buckets,
+      unencrypted volumes or security groups open to the world, and automatic
+      remediation can restore the baseline. Security Hub aggregates findings
+      from GuardDuty, Inspector, Macie and Config into one score, while
+      EventBridge routes high-severity findings to the on-call workflow.
+      Tag policies and backup policies applied through Organizations keep cost
+      allocation and recovery consistent across accounts. Define ownership for
+      each account and each workload, and review exceptions on a schedule.
+      A media company discovered that its "temporary" exception for a public
+      marketing bucket had survived two years; a Config rule plus a monthly
+      exception review removed it. The exam rewards designs that detect and
+      remediate automatically, centralize findings, and preserve an audit trail,
+      rather than relying on a manual checklist. It also expects you to know
+      that detective controls do not prevent an action; preventive controls such
+      as SCPs, bucket policies and permissions boundaries do.
+    key_points:
+    - Config rules detect drift; remediation can restore the baseline
+    - Security Hub aggregates findings; EventBridge routes them to response
+    - Tag and backup policies keep cost and recovery consistent
+    - Preventive controls stop actions; detective controls only report them
+    - 'Example: a Config rule and exception review removed a two-year-old public bucket'
+- id: sap-networking
+  title: Hybrid and Advanced Networking
+  lessons:
+  - id: sap-transit-gateway
+    title: Transit Gateway and Hybrid Connectivity
+    theory: |
+      A Transit Gateway is a regional hub that connects VPCs, VPNs and Direct
+      Connect gateways without a full mesh of peering links. Attachments belong
+      to route tables, and route-table associations and propagations decide
+      which networks can reach each other. Segment production, development and
+      shared services into separate route domains so a development VPC cannot
+      reach production by default. For hybrid connectivity, Direct Connect gives
+      predictable private bandwidth, while a VPN is faster to set up and can
+      serve as a backup path. Use at least two Direct Connect locations or a
+      VPN backup for resilience, and advertise only the prefixes you intend to
+      route. A retail company with two hundred stores connected stores through
+      VPN to a Transit Gateway, then segmented payment traffic from store
+      operations. When one VPN tunnel failed, the second tunnel carried traffic
+      without changing routes. The exam often asks you to choose between
+      peering, Transit Gateway and Direct Connect, and the deciding factors are
+      scale, transitivity, segmentation and operational ownership.
+    key_points:
+    - Transit Gateway is a regional hub that avoids a full peering mesh
+    - Route-table associations and propagations enforce segmentation
+    - Direct Connect for predictable bandwidth; VPN for speed and backup
+    - Use redundant paths and advertise only intended prefixes
+    - 'Example: two hundred stores segmented payment traffic through a Transit Gateway'
+  - id: sap-hybrid-dns
+    title: Hybrid DNS and Traffic Management
+    theory: |
+      Hybrid applications fail when name resolution is an afterthought. Route 53
+      Resolver endpoints forward queries between the VPC and on-premises DNS,
+      with inbound endpoints for on-premises to AWS and outbound endpoints for
+      AWS to on-premises. Private hosted zones hold internal names, and resolver
+      rules decide which queries go to which DNS server. Design for failure:
+      deploy resolver endpoints in multiple Availability Zones, keep
+      on-premises forwarders highly available, and make sure the failure of one
+      link does not leave a stale answer cached for the TTL. For global traffic,
+      Route 53 latency, failover and geolocation routing choose an endpoint,
+      while Global Accelerator provides anycast IP addresses and fast regional
+      failover for TCP and UDP. A logistics platform serving warehouses on
+      three continents used latency routing for the public API and private
+      hosted zones for internal service names, with resolver endpoints in every
+      Region. The exam expects you to separate public DNS, private DNS and
+      traffic-steering policy, and to notice when a TTL or a single resolver
+      endpoint undermines an otherwise resilient design.
+    key_points:
+    - Resolver inbound endpoints serve on-premises queries; outbound endpoints serve VPC queries
+    - Use resolver rules and private hosted zones for internal names
+    - Deploy resolver endpoints across Availability Zones
+    - Global Accelerator gives anycast IPs and fast regional failover
+    - 'Example: latency routing plus private zones for a three-continent logistics platform'
+  - id: sap-network-security-scale
+    title: Network Security at Scale
+    theory: |
+      At scale, network security must be centralized and inspectable without
+      becoming a bottleneck. Put shared security appliances in an inspection
+      VPC, attach them to a Transit Gateway, and route traffic that needs
+      inspection through that VPC. Use AWS Network Firewall for stateful domain
+      and protocol filtering, and keep security groups as the per-resource
+      control. Centralize VPC flow logs and query them when investigating an
+      incident. For private access to AWS APIs, use interface VPC endpoints and
+      endpoint policies that restrict which buckets, queues or secrets a VPC
+      can reach. Avoid overlapping CIDR ranges across VPCs and on-premises,
+      because overlap forces complex NAT and breaks routing. A manufacturer
+      standardized /16 address plans per factory and per environment before
+      connecting them, which let the network team add sites without renumbering.
+      The exam often presents a requirement to inspect east-west traffic or to
+      restrict access to a single S3 bucket from a VPC; the answer is usually a
+      centralized inspection VPC or an endpoint policy, not a wider security
+      group.
+    key_points:
+    - Centralize inspection in a shared VPC attached to the Transit Gateway
+    - Network Firewall filters domains and protocols; security groups stay per resource
+    - Endpoint policies restrict which resources a VPC can reach
+    - Plan non-overlapping CIDRs before connecting networks
+    - 'Example: standard /16 plans per factory avoided renumbering later'
+- id: sap-migration-dr
+  title: Migration and Disaster Recovery at Scale
+  lessons:
+  - id: sap-migration-strategies
+    title: Migration Strategies and Cutover
+    theory: |
+      The six migration strategies are rehost, replatform, repurchase, refactor,
+      retire and retain. Most enterprise programs start with rehost to gain
+      speed, then replatform selected workloads to managed services. AWS
+      Application Migration Service replicates servers continuously, so a test
+      launch and a cutover can use the same replicated state. AWS Database
+      Migration Service migrates and continuously replicates databases, and
+      DataSync moves file data. The hard part is the cutover plan: freeze writes,
+      verify replication lag is zero, run validation queries, switch DNS or
+      connection strings, and keep a tested rollback for a defined window. Run
+      at least one full rehearsal, including the rollback. In a healthcare
+      migration, the team rehearsed a weekend cutover three times, found a
+      missing certificate and a reporting dependency, and then completed the
+      production cutover in the planned window with no data loss. The exam asks
+      you to choose a migration service from the source and target, and to spot
+      a plan that has no rollback or no way to validate data before switching.
+    key_points:
+    - The six Rs are rehost, replatform, repurchase, refactor, retire and retain
+    - Application Migration Service replicates servers for test and cutover
+    - DMS replicates databases; DataSync moves file data
+    - Freeze writes, verify zero lag and rehearse the rollback
+    - 'Example: three rehearsals caught a missing certificate before a healthcare cutover'
+  - id: sap-dr-patterns
+    title: Disaster Recovery Patterns and Testing
+    theory: |
+      Disaster recovery is a business decision expressed as RTO and RPO, then
+      implemented as a pattern. Backup and restore is cheapest and slowest.
+      Pilot light keeps data replicated and a minimal core running. Warm standby
+      keeps a scaled-down full stack ready to scale. Multi-site active-active
+      serves traffic from more than one Region and is the most expensive. For
+      each pattern, decide what is replicated, how failover is triggered, and
+      how you will fail back. Automate the runbook with infrastructure as code
+      and test it on a schedule; an untested DR plan is a hypothesis. Use
+      Aurora Global Database or cross-Region read replicas for data, Route 53
+      health checks or Global Accelerator for traffic, and pre-provisioned
+      capacity to avoid depending on quotas during a disaster. A payments
+      company ran a quarterly game day that disabled a Region and measured the
+      real RTO; the first run exposed a manual DNS step that added forty
+      minutes, which they automated. The exam favors tested, automated failover
+      with explicit RTO and RPO over a design that merely names a second Region.
+    key_points:
+    - DR patterns trade cost for recovery speed
+    - Decide replication, failover trigger and failback for each pattern
+    - Automate runbooks and test them on a schedule
+    - Pre-provision capacity so quotas do not block recovery
+    - 'Example: a game day found a manual DNS step adding forty minutes'
+  - id: sap-cost-resilience-tradeoffs
+    title: Cost, Resilience and Organizational Trade-offs
+    theory: |
+      Professional-level design is mostly trade-off management. A multi-Region
+      active-active design may be technically correct and still be the wrong
+      answer if the business cannot fund it. Quantify the cost of downtime,
+      compare it with the cost of the resilience pattern, and document the
+      decision. Use commitments for steady baselines, but keep enough
+      flexibility for migration and seasonal peaks. Centralize shared services
+      such as networking, logging and security to reduce duplication, and charge
+      them back with tags and showback reports. Watch for hidden costs:
+      cross-AZ and cross-Region data transfer, NAT gateway processing, and
+      idle standby capacity. In a merger, two teams each ran a full landing
+      zone; consolidating shared networking and logging removed duplicate
+      appliances and made the combined estate easier to audit, even though the
+      migration itself cost money. The exam expects a defensible recommendation
+      with assumptions, not a list of every service. State the RTO, RPO, budget
+      and compliance constraints, then choose the simplest design that satisfies
+      them and explain what you would monitor.
+    key_points:
+    - Quantify downtime cost against resilience cost and document the decision
+    - Commit only steady baselines; keep flexibility for peaks and migrations
+    - Centralize shared networking, logging and security to avoid duplication
+    - Watch cross-AZ, cross-Region and NAT processing costs
+    - 'Example: consolidating two landing zones removed duplicate appliances'
+guided_lab:
+  lab_definition_id: sap-hybrid-network
+  title: Build a segmented hybrid network with resilient egress
+  tasks:
+  - Create a VPC with CIDR 10.60.0.0/16 and at least six subnets
+  - Add two NAT gateways for resilient private egress and route private subnets to them
+  - Keep the application tier private and deny SSH from the whole internet
+  - Launch two application instances and register them behind a load balancer
+  - Confirm the load balancer reports two healthy targets
+  - Record the DNS and routing decisions you would use to extend this VPC on-premises
+  validation_rules:
+  - rule: vpc_exists
+    description: The hybrid VPC exists with the planned CIDR
+    params:
+      cidr: 10.60.0.0/16
+  - rule: subnet_count
+    description: At least six subnets exist for segmented tiers
+    params:
+      value: 6
+      operator: '>='
+  - rule: nat_gateway_exists
+    description: Two NAT gateways provide resilient egress
+    params:
+      min_count: 2
+  - rule: route_to_nat
+    description: Private subnets route 0.0.0.0/0 to a NAT gateway
+    params:
+      subnet_type: private
+  - rule: security_group_denies
+    description: No security group allows SSH from the whole internet
+    params:
+      port: 22
+      source: 0.0.0.0/0
+  - rule: instance_running
+    description: At least two application instances are running
+    params:
+      count: 2
+  - rule: load_balancer_healthy_targets
+    description: The load balancer has at least two healthy targets
+    params:
+      min_count: 2
+challenge:
+  title: Extend the platform to a second Region without breaking internal DNS
+  task: >-
+    Design and record the changes needed to serve the application from a second
+    Region with a five-minute RTO and a one-minute RPO. Keep private egress
+    resilient, resolve the internal name payments.internal, and deny SSH from
+    the internet. Explain how you would test failover and fail back.
+  validation_rules:
+  - rule: dns_resolves
+    description: The internal payments name resolves inside the VPC
+    params:
+      name: payments.internal
+  - rule: nat_gateway_exists
+    description: Resilient egress remains available
+    params:
+      min_count: 2
+  - rule: security_group_denies
+    description: No security group allows SSH from the whole internet
+    params:
+      port: 22
+      source: 0.0.0.0/0
+  - rule: load_balancer_healthy_targets
+    description: Two healthy targets remain behind the load balancer
+    params:
+      min_count: 2
+assessment:
+- question: A company wants a central hub that connects 30 VPCs and two on-premises sites with segmented routing. Which service fits best?
+  options:
+  - Full-mesh VPC peering
+  - AWS Transit Gateway with separate route tables
+  - A single NAT gateway shared by all VPCs
+  - Route 53 private hosted zones only
+  correct_answer: 1
+  explanation: Transit Gateway scales beyond a peering mesh, and route tables provide the required segmentation.
+- question: A regulated workload must not be able to disable CloudTrail even by an account administrator. Where should the deny be enforced?
+  options:
+  - An IAM group policy in each account
+  - A service control policy in AWS Organizations
+  - A security group on the CloudTrail endpoint
+  - A bucket policy on the log bucket
+  correct_answer: 1
+  explanation: An SCP applies to every principal in the account, including administrators, and can deny disabling audit logging.
+- question: On-premises users must resolve private names hosted in Route 53, and VPC workloads must resolve on-premises names. What do you need?
+  options:
+  - Route 53 Resolver inbound and outbound endpoints with forwarding rules
+  - A public hosted zone for every internal name
+  - Global Accelerator only
+  - A larger NAT gateway
+  correct_answer: 0
+  explanation: Inbound endpoints receive on-premises queries; outbound endpoints and resolver rules forward VPC queries to on-premises DNS.
+- question: A migration plan freezes writes, checks replication lag, validates data and switches DNS. What critical element is still missing?
+  options:
+  - A tested rollback plan and rehearsal
+  - A larger source database instance
+  - A second public load balancer
+  - More IAM users for the migration team
+  correct_answer: 0
+  explanation: A cutover without a tested rollback and rehearsal is incomplete; the exam looks for a proven way back.
+- question: A business requires a 15-minute RTO and a 5-minute RPO at the lowest cost. Which pattern is the best fit?
+  options:
+  - Backup and restore from nightly snapshots
+  - Warm standby with continuous data replication
+  - Multi-site active-active in three Regions
+  - A single Region with larger instances
+  correct_answer: 1
+  explanation: Warm standby meets a short RTO and RPO with continuous replication at lower cost than active-active.
+xp_reward: 350
+prerequisites:
+- aws-saa
+- architecture
+- terraform

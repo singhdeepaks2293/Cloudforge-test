@@ -1,0 +1,34 @@
+id: alb-target-latency
+title: 'Slow Checkout: The Load Balancer Drain'
+symptom: >-
+  The application is up and target health checks pass, but checkout p99 latency
+  climbs from 300 ms to more than five seconds. Users retry, traffic doubles,
+  and the database looks healthy while the load balancer reports timeouts.
+injected_fault:
+  kind: latency
+  target: load_balancer
+  parameters:
+    load_balancer_id: alb-checkout
+    latency_ms: 5000
+    affected: target_response
+diagnosis_hints:
+- 'Separate client latency from server latency: compare load-balancer latency with application request duration.'
+- Check whether only one target group or Availability Zone is slow.
+- Review the load balancer and target-group timeout settings against the observed delay.
+- Look for a recent change to health-check or target registration settings.
+fix_steps:
+- Identify the slow target group and its registered targets.
+- Remove or replace the degraded target, or correct the introduced delay.
+- Align the target-group timeout with the application's real response budget.
+- Re-test checkout latency and confirm healthy targets.
+validation_rules:
+- rule: load_balancer_healthy_targets
+  description: At least two targets are healthy behind the load balancer
+  params:
+    min_count: 2
+- rule: instance_reachable
+  description: A running target has a recorded address and is reachable
+  params:
+    protocol: http
+    port: 443
+xp_reward: 170

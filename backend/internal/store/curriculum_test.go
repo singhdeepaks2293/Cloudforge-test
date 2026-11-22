@@ -36,18 +36,18 @@ func seedMemory(t *testing.T) (*MemoryCourseStore, *MemoryCurriculumStore, *curr
 
 func TestSeedIdempotentMemory(t *testing.T) {
 	_, curr, rep := seedMemory(t)
-	if rep.Tracks != 14 || rep.Lessons != 70 || rep.Questions != 84 || rep.Scenarios != 6 || rep.Achievements != 15 {
+	if rep.Tracks != 16 || rep.Lessons != 88 || rep.Questions != 94 || rep.Scenarios != 10 || rep.Achievements != 19 {
 		t.Fatalf("seed report: %+v", rep)
 	}
-	if rep.LabDefinitions != 14*2+6 {
-		t.Fatalf("lab definitions: got %d, want %d", rep.LabDefinitions, 14*2+6)
+	if rep.LabDefinitions != 16*2+10 {
+		t.Fatalf("lab definitions: got %d, want %d", rep.LabDefinitions, 16*2+10)
 	}
 	tracks, err := curr.ListTracks(context.Background())
-	// Phase 1 fix (14-vs-17): tracks are the 14 seeded curriculum
+	// Phase 1 fix (16-vs-19): tracks are the 16 seeded curriculum
 	// tracks only. The 3 legacy M1 courses (vpc-fundamentals,
 	// iam-security, ec2-basics) are courses, not tracks, and must not
 	// be listed here — they still appear in GET /api/v1/courses (17).
-	if err != nil || len(tracks) != 14 {
+	if err != nil || len(tracks) != 16 {
 		t.Fatalf("ListTracks after seed: %d tracks err=%v", len(tracks), err)
 	}
 	// Re-seed: counts must be identical and no duplicate tracks.
@@ -228,7 +228,7 @@ func TestPostgresCurriculumIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if rep.Tracks != 14 || rep.Lessons != 70 || rep.Questions != 84 || rep.Scenarios != 6 || rep.Achievements != 15 {
+	if rep.Tracks != 16 || rep.Lessons != 88 || rep.Questions != 94 || rep.Scenarios != 10 || rep.Achievements != 19 {
 		t.Fatalf("seed report: %+v", rep)
 	}
 	// Idempotent: a second seed reports the same counts and the
@@ -321,8 +321,8 @@ func TestPostgresCurriculumIntegration(t *testing.T) {
 
 func TestListTracksExcludesLegacyCourses(t *testing.T) {
 	courses, curr, rep := seedMemory(t)
-	if rep.Tracks != 14 {
-		t.Fatalf("seed report tracks: %d, want 14", rep.Tracks)
+	if rep.Tracks != 16 {
+		t.Fatalf("seed report tracks: %d, want 16", rep.Tracks)
 	}
 	tracks, err := curr.ListTracks(context.Background())
 	if err != nil {
@@ -337,13 +337,13 @@ func TestListTracksExcludesLegacyCourses(t *testing.T) {
 			t.Fatalf("ListTracks must not include legacy M1 course %q (it is a course, not a track)", tr.ID)
 		}
 	}
-	// The courses list is a different surface and still holds all 17:
-	// 3 legacy M1 courses + 14 curriculum tracks.
+	// The courses list is a different surface and still holds all 19:
+	// 3 legacy M1 courses + 16 curriculum tracks.
 	all, err := courses.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 17 {
-		t.Fatalf("courses list = %d, want 17 (3 legacy + 14 tracks)", len(all))
+	if len(all) != 19 {
+		t.Fatalf("courses list = %d, want 19 (3 legacy + 16 tracks)", len(all))
 	}
 }

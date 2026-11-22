@@ -19,24 +19,24 @@ func TestLoadCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(b.Tracks) != 14 {
-		t.Fatalf("tracks: got %d, want 14", len(b.Tracks))
+	if len(b.Tracks) != 16 {
+		t.Fatalf("tracks: got %d, want 16", len(b.Tracks))
 	}
 	lessons, questions := 0, 0
 	for _, tr := range b.Tracks {
 		lessons += tr.LessonCount()
 		questions += len(tr.Assessment)
 	}
-	if lessons != 70 {
+	if lessons != 88 {
 		t.Fatalf("lessons: got %d, want 70", lessons)
 	}
-	if questions != 84 {
+	if questions != 94 {
 		t.Fatalf("questions: got %d, want 84", questions)
 	}
-	if len(b.Scenarios) != 6 {
+	if len(b.Scenarios) != 10 {
 		t.Fatalf("scenarios: got %d, want 6", len(b.Scenarios))
 	}
-	if len(b.Achievements) != 15 {
+	if len(b.Achievements) != 19 {
 		t.Fatalf("achievements: got %d, want 15", len(b.Achievements))
 	}
 	net := b.Tracks[0]

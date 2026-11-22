@@ -638,10 +638,10 @@ module position, lesson slug, question index, lab-definition id,
 achievement id, scenario id) — and runs at API startup when
 `CURRICULUM_SEED=1` (the default), via the `-seed-curriculum`
 flag, or on demand through `POST /api/v1/admin/seed-curriculum`
-(admin only). Seed counts for the shipped content: **14 tracks, 70
-lessons, 84 assessment questions, 6 break-and-fix scenarios, 15
+(admin only). Seed counts for the shipped content: **16 tracks, 88
+lessons, 94 assessment questions, 10 break-and-fix scenarios, 19
 achievements** (plus 2 guided/challenge lab definitions per track =
-34 lab definitions).
+42 lab definitions).
 
 Migration `005_curriculum.sql` adds only what M8 uses: course
 `difficulty`/`estimated_hours`/`xp_reward`; lesson `slug`/`theory`/
@@ -658,7 +658,7 @@ match the curriculum YAML lesson order/topics — `vpc-fundamentals`
 The M1 course rows are left untouched; the curriculum tracks are
 new course rows (`networking`, `iam`, `ec2`, …), so the old
 `/api/v1/courses` catalogue still lists the M1 courses and the new
-`/api/v1/curriculum/tracks` surface lists all 17.
+`/api/v1/curriculum/tracks` surface lists all 19.
 
 **XP:** lesson completion still awards 10 XP (+10 first-lesson
 bonus) through the existing `xp_transactions` path, and a
@@ -677,7 +677,7 @@ correctness). Break-and-fix solves award the scenario XP once.
 **Achievements + streaks:** `internal/achievements` evaluates the
 triggers in `achievements.yaml` on every XP/progress event (lesson
 completion, assessment pass, passing lab validation, break-and-fix
-solve). All 15 shipped triggers are observable and live
+solve). All 19 shipped triggers are observable and live
 (`lessons_completed`, `labs_completed`, `challenges_completed`,
 `break_fix_solved`, `track_completed`, `tracks_completed`,
 `assessment_score`, `xp_total`, `streak_days`). The three M2 legacy
@@ -688,7 +688,7 @@ Streaks are consecutive UTC calendar days with a lesson, lab, or
 assessment activity (a streak ending yesterday still counts; the
 current day not being over yet does not break it).
 
-**Break-and-fix:** the 6 scenarios are seeded as lab definitions
+**Break-and-fix:** the 10 scenarios are seeded as lab definitions
 (`break-fix-<id>`, kind `break-fix`) with their fault spec.
 `POST /labs/{id}/break-fix/start` maps the YAML fault kind to the
 engine `FaultSpec` (`route-blackhole`→5/magnitude 1,

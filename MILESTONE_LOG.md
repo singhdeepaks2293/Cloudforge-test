@@ -2946,3 +2946,47 @@ curriculum and deployment files untouched. The pre-existing modified
   their earlier layouts.
 - The likeness is structural (spacing, colour, tables, toolbars); no
   AWS brand assets or fonts are used.
+
+## Certification tracks, industry incidents and coverage map
+
+### Content
+
+- Added `curriculum/aws-saa/aws-saa.yaml`: SAA-C03 track with three
+  domains, nine lessons, an advanced two-AZ guided lab (`saa-ha-web`),
+  a cost-and-availability challenge, and five exam-style questions.
+- Added `curriculum/aws-sap/aws-sap.yaml`: SAP-C02 track covering
+  multi-account governance, hybrid networking and migration/DR, with
+  nine lessons, a segmented hybrid lab (`sap-hybrid-network`), a
+  multi-Region challenge and five exam-style questions.
+- Added four industry break-and-fix scenarios using only rules the
+  validation engine can evaluate: `checkout-sg-regression`,
+  `nat-egress-collapse`, `alb-target-latency` and `hybrid-dns-outage`.
+- Added four achievements (`saa-architect`, `sap-architect`,
+  `incident-commander`, `certification-builder`) and raised the
+  break-and-fix completion achievement to the new ten-scenario set.
+- Added `saa-ha-web` and `sap-hybrid-network` to the launchable lab
+  definitions at 30 minutes each, so both work inside the lite quota.
+- Catalogued the missing SAA/SAP services honestly as `UNSUPPORTED`
+  (Auto Scaling, Global Accelerator, Direct Connect, Control Tower,
+  IAM Identity Center, RAM, Storage Gateway, Snowball, Lake Formation,
+  Macie, Compute Optimizer, Savings Plans, Audit Manager, Artifact).
+- Added `docs/certifications/AWS_CERTIFICATION_MAP.md` mapping each
+  exam domain to the services it needs, the CloudForge fidelity, and
+  the practice lab or lesson.
+
+### Verification
+
+- `python3 curriculum/validate.py` — 16 tracks, 88 lessons, 94
+  questions, 10 scenarios, 19 achievements.
+- `go test ./internal/curriculum ./internal/labs ./internal/achievements ./internal/store`
+  — pass.
+- `go test ./internal/httpapi -run 'TestCurriculumFlow|TestCurriculumLabValidationRulesField|TestLiteModeCapsQuotas'`
+  — pass.
+
+### Known limitations
+
+- Non-network services (S3, IAM, Lambda, SQS, RDS) still cannot be
+  graded by lab validation; that needs provider state in the
+  validation state.
+- The new lab definitions are content-complete but were not launched
+  against a live lite stack in this change.

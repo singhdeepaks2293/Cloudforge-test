@@ -18,7 +18,7 @@ func seedTestCurriculum(t *testing.T, srv *Server) {
 	if err != nil {
 		t.Fatalf("SeedDir: %v", err)
 	}
-	if rep.Tracks != 14 || rep.Lessons != 70 {
+	if rep.Tracks != 16 || rep.Lessons != 88 {
 		t.Fatalf("seed report: %+v", rep)
 	}
 }
@@ -34,8 +34,8 @@ func TestCurriculumFlow(t *testing.T) {
 		t.Fatalf("list tracks: %d %v", status, body)
 	}
 	tracks, _ := body["tracks"].([]any)
-	if len(tracks) < 14 {
-		t.Fatalf("tracks: %d, want >= 14", len(tracks))
+	if len(tracks) < 16 {
+		t.Fatalf("tracks: %d, want >= 16", len(tracks))
 	}
 
 	// Track detail includes theory and hides correct answers.

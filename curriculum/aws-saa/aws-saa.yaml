@@ -1,0 +1,372 @@
+id: aws-saa
+title: AWS Certified Solutions Architect - Associate
+description: >-
+  Exam-focused solutions architecture practice built around the four SAA-C03
+  domains: resilient, secure, high-performing and cost-optimized designs. Each
+  module pairs exam concepts with a real production incident so learners can
+  explain a design decision and then operate it under pressure.
+difficulty: intermediate
+estimated_hours: 12
+learning_objectives:
+- Choose multi-AZ, multi-region and backup strategies from stated RTO and RPO
+- Design least-privilege IAM and layered network controls for a regulated workload
+- Select caching, storage and compute services from access patterns and cost data
+- Diagnose a live architecture failure and defend the fix against the Well-Architected pillars
+- Map each design decision to the SAA-C03 task statements
+modules:
+- id: saa-resilience
+  title: Designing Resilient Architectures
+  lessons:
+  - id: saa-recovery-objectives
+    title: Recovery Objectives and Disaster Recovery Patterns
+    theory: |
+      Every availability decision starts with two numbers. Recovery time
+      objective (RTO) is how long the business can tolerate an outage, and
+      recovery point objective (RPO) is how much data it can afford to lose.
+      Backup and restore is the cheapest pattern: restore from S3 or snapshots,
+      with an RTO measured in hours. Pilot light keeps a minimal copy of the
+      core data tier running and scales the rest during recovery. Warm standby
+      keeps a scaled-down but fully functional stack, so failover is minutes.
+      Multi-site active-active runs the workload in more than one Region and
+      routes users to the nearest healthy copy, giving the lowest RTO at the
+      highest cost. A real retail order service might accept a fifteen-minute
+      RPO for orders but only a five-minute RTO for checkout, which rules out
+      backup and restore and points to warm standby with cross-Region
+      replication. The exam consistently asks you to pick the cheapest pattern
+      that still meets both numbers, not the most resilient pattern available.
+    key_points:
+    - RTO is tolerated downtime; RPO is tolerated data loss
+    - Backup and restore, pilot light, warm standby and multi-site trade cost for recovery speed
+    - Pick the cheapest pattern that satisfies both stated numbers
+    - 'Example: checkout needs a five-minute RTO; nightly backups are not enough'
+    architecture_diagram_mermaid: |
+      flowchart LR
+        BR[Backup and restore] --> PL[Pilot light]
+        PL --> WS[Warm standby]
+        WS --> MS[Multi-site active-active]
+        BR -->|lowest cost, slowest| Cost[Cost]
+        MS -->|highest cost, fastest| Cost
+  - id: saa-multi-az-failover
+    title: Multi-AZ Failover and Static Stability
+    theory: |
+      A Multi-AZ design removes a single data-center failure domain, but only
+      if every tier can fail independently. An Application Load Balancer spreads
+      traffic across healthy targets in at least two Availability Zones and
+      removes targets that fail its health check. The application tier should
+      be stateless so any instance can serve any request, and the data tier
+      should use a managed Multi-AZ deployment rather than a hand-built replica.
+      Static stability means the recovery path does not depend on creating new
+      capacity during the incident: pre-provision spare capacity in each zone
+      instead of relying on Auto Scaling to launch into a zone that may itself
+      be degraded. Route 53 failover routing can move traffic to a secondary
+      Region, but DNS TTLs and client caching make it slower than an in-Region
+      load-balancer decision. A ticketing platform that loses one zone should
+      keep selling tickets with no operator action; that is the test. Design the
+      health check to reflect real user success, not just whether a process is
+      listening on a port.
+    key_points:
+    - Spread every tier across at least two Availability Zones
+    - Health checks must reflect real request success
+    - Static stability avoids creating capacity during a failure
+    - DNS failover is slower than an in-Region load-balancer decision
+    - 'Example: a ticketing platform keeps selling through a zone loss'
+  - id: saa-decoupling
+    title: Decoupling with Queues and Events
+    theory: |
+      Tightly coupled tiers fail together. A checkout service that calls an
+      inventory service synchronously inherits every inventory latency spike and
+      outage, and a retry storm can turn a small slowdown into a full outage.
+      Amazon SQS gives durable point-to-point buffering so producers can keep
+      accepting work while consumers catch up. Amazon SNS fans a message out to
+      many subscribers, and EventBridge routes events by content to decoupled
+      consumers. The design details matter: make consumers idempotent because
+      at-least-once delivery can repeat a message, set a visibility timeout
+      longer than normal processing, and attach a dead-letter queue so poison
+      messages do not block the main queue forever. Backpressure is a feature,
+      not a failure: a queue that grows during a flash sale protects the
+      database. During a real Black Friday incident, a team that had moved order
+      writes onto a queue survived a payment-provider slowdown by draining the
+      backlog afterward, while a synchronous competitor returned errors to
+      customers. The exam favors asynchronous boundaries between tiers with
+      different scaling or failure characteristics.
+    key_points:
+    - SQS buffers point-to-point work; SNS and EventBridge fan out events
+    - Consumers must be idempotent under at-least-once delivery
+    - Use dead-letter queues and visibility timeouts deliberately
+    - Backpressure protects downstream tiers during spikes
+    - 'Example: a queue absorbs a payment-provider slowdown during Black Friday'
+- id: saa-security
+  title: Designing Secure Architectures
+  lessons:
+  - id: saa-least-privilege
+    title: Least Privilege, Roles and Guardrails
+    theory: |
+      Least privilege is a process, not a single policy. Start from the job to
+      be done, grant the smallest set of actions on the smallest set of
+      resources, and use conditions such as source VPC, MFA or resource tags to
+      narrow access further. Prefer IAM roles over long-lived access keys so
+      credentials are short-lived and automatically rotated. Permission
+      boundaries cap the maximum permissions an identity can receive, which lets
+      you delegate policy creation without letting a team escalate itself.
+      Service control policies in AWS Organizations set an organization-wide
+      ceiling that even account administrators cannot exceed, which is how you
+      enforce region restrictions or block disabling of audit logging. IAM
+      Access Analyzer finds resources shared outside the account, and credentials
+      reports surface unused keys. In a real contractor-access review, a team
+      replaced a shared administrator role with per-task roles, added a
+      permission boundary, and removed unused keys; the next access review found
+      no standing administrative access. The exam often presents an
+      access-denied error and expects you to distinguish an identity policy, a
+      resource policy, a boundary, an SCP and a session policy.
+    key_points:
+    - Grant the smallest action set on the smallest resource set
+    - Prefer short-lived roles over long-lived access keys
+    - Permission boundaries cap delegated permissions; SCPs cap whole accounts
+    - Access Analyzer and credential reports find excess exposure
+    - 'Example: replace shared admin access with per-task roles and a boundary'
+  - id: saa-network-segmentation
+    title: Layered Network Segmentation
+    theory: |
+      Network security works in layers because each control answers a different
+      question. Security groups are stateful and decide whether a resource may
+      receive traffic; network ACLs are stateless and decide whether a subnet
+      may carry traffic. Put databases and application servers in private
+      subnets with no route to the internet, and expose only the load balancer
+      in public subnets. Reach private AWS services through VPC endpoints
+      instead of sending traffic over a NAT gateway, which reduces exposure and
+      data-processing cost. For administrative access, prefer AWS Systems
+      Manager Session Manager over a bastion host: there is no inbound port, no
+      public address and every session is audited. For a payment-card workload,
+      segment the cardholder-data environment into its own VPC and accounts,
+      restrict egress to approved endpoints, and log flow logs to a central
+      account. A common exam trap is fixing a connection by opening a security
+      group to 0.0.0.0/0; the better answer is usually a narrower source
+      security group, a VPC endpoint or a private link. Draw the path first,
+      then place a control at each boundary.
+    key_points:
+    - Security groups are stateful; network ACLs are stateless
+    - Keep data and application tiers in private subnets
+    - Use VPC endpoints instead of NAT for private AWS service access
+    - Session Manager removes the need for a public bastion
+    - 'Example: isolate cardholder data in dedicated accounts and VPCs'
+  - id: saa-data-protection
+    title: Encryption, Secrets and Data Perimeter
+    theory: |
+      Protecting data means controlling it at rest, in transit and at the
+      perimeter. AWS KMS provides managed keys and envelope encryption: services
+      use a data key to encrypt objects, and the data key is itself encrypted by
+      a KMS key, so you never handle raw key material. Enable rotation, scope
+      key policies tightly, and separate key administration from key use. Store
+      application secrets in AWS Secrets Manager or Systems Manager Parameter
+      Store instead of environment variables or source code, and automate
+      rotation for database credentials. For object storage, enable Block Public
+      Access at the account level, require TLS with a bucket policy, enable
+      versioning for recovery, and use S3 Object Lock where records must be
+      immutable. A data perimeter combines identity, resource and network
+      controls so that only trusted identities from trusted networks can reach
+      sensitive data. In a healthcare migration, a team encrypted every store
+      with customer-managed keys, rotated database secrets automatically, and
+      blocked public bucket policies organization-wide; an audit then showed no
+      unencrypted store and no public object. The exam expects you to choose
+      customer-managed keys when the requirement is control, audit or
+      cross-account access.
+    key_points:
+    - KMS envelope encryption keeps raw key material out of the application
+    - Rotate secrets automatically with Secrets Manager
+    - Block Public Access and require TLS on object storage
+    - Use customer-managed keys when control and audit are required
+    - 'Example: encrypt every store and rotate database secrets in a healthcare migration'
+- id: saa-performance-cost
+  title: Designing High-Performing and Cost-Optimized Architectures
+  lessons:
+  - id: saa-caching
+    title: Caching and Content Delivery
+    theory: |
+      Caching is the cheapest way to improve both latency and cost, provided the
+      cache is designed around the access pattern. CloudFront caches content at
+      edge locations, which removes repeated long-haul requests and can absorb
+      traffic spikes. ElastiCache provides an in-memory tier for session state,
+      leaderboards or repeated database reads. Use the cache-aside pattern:
+      read from the cache, fall back to the database on a miss, then populate
+      the cache with a TTL. Choose TTLs from how stale the data may be, not from
+      a default. Protect the database from a cache stampede by adding jitter and
+      request coalescing when a popular key expires. Invalidate deliberately:
+      version object keys or use short TTLs instead of purging the whole cache
+      during an incident. A media streaming service cut origin egress and
+      startup time by caching manifests and segments at the edge, while keeping
+      per-user playlists uncached. The exam often contrasts CloudFront for
+      public, cacheable content with ElastiCache for application-level data, and
+      asks you to spot a design that caches personalized or rapidly changing
+      data and therefore adds risk without benefit.
+    key_points:
+    - Cache public content at the edge with CloudFront
+    - Use ElastiCache for repeated application reads and session state
+    - Cache-aside with deliberate TTLs and jitter avoids stampedes
+    - Version keys instead of purging everything during an incident
+    - 'Example: cache manifests and segments, not per-user playlists'
+  - id: saa-compute-storage
+    title: Choosing Compute and Storage
+    theory: |
+      The right compute and storage choice follows from the workload shape. A
+      short, event-driven function with unpredictable traffic fits Lambda; a
+      long-running service with steady traffic and custom dependencies fits
+      containers on ECS or EKS; a lift-and-shift application fits EC2. Graviton
+      instances often deliver better price-performance for supported workloads,
+      but test the dependency stack first. For storage, S3 is for object data
+      accessed by API, EBS is for block storage attached to one instance, and
+      EFS is for shared file access across many instances. Within S3, choose
+      storage classes from access frequency and retrieval tolerance: Standard
+      for hot data, Infrequent Access for occasional reads, and Glacier tiers
+      for archives. Lifecycle rules move objects automatically. A SaaS company
+      reduced cost by moving session data to ElastiCache, archived logs to
+      Glacier, and stateless workers to Graviton, while leaving a latency-
+      sensitive licensing service on its original instance family. The exam
+      rewards matching the service to the access pattern and penalizes choosing
+      a fashionable service that does not fit the workload.
+    key_points:
+    - Lambda for short event-driven work; containers for long-running services
+    - Graviton can improve price-performance but verify dependencies
+    - S3 is object, EBS is block for one instance, EFS is shared file
+    - Use S3 lifecycle rules to move cold data automatically
+    - 'Example: archive logs to Glacier and move session state to ElastiCache'
+  - id: saa-cost-governance
+    title: Cost Visibility and Governance
+    theory: |
+      Cost optimization starts with visibility. Tag every resource with owner,
+      environment and cost center, activate those tags as cost allocation tags,
+      and review Cost Explorer by service and account. AWS Budgets sends alerts
+      or triggers automation when spend or forecast crosses a threshold. Savings
+      Plans and Reserved Instances trade commitment for discount, so they fit
+      steady baselines rather than spiky workloads. Compute Optimizer and Trusted
+      Advisor highlight over-provisioned resources, while S3 lifecycle rules and
+      EBS snapshot policies remove forgotten storage. The harder cultural change
+      is making cost a design input: a team that reviews unit cost per request
+      catches regressions before the monthly bill. In a startup incident, a
+      forgotten development environment with public load balancers and oversized
+      instances produced most of a surprise bill; tagging, budgets and a
+      scheduled shutdown removed the recurring waste. The exam often asks for
+      the most cost-effective option that still meets a requirement, so compare
+      commitment discounts, storage classes and serverless pricing rather than
+      defaulting to the largest instance.
+    key_points:
+    - Tag resources and activate cost allocation tags before optimizing
+    - Budgets alert or automate when spend or forecast crosses a threshold
+    - Savings Plans fit steady baselines; do not commit spiky workloads
+    - Compute Optimizer and Trusted Advisor find over-provisioning
+    - 'Example: tagging and scheduled shutdown remove forgotten dev spend'
+guided_lab:
+  lab_definition_id: saa-ha-web
+  title: Build a highly available web tier across two Availability Zones
+  tasks:
+  - Create a VPC with CIDR 10.20.0.0/16 and at least four subnets
+  - Add an internet gateway and route the public subnets to it
+  - Add a NAT gateway and route the private subnets to it
+  - Create a security group that allows HTTPS from the internet and SSH only from the lab network
+  - Launch at least two web instances and register them behind a load balancer
+  - Confirm the load balancer reports at least two healthy targets
+  validation_rules:
+  - rule: vpc_exists
+    description: The lab VPC exists with the planned CIDR
+    params:
+      cidr: 10.20.0.0/16
+  - rule: subnet_count
+    description: At least four subnets exist for public and private tiers
+    params:
+      value: 4
+      operator: '>='
+  - rule: route_to_igw
+    description: Public subnets route 0.0.0.0/0 to the internet gateway
+    params:
+      subnet_type: public
+  - rule: nat_gateway_exists
+    description: At least one NAT gateway exists
+    params:
+      min_count: 1
+  - rule: route_to_nat
+    description: Private subnets route 0.0.0.0/0 to the NAT gateway
+    params:
+      subnet_type: private
+  - rule: security_group_allows
+    description: The web security group allows HTTPS from the internet
+    params:
+      port: 443
+      source: 0.0.0.0/0
+  - rule: instance_running
+    description: At least two web instances are running
+    params:
+      count: 2
+  - rule: load_balancer_healthy_targets
+    description: The load balancer has at least two healthy targets
+    params:
+      min_count: 2
+challenge:
+  title: Survive a flash sale without overspending
+  task: >-
+    Keep the storefront available through a ten-times traffic spike while
+    reducing idle cost. Remove SSH exposure from the internet, keep two healthy
+    targets behind the load balancer, and record CPU utilization below sixty
+    percent after the spike. Explain which tier you would scale first and why.
+  validation_rules:
+  - rule: security_group_denies
+    description: No security group allows SSH from the whole internet
+    params:
+      port: 22
+      source: 0.0.0.0/0
+  - rule: load_balancer_healthy_targets
+    description: Two healthy targets remain behind the load balancer
+    params:
+      min_count: 2
+  - rule: metric_below
+    description: Recorded CPU utilization stays below sixty percent
+    params:
+      metric: cpu_utilization
+      threshold: 60
+assessment:
+- question: A checkout service must survive the loss of one Availability Zone with an RTO of five minutes and an RPO of one minute. Which design is the most cost-effective choice that meets both objectives?
+  options:
+  - Nightly backups restored into a new Region
+  - A warm standby stack with cross-Region data replication
+  - A single-AZ deployment with larger instances
+  - Manual failover to a cold environment after an incident
+  correct_answer: 1
+  explanation: Warm standby keeps a functional scaled-down stack and replicated data, meeting a five-minute RTO and one-minute RPO at lower cost than active-active.
+- question: A synchronous call from checkout to inventory is causing checkout outages whenever inventory slows down. What is the best first change?
+  options:
+  - Increase the checkout instance size
+  - Put an SQS queue between checkout and inventory and make the consumer idempotent
+  - Add a read replica to the inventory database
+  - Move checkout and inventory into the same Availability Zone
+  correct_answer: 1
+  explanation: A queue decouples the tiers, absorbs backpressure and lets inventory catch up; idempotency handles at-least-once delivery.
+- question: A contractor needs to create IAM policies for a team but must not be able to grant more permission than the team is allowed. Which control fits?
+  options:
+  - An IAM permission boundary on the contractor-created roles
+  - A longer access-key rotation schedule
+  - A network ACL on the contractor's subnet
+  - Enabling S3 versioning
+  correct_answer: 0
+  explanation: A permission boundary caps the maximum permissions a role can receive, so delegated policy authors cannot escalate beyond the boundary.
+- question: Private application instances must call S3 without traversing the public internet or a NAT gateway. What should you add?
+  options:
+  - A gateway VPC endpoint for S3
+  - A second internet gateway
+  - A public load balancer
+  - A larger NAT gateway
+  correct_answer: 0
+  explanation: A gateway VPC endpoint provides private connectivity to S3 from the VPC route table without NAT or internet exposure.
+- question: A media service serves the same video segments to millions of viewers and wants to cut origin egress and startup latency. Which change helps most?
+  options:
+  - Cache segments at CloudFront edge locations
+  - Move the origin to a larger instance
+  - Store segments in EBS
+  - Add a read replica of the origin database
+  correct_answer: 0
+  explanation: CloudFront caches cacheable segments close to viewers, reducing repeated origin requests and long-haul latency.
+xp_reward: 250
+prerequisites:
+- fundamentals
+- networking
+- iam
+- ec2
+- storage
+- databases
