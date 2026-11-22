@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -22,7 +22,15 @@ const listOf = (v: unknown, key: string): Rec[] => {
  * are eligible for routing — unprobed targets are never assumed
  * healthy.
  */
-export function ElbConsole() {
+/**
+ * Load-balancer list content without the console shell, so the EC2
+ * console can render it as its Load Balancing section (the survey
+ * found ELB has no standalone console — it is the EC2 console's
+ * Load Balancing section). ElbConsole below keeps the standalone
+ * shell for the /services/elb bookmark, which now redirects to the
+ * EC2 section.
+ */
+export function ElbListContent() {
   const queryClient = useQueryClient()
   const [lbName, setLbName] = useState('')
   const [tgName, setTgName] = useState('')
@@ -84,13 +92,7 @@ export function ElbConsole() {
   })
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Elastic Load Balancing' }]}
-        title="Elastic Load Balancing — Load Balancers"
-        description="Application load balancers with listeners, target groups and health checks. In-process round-robin with real probes — no traffic is actually proxied."
-        actions={<FidelityBadge fidelity="SIMULATED" footnote="in-process round-robin · real probes" />}
-      />
+    <>
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {routeResult !== '' && <p className="border border-aws-border bg-white px-4 py-2 font-mono text-sm" role="status">{routeResult}</p>}
       {lbs.isPending && <Loading label="Loading load balancers" />}
@@ -115,9 +117,16 @@ export function ElbConsole() {
             totalCount={lbRows.length}
             columns={[
               { header: 'Name', render: (lb) => <button type="button" className="text-aws-link underline" onClick={() => setSelectedLb(String(lb.id))}>{String(lb.name)}</button> },
-              { header: 'DNS name', render: (lb) => String(lb.dns_name ?? '—') },
-              { header: 'Scheme', render: (lb) => String(lb.scheme ?? '—') },
               { header: 'State', render: (lb) => String(lb.status ?? '—') },
+              { header: 'Type', render: () => <span title="CloudForge does not model load balancer types (Application / Network / Gateway)">Not available</span> },
+              { header: 'Scheme', render: (lb) => String(lb.scheme ?? '—') },
+              { header: 'IP address type', render: () => <span title="CloudForge load balancers have no IP address type">Not available</span> },
+              { header: 'VPC ID', render: () => <span title="CloudForge load balancers are not attached to a VPC">Not available</span> },
+              { header: 'Availability Zones', render: () => <span title="No availability zones in the local region">Not available</span> },
+              { header: 'Security groups', render: () => <span title="CloudForge load balancers have no security groups">Not available</span> },
+              { header: 'DNS name', render: (lb) => String(lb.dns_name ?? '—') },
+              { header: 'ARN', render: () => <span title="CloudForge load balancers have no ARN">Not available</span> },
+              { header: 'Date created', render: (lb) => (typeof lb.created_at === 'string' ? new Date(lb.created_at as string).toLocaleString() : '—') },
               {
                 header: 'Actions',
                 render: (lb) => (
@@ -237,6 +246,66 @@ export function ElbConsole() {
           </div>
         )}
       </AwsCard>
-    </div>
+    </>
+  )
+}
+
+/**
+ * Standalone ELB shell (kept for the /services/elb bookmark, which
+ * App.tsx redirects to the EC2 console's Load Balancing section).
+ * Home counts come from the same React Query keys as ElbListContent,
+ * so the two share one cached fetch.
+ */
+export function ElbConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
+  const queryClient = useQueryClient()
+  const lbs = useQuery({ queryKey: ['elb-lbs'], queryFn: () => request<Rec>('/api/v1/aws/elb/load-balancers'), retry: 1 })
+  const tgs = useQuery({ queryKey: ['elb-tgs'], queryFn: () => request<Rec>('/api/v1/aws/elb/target-groups'), retry: 1 })
+  const lbRows = listOf(lbs.data, 'load_balancers')
+  const tgRows = listOf(tgs.data, 'target_groups')
+  return (
+    <ConsoleWithHome
+      icon="scale"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Elastic Load Balancing' }]}
+      title="Elastic Load Balancing — Load Balancers"
+      description="Application load balancers with listeners, target groups and health checks. In-process round-robin with real probes — no traffic is actually proxied. Per the 2026-11-22 console survey, ELB has no standalone console; it is the EC2 console's Load Balancing section — this page is kept as the old bookmark target."
+      fidelity="SIMULATED"
+      fidelityFootnote="in-process round-robin · real probes"
+      homeLabel="ELB dashboard"
+      listLabel="Load balancers"
+      initialSection={initialSection}
+      home={(goToList) => (
+        <ServiceHomeDashboard
+          serviceName="Elastic Load Balancing"
+          banner="In-process round-robin with real HTTP/TCP health probes. No engine RPC, no nginx reconfiguration; the DNS name is a local teaching name."
+          actions={[
+            { label: 'Create load balancer', primary: true, onClick: goToList },
+            { label: 'Open EC2 console — Load Balancing section', to: '/services/ec2?section=load-balancers' },
+            { label: 'Open Auto Scaling (unsupported)', to: '/services/ec2?section=autoscaling' },
+          ]}
+          cards={[
+            { label: 'Load balancers', count: lbRows.length, onSelect: goToList },
+            { label: 'Target groups', count: tgRows.length, onSelect: goToList },
+            { label: 'Listeners', count: '—', onSelect: goToList, note: 'Per load balancer, on the list page' },
+            { label: 'Auto Scaling groups', count: 0, disabledReason: 'Auto Scaling is UNSUPPORTED — no scaling API.' },
+          ]}
+          onRefresh={() => void queryClient.invalidateQueries()}
+          refreshing={lbs.isFetching}
+          health={[
+            lbs.isError ? 'Load balancers could not be loaded.' : `${lbRows.length} load balancer(s), ${tgRows.length} target group(s).`,
+            'SIMULATED: only targets whose last probe said healthy are eligible; unprobed targets are never assumed healthy.',
+          ]}
+          settings={[
+            { label: 'Resource Explorer', to: '/explorer' },
+            { label: 'All services', to: '/services' },
+          ]}
+          info={[
+            { label: 'Learning Center — networking track', to: '/learn' },
+            { label: 'Global Accelerator (unsupported — exam concept)', to: '/services/globalaccelerator' },
+          ]}
+        />
+      )}
+    >
+      <ElbListContent />
+    </ConsoleWithHome>
   )
 }

@@ -129,3 +129,19 @@ func TestLimitsCapAt(t *testing.T) {
 		t.Fatalf("unlimited duration capped at lite must be 30 min: %+v", got)
 	}
 }
+
+// v3 exam services: lite per-service resource cap.
+func TestLiteExamResourceMax(t *testing.T) {
+	if got := LiteExamResourceMax("learner"); got != 10 {
+		t.Fatalf("learner: got %d, want 10", got)
+	}
+	if got := LiteExamResourceMax("instructor"); got != 25 {
+		t.Fatalf("instructor: got %d, want 25", got)
+	}
+	if got := LiteExamResourceMax("admin"); got != 50 {
+		t.Fatalf("admin: got %d, want 50", got)
+	}
+	if got := LiteExamResourceMax("nobody"); got != 10 {
+		t.Fatalf("unknown role: got %d, want 10 (learner default)", got)
+	}
+}

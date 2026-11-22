@@ -15,6 +15,18 @@ const listOf = (v: unknown, key: string): Rec[] => {
 const str = (r: Rec, k: string): string => (typeof r[k] === 'string' ? (r[k] as string) : '')
 
 /**
+ * Latest execution for a pipeline (by created_at), matched on the
+ * execution's pipeline name or id. The pipeline's stage list is shown
+ * on the execution's stage-detail view, not in this table.
+ */
+function latestExecution(executions: Rec[], pipeline: Rec): Rec | undefined {
+  const mine = executions.filter((e) => str(e, 'pipeline_name') === str(pipeline, 'name') || str(e, 'pipeline_id') === str(pipeline, 'id'))
+  if (mine.length === 0) return undefined
+  mine.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
+  return mine[0]
+}
+
+/**
  * CodePipeline console (Phase 4) — mirrors the AWS CodePipeline
  * console's Pipelines list and pipeline detail with stage
  * visualisation. Stages run for real, in order: source (local git
@@ -152,13 +164,11 @@ export function CodePipelineConsole() {
             emptyMessage="No pipelines yet. Create one above."
             rows={pipelineRows}
             columns={[
-              { header: 'Pipeline name', render: (r) => <span className="font-mono">{str(r, 'name')}</span> },
-              {
-                header: 'Stages',
-                render: (r) =>
-                  Array.isArray(r.stages) ? (r.stages as Record<string, unknown>[]).map((s) => String(s.name ?? s.type)).join(' → ') : '—',
-              },
-              { header: 'Created', render: (r) => <span className="text-aws-muted">{str(r, 'created_at').slice(0, 19).replace('T', ' ') || '—'}</span> },
+              { header: 'Name', render: (r) => <span className="font-mono">{str(r, 'name')}</span> },
+              { header: 'Latest execution status', render: (r) => { const e = latestExecution(execRows, r); return e ? str(e, 'status') || '—' : '—' } },
+              { header: 'Latest source revisions', render: () => <span title="CloudForge does not record source revisions">Not available</span> },
+              { header: 'Latest execution started', render: (r) => { const e = latestExecution(execRows, r); return <span className="text-aws-muted">{e ? String(e.created_at ?? '').slice(0, 19).replace('T', ' ') || '—' : '—'}</span> } },
+              { header: 'Most recent executions', render: (r) => String(execRows.filter((e) => str(e, 'pipeline_name') === str(r, 'name') || str(e, 'pipeline_id') === str(r, 'id')).length) },
               {
                 header: 'Actions',
                 render: (r) => (

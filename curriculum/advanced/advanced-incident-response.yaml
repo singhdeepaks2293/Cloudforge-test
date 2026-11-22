@@ -1,0 +1,215 @@
+id: advanced-incident-response
+title: Security Incident Response
+description: 'Handle a real security incident end to end: detect it, contain it, eradicate the cause,
+  recover safely, and write the report that stops it happening again.'
+difficulty: advanced
+estimated_hours: 8
+learning_objectives:
+- Detect an incident from logs, metrics and alerts — and tell a real incident from noise
+- Contain a compromised resource without destroying evidence
+- Eradicate the root cause, not just the symptom
+- Recover safely and verify the system is clean
+- Write a blameless post-incident review that produces fixes
+modules:
+- id: adv-ir-detect
+  title: Detect and Contain
+  lessons:
+  - id: adv-ir-detection
+    title: Detection — Signal in the Noise
+    theory: 'Detection is the difference between an incident found in minutes and one found in months.
+      The signals are unglamorous: a login from a country the team has never worked in, an instance
+      making outbound connections at 3 a.m., a sudden change in a security group, an access key used
+      from two places at once, a bill that jumps because something is mining cryptocurrency. No single
+      signal proves an incident, and most alerts are noise — the skill is correlation, putting two or
+      three weak signals together until they form a picture. That needs logs in one place, with
+      retention long enough to look backwards: when the incident is found, the first question is
+      always when it started, and the answer lives in logs that were kept. Detection also needs a
+      baseline: you cannot spot unusual traffic if you never measured usual traffic. In the lab the
+      discipline is the same at small scale: read the logs, correlate the signals, and decide — is
+      this an incident, or noise?'
+    key_points:
+    - Most alerts are noise; incidents emerge from correlating weak signals
+    - Centralised logs with long retention let you find when it started
+    - You cannot spot unusual traffic without a baseline for usual traffic
+    - Watch for odd logins, odd egress, sudden security group changes, key reuse
+    - 'The first question is always: when did this start?'
+    architecture_diagram_mermaid: "flowchart LR\n    Logs[Central logs] --> Corr[Correlate signals]\\n    Corr --> Base[Compare to baseline]\\n    Base --> Decide[Incident or noise?]"
+  - id: adv-ir-containment
+    title: Containment Without Destroying Evidence
+    theory: 'Containment is a race between two goals that pull in opposite directions: stop the damage
+      now, and preserve the evidence for later. The instinct is to delete the compromised instance
+      immediately — and that instinct destroys the logs, the memory and the timeline that explain what
+      happened. The right sequence is: isolate first, investigate second, destroy last. Isolation
+      means cutting the network path, not the power: change the security group so the instance cannot
+      reach anything or be reached, revoke the exposed credentials, snapshot the disk before anything
+      is touched. Only then, with the evidence safe, does the investigation begin — and only when the
+      investigation is complete does anything get deleted. Every action is logged with a time, because
+      the timeline is the evidence. The hardest containment decision is whether to keep a compromised
+      system running briefly to watch the attacker: sometimes the answer is yes, with approval, and
+      sometimes the risk is too high. Either way, the decision is recorded.'
+    key_points:
+    - Isolate first, investigate second, destroy last
+    - Cut the network path with security groups, not the power
+    - Snapshot the disk before anything is touched
+    - Revoke exposed credentials immediately
+    - Log every action with a time; the timeline is the evidence
+    architecture_diagram_mermaid: "flowchart LR\n    Isolate[Isolate: SG + revoke keys] --> Snap[Snapshot disk]\\n    Snap --> Invest[Investigate]\\n    Invest --> Erad[Eradicate + rebuild]"
+- id: adv-ir-recover
+  title: Recover and Learn
+  lessons:
+  - id: adv-ir-eradication
+    title: Eradication and Recovery
+    theory: 'Eradication means removing the cause, not the symptom. Deleting the suspicious process
+      while the stolen access key still works is not eradication — the attacker comes back within the
+      hour. The checklist is methodical: revoke every exposed credential and rotate the rest, close
+      the hole that let the attacker in, rebuild the affected systems from known-good images rather
+      than cleaning them in place, and verify the rebuild before it serves traffic. Recovery is
+      staged, not a switch flip: the rebuilt system goes to a restricted network first, is watched
+      for signs of the attacker returning, and only then takes full traffic. Verification is evidence,
+      not hope: the same signals that detected the incident are checked and found quiet, logs are
+      reviewed for the period after recovery, and the fix is tested — the hole is probed again to prove
+      it is closed. A recovery that skips verification is how the same incident happens twice.'
+    key_points:
+    - Remove the cause, not the symptom — a live stolen key means the attacker returns
+    - Rebuild from known-good images; do not clean compromised systems in place
+    - 'Recover in stages: restricted network first, watch, then full traffic'
+    - Verify with the same signals that detected the incident
+    - Probe the hole again to prove it is closed
+    architecture_diagram_mermaid: "flowchart LR\n    Revoke[Revoke + rotate] --> Rebuild[Rebuild from image]\\n    Rebuild --> Stage[Staged recovery]\\n    Stage --> Verify[Verify signals quiet]"
+  - id: adv-ir-review
+    title: The Blameless Post-Incident Review
+    theory: 'The post-incident review is where the incident pays for itself — or does not. Its rule is
+      blameless: the question is never who made the mistake, it is what in the system made the mistake
+      possible, because a system that depends on one person never erring will fail again. The review
+      reconstructs the timeline from the logs kept during containment, names the root cause, and lists
+      what went well alongside what did not — the detection that worked, the runbook step that was
+      missing, the alert that fired too late. Every finding becomes an action with an owner and a date;
+      a review with no actions is a story, not a fix. The actions are the kind that change the system:
+      an alert that now fires earlier, a credential that now rotates automatically, a security group
+      change that now needs approval. The review is shared beyond the team that fought the incident,
+      because the next team to meet the same attacker should not have to learn the same lesson from
+      scratch.'
+    key_points:
+    - 'Blameless: ask what made the mistake possible, not who made it'
+    - Reconstruct the timeline from containment logs
+    - Every finding becomes an action with an owner and a date
+    - 'Actions change the system: alerts, rotation, approvals'
+    - Share the review beyond the team that fought the incident
+    architecture_diagram_mermaid: "flowchart LR\n    Time[Timeline] --> Root[Root cause]\\n    Root --> Actions[Actions + owners + dates]\\n    Actions --> Share[Share the learning]"
+guided_lab:
+  lab_definition_id: adv-incident
+  title: Contain a Compromised Instance
+  tasks:
+  - Launch the lab and identify the instance that must be isolated
+  - 'Contain it: deny SSH from the internet and cut its route to the internet'
+  - Keep a known-good instance running and reachable for the investigation
+  - Prove the VPC and subnets are intact and the containment holds
+  - Run the lab validator and fix every failing check before finishing
+  validation_rules:
+  - rule: vpc_exists
+    description: A VPC exists in the lab
+  - rule: subnet_count
+    description: At least two subnets exist
+    params:
+      operator: '>='
+      value: 2
+  - rule: instance_running
+    description: At least one known-good instance is running
+    params:
+      operator: '>='
+      count: 1
+  - rule: instance_reachable
+    description: The known-good instance is running with a recorded address
+    params:
+      protocol: http
+      port: 80
+  - rule: security_group_denies
+    description: SSH is denied from the internet
+    params:
+      port: 22
+      source: 0.0.0.0/0
+  - rule: security_group_denies
+    description: RDP is denied from the internet
+    params:
+      port: 3389
+      source: 0.0.0.0/0
+challenge:
+  title: The attacker is still active
+  task: 'The compromised instance is still trying to reach the internet. Prove it is contained: SSH and
+    RDP denied from the internet on its security groups, and a known-good instance still running and
+    reachable for the investigation. Also remove its subnet''s internet route as a containment action
+    (the validator grades containment on the security groups, which it can check per group).'
+  validation_rules:
+  - rule: security_group_denies
+    description: SSH is denied from the internet
+    params:
+      port: 22
+      source: 0.0.0.0/0
+  - rule: security_group_denies
+    description: RDP is denied from the internet
+    params:
+      port: 3389
+      source: 0.0.0.0/0
+  - rule: instance_running
+    description: At least one known-good instance is running
+    params:
+      operator: '>='
+      count: 1
+  - rule: instance_reachable
+    description: The known-good instance is running with a recorded address
+    params:
+      protocol: http
+      port: 80
+assessment:
+- question: What is the correct first containment action for a compromised instance?
+  options:
+  - Delete the instance immediately
+  - Isolate it by cutting its network path, then snapshot the disk
+  - Reboot it
+  - Change its password
+  correct_answer: 1
+  explanation: Isolation stops the damage while preserving logs, memory and disk as evidence; deletion destroys all three.
+- question: Why is deleting the suspicious process not eradication?
+  options:
+  - The process restarts automatically
+  - The stolen access key still works, so the attacker returns
+  - Deletion is too slow
+  - The process is not the problem
+  correct_answer: 1
+  explanation: Eradication removes the cause — exposed credentials, the open hole — not just the visible symptom.
+- question: Why rebuild compromised systems from known-good images instead of cleaning them?
+  options:
+  - It is faster
+  - A cleaned system can never be proven free of a backdoor
+  - Images are cheaper
+  - Cleaning requires downtime
+  correct_answer: 1
+  explanation: You cannot prove a compromised system is clean; a rebuild from a known-good image is the only trustworthy state.
+- question: What is the rule of a post-incident review?
+  options:
+  - Find who is to blame
+  - 'Blameless: ask what in the system made the mistake possible, not who made it'
+  - Keep it private to the team
+  - Focus only on what went wrong
+  correct_answer: 1
+  explanation: Blame makes people hide mistakes; fixing the system stops the mistake happening again.
+- question: How do you know an incident is really over?
+  options:
+  - The alerts stop
+  - The same detection signals are checked and found quiet, and the hole is probed again
+  - The team goes home
+  - The instance is deleted
+  correct_answer: 1
+  explanation: 'Verification is evidence: quiet detection signals plus a re-probe that proves the hole is closed.'
+- question: Which signals together suggest a real incident rather than noise?
+  options:
+  - One failed login
+  - A login from an unusual country plus odd 3 a.m. egress plus a sudden security group change
+  - A slow dashboard
+  - A high CPU alert
+  correct_answer: 1
+  explanation: No single signal proves an incident; correlated weak signals form the picture.
+xp_reward: 300
+prerequisites:
+- iam
+- monitoring

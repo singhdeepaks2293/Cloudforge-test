@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { FidelityBadge } from '../components/AwsBadge.tsx'
@@ -268,7 +269,7 @@ export function GlueConsole() {
  * screens: streams, PutRecord with a partition key, and GetRecords
  * in sequence-number order.
  */
-export function KinesisConsole() {
+export function KinesisConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [shards, setShards] = useState(1)
@@ -307,13 +308,46 @@ export function KinesisConsole() {
   })
   const sel = streamRows.find((s) => s.id === selected)
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Analytics', to: '/services' }, { label: 'Kinesis' }]}
-        title="Kinesis — Data streams"
-        description="Durable streams backed by Postgres, with sequence numbers and shard assignment by partition-key hash."
-        actions={<FidelityBadge fidelity="API_EMULATED" footnote="durable Postgres streams" />}
-      />
+    <ConsoleWithHome
+      icon="activity"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Analytics', to: '/services' }, { label: 'Kinesis' }]}
+      title="Kinesis — Data streams"
+      description="Durable streams backed by Postgres, with sequence numbers and shard assignment by partition-key hash."
+      fidelity="API_EMULATED"
+      fidelityFootnote="durable Postgres streams"
+      homeLabel="Kinesis dashboard"
+      listLabel="Data streams"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Kinesis"
+            banner="Durable Postgres-backed streams with sequence numbers and shard assignment by partition-key hash. No enhanced fan-out, no Kinesis Data Analytics. Survey note: in the 2026-11-22 reference account this console was RESTRICTED (paid plan / not supported) — no layout was captured beyond the restriction dialog, so this console's layout follows public console documentation, not an observed layout. The restriction is not the design."
+            actions={[
+              { label: 'Create stream', primary: true, onClick: goToList },
+            { label: 'Open Firehose', to: '/services/firehose' },
+            ]}
+            cards={[
+              { label: 'Data streams', count: streamRows.length, onSelect: goToList },
+            { label: 'Records (selected stream)', count: selected !== '' ? recordRows.length : '—', onSelect: goToList },
+            { label: 'Enhanced fan-out', count: 0, disabledReason: 'Not modelled.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={streams.isFetching}
+            health={[
+              "streams.isError ? 'Streams could not be loaded.' : `${streamRows.length} stream(s) listed.`",
+            "Shard_count 1–8, 1 MiB cap, monotonic sequence numbers.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — messaging track', to: '/learn' },
+            { label: 'Firehose (delivery)', to: '/services/firehose' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {streams.isPending && <Loading label="Loading streams" />}
       {streams.isError && <ErrorBox message={`Streams could not be loaded (${streams.error.message}).`} />}
@@ -369,7 +403,7 @@ export function KinesisConsole() {
           />
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -377,7 +411,7 @@ export function KinesisConsole() {
  * Firehose console (Phase 6) — mirrors the AWS Firehose delivery
  * streams screens: streams, PutRecord, and real delivery records.
  */
-export function FirehoseConsole() {
+export function FirehoseConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [dest, setDest] = useState('postgres')
@@ -415,13 +449,46 @@ export function FirehoseConsole() {
   })
   const sel = streamRows.find((s) => s.id === selected)
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Analytics', to: '/services' }, { label: 'Firehose' }]}
-        title="Firehose — Delivery streams"
-        description="Deliver records to S3 (MinIO) or a Postgres table, with a real delivery record per put."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="S3 needs MinIO · Postgres destination is local" />}
-      />
+    <ConsoleWithHome
+      icon="activity"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Analytics', to: '/services' }, { label: 'Firehose' }]}
+      title="Firehose — Delivery streams"
+      description="Deliver records to S3 (MinIO) or a Postgres table, with a real delivery record per put."
+      fidelity="PARTIAL"
+      fidelityFootnote="S3 needs MinIO · Postgres destination is local"
+      homeLabel="Firehose dashboard"
+      listLabel="Delivery streams"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Kinesis Data Firehose"
+            banner="Delivery to S3 (MinIO — honest 503 when MinIO is down) or to a Postgres table as JSONB rows, with a real delivery record per put. No buffering, no Lambda transforms."
+            actions={[
+              { label: 'Create delivery stream', primary: true, onClick: goToList },
+            { label: 'Open Kinesis', to: '/services/kinesis' },
+            ]}
+            cards={[
+              { label: 'Delivery streams', count: streamRows.length, onSelect: goToList },
+            { label: 'Deliveries (selected stream)', count: selected !== '' ? deliveryRows.length : '—', onSelect: goToList },
+            { label: 'Transformations', count: 0, disabledReason: 'No Lambda transforms.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={streams.isFetching}
+            health={[
+              "streams.isError ? 'Delivery streams could not be loaded.' : `${streamRows.length} delivery stream(s) listed.`",
+            "Counters only on DELIVERED; a FAILED delivery returns 502.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — messaging track', to: '/learn' },
+            { label: 'S3 (delivery destination)', to: '/services/s3' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {streams.isPending && <Loading label="Loading streams" />}
       {streams.isError && <ErrorBox message={`Streams could not be loaded (${streams.error.message}).`} />}
@@ -482,7 +549,7 @@ export function FirehoseConsole() {
           {str(sel, 'destination') === 's3' && <p className="mt-2 text-xs text-aws-muted">S3 delivery needs MinIO — when MinIO is down the put returns an honest 503 and the delivery is recorded FAILED.</p>}
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }
 

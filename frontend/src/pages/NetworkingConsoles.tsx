@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { FidelityBadge } from '../components/AwsBadge.tsx'
@@ -126,7 +127,14 @@ export function VpcPeeringConsole() {
  * Gateway screens. Attachments are real route-table entries in the
  * attached VPCs' lab state.
  */
-export function TransitGatewayConsole() {
+/**
+ * Transit-gateway list content without the console shell, so the VPC
+ * console can render it as its Transit Gateways section (the survey
+ * found Transit Gateway has no standalone console — it is a VPC
+ * console section). TransitGatewayConsole below keeps the standalone
+ * shell for the old bookmark, which now redirects to the VPC section.
+ */
+export function TransitGatewayListContent() {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [attachVpc, setAttachVpc] = useState('')
@@ -141,7 +149,7 @@ export function TransitGatewayConsole() {
     onError: (e: Error) => setNotice(`Create failed: ${e.message}`),
   })
   const attach = useMutation({
-    mutationFn: () => request<Rec>(`/api/v1/aws/transit-gateways/${selected}/attachments`, { method: 'POST', body: { vpc_resource_id: attachVpc } }),
+    mutationFn: () => request<Rec>(`/api/v1/aws/transit-gateways/${sel?.id ?? selected}/attachments`, { method: 'POST', body: { vpc_resource_id: attachVpc } }),
     onSuccess: () => { setNotice('VPC attached — 0.0.0.0/0 route written to the VPC.'); refresh() },
     onError: (e: Error) => setNotice(`Attach failed: ${e.message}`),
   })
@@ -155,16 +163,12 @@ export function TransitGatewayConsole() {
     onSuccess: () => { setNotice('Transit gateway deleted.'); setSelected(''); refresh() },
     onError: (e: Error) => setNotice(`Delete failed: ${e.message}`),
   })
-  const sel = rows.find((t) => t.id === selected)
+  // The attachments table is on this page (survey): show the first
+  // gateway's attachments until the user picks another one.
+  const sel = rows.find((t) => t.id === selected) ?? rows[0]
   const attachments = Array.isArray(sel?.attachments) ? (sel?.attachments as Record<string, unknown>[]) : []
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Transit Gateway' }]}
-        title="Transit Gateway — Transit gateways"
-        description="Central hub for lab VPCs. Attachments are real route-table entries in the attached VPCs' lab state."
-        actions={<FidelityBadge fidelity="SIMULATED" footnote="real route entries · no engine TGW RPC" />}
-      />
+    <>
       <Notice text={notice} />
       {tgws.isPending && <Loading label="Loading transit gateways" />}
       {tgws.isError && <ErrorBox message={`Transit gateways could not be loaded (${tgws.error.message}).`} />}
@@ -204,9 +208,11 @@ export function TransitGatewayConsole() {
           </div>
           <AwsTable
             columns={[
-              { header: 'Attachment', render: (r) => str(r as Rec, 'id') },
+              { header: 'Name', render: () => <span title="Attachments have no name in CloudForge">Not available</span> },
+              { header: 'Transit gateway attachment ID', render: (r) => str(r as Rec, 'id') },
+              { header: 'Transit gateway ID', render: () => str(sel as Rec, 'id') },
               { header: 'VPC', render: (r) => str(r as Rec, 'vpc_resource_id') },
-              { header: 'Status', render: (r) => str(r as Rec, 'status') },
+              { header: 'State', render: (r) => str(r as Rec, 'status') },
               {
                 header: 'Actions',
                 render: (r) => <AwsButton onClick={() => detach.mutate(str(r as Rec, 'id'))}>Detach</AwsButton>,
@@ -217,7 +223,7 @@ export function TransitGatewayConsole() {
           />
         </AwsCard>
       )}
-    </div>
+    </>
   )
 }
 
@@ -226,7 +232,7 @@ export function TransitGatewayConsole() {
  * screens. Endpoint records route lab traffic to platform services;
  * the DNS name is a local teaching name, not registered.
  */
-export function VpcEndpointsConsole() {
+export function VpcEndpointsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [vpc, setVpc] = useState('')
@@ -246,13 +252,46 @@ export function VpcEndpointsConsole() {
     onError: (e: Error) => setNotice(`Delete failed: ${e.message}`),
   })
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'VPC Endpoints' }]}
-        title="VPC Endpoints — Endpoints"
-        description="PrivateLink-style endpoints from a lab VPC to platform services."
-        actions={<FidelityBadge fidelity="SIMULATED" footnote="endpoint records · DNS name is a teaching name" />}
-      />
+    <ConsoleWithHome
+      icon="network"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'VPC Endpoints' }]}
+      title="VPC Endpoints — Endpoints"
+      description="PrivateLink-style endpoints from a lab VPC to platform services."
+      fidelity="SIMULATED"
+      fidelityFootnote="endpoint records · DNS name is a teaching name"
+      homeLabel="VPC Endpoints dashboard"
+      listLabel="Endpoints"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="VPC Endpoints"
+            banner="PrivateLink-style endpoints from a lab VPC to platform services. The DNS name is a local teaching name, not registered."
+            actions={[
+              { label: 'Create endpoint', primary: true, onClick: goToList },
+            { label: 'Open VPC console', to: '/services/vpc' },
+            ]}
+            cards={[
+              { label: 'Endpoints', count: rows.length, onSelect: goToList },
+            { label: 'Endpoint services', count: 0, disabledReason: 'No endpoint-service API in CloudForge.' },
+            { label: 'Services', count: '—', onSelect: goToList, note: 's3, dynamodb, sqs, sns' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={endpoints.isFetching}
+            health={[
+              "endpoints.isError ? 'Endpoints could not be loaded.' : `${rows.length} endpoint(s) listed.`",
+            "Endpoint records route lab traffic to platform services.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — networking track', to: '/learn' },
+            { label: 'S3 (endpoint service)', to: '/services/s3' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {endpoints.isPending && <Loading label="Loading endpoints" />}
       {endpoints.isError && <ErrorBox message={`Endpoints could not be loaded (${endpoints.error.message}).`} />}
@@ -290,7 +329,7 @@ export function VpcEndpointsConsole() {
           emptyMessage="No endpoints yet."
         />
       </AwsCard>
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -301,7 +340,7 @@ export function VpcEndpointsConsole() {
  * firewall RPC when a lab is attached — sync failure is recorded,
  * never claimed.
  */
-export function NetworkFirewallConsole() {
+export function NetworkFirewallConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [labId, setLabId] = useState('')
@@ -352,13 +391,46 @@ export function NetworkFirewallConsole() {
   const sel = rows.find((f) => f.id === selected)
   const rules = Array.isArray(sel?.rules) ? (sel?.rules as Record<string, unknown>[]) : []
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Network Firewall' }]}
-        title="Network Firewall — Firewalls"
-        description="Stateful firewall policies with real 5-tuple rule evaluation."
-        actions={<FidelityBadge fidelity="SIMULATED" footnote="rules really evaluated · engine sync best-effort" />}
-      />
+    <ConsoleWithHome
+      icon="shield"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Network Firewall' }]}
+      title="Network Firewall — Firewalls"
+      description="Stateful firewall policies with real 5-tuple rule evaluation."
+      fidelity="SIMULATED"
+      fidelityFootnote="rules really evaluated · engine sync best-effort"
+      homeLabel="Network Firewall dashboard"
+      listLabel="Firewalls"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Network Firewall"
+            banner="Stateful firewall policies with real 5-tuple rule evaluation. The policy is sent to the engine firewall RPC when a lab is attached; sync failure is recorded, never claimed."
+            actions={[
+              { label: 'Create firewall', primary: true, onClick: goToList },
+            { label: 'Open WAF console', to: '/services/waf' },
+            ]}
+            cards={[
+              { label: 'Firewalls', count: rows.length, onSelect: goToList },
+            { label: 'Rule groups', count: '—', onSelect: goToList, note: 'Rules live on the firewall' },
+            { label: 'TLS inspection configurations', count: 0, disabledReason: 'Not modelled.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={firewalls.isFetching}
+            health={[
+              "firewalls.isError ? 'Firewalls could not be loaded.' : `${rows.length} firewall(s) listed.`",
+            "Rules are evaluated in priority order; anything unmatched is denied.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — networking track', to: '/learn' },
+            { label: 'VPC (protected networks)', to: '/services/vpc' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {firewalls.isPending && <Loading label="Loading firewalls" />}
       {firewalls.isError && <ErrorBox message={`Firewalls could not be loaded (${firewalls.error.message}).`} />}
@@ -440,7 +512,7 @@ export function NetworkFirewallConsole() {
           <p className="mt-2 text-xs text-aws-muted">Rules are evaluated in priority order; anything unmatched is denied.</p>
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -449,7 +521,7 @@ export function NetworkFirewallConsole() {
  * screens. Records are built ONLY from real engine telemetry
  * snapshots taken by /capture — no per-packet flows are invented.
  */
-export function FlowLogsConsole() {
+export function FlowLogsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [vpc, setVpc] = useState('')
@@ -485,13 +557,46 @@ export function FlowLogsConsole() {
   })
   const sel = rows.find((g) => g.id === selected)
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Flow Logs' }]}
-        title="VPC Flow Logs — Flow log groups"
-        description="Flow-log records built only from real engine telemetry snapshots. Never invented flows."
-        actions={<FidelityBadge fidelity="SIMULATED" footnote="engine-telemetry snapshots only" />}
-      />
+    <ConsoleWithHome
+      icon="activity"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'VPC Flow Logs' }]}
+      title="VPC Flow Logs — Flow log groups"
+      description="Flow-log records built only from real engine telemetry snapshots. Never invented flows."
+      fidelity="SIMULATED"
+      fidelityFootnote="engine-telemetry snapshots only"
+      homeLabel="Flow Logs dashboard"
+      listLabel="Flow log groups"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="VPC Flow Logs"
+            banner="Flow-log records built only from real engine telemetry snapshots taken by /capture — no per-packet flows are synthesised."
+            actions={[
+              { label: 'Create flow log group', primary: true, onClick: goToList },
+            { label: 'Open VPC console', to: '/services/vpc' },
+            ]}
+            cards={[
+              { label: 'Flow log groups', count: rows.length, onSelect: goToList },
+            { label: 'Records', count: selected !== '' ? recordRows.length : '—', onSelect: goToList, note: 'One record per real telemetry point' },
+            { label: 'CloudWatch log groups', count: 0, disabledReason: 'No CloudWatch Logs destination in CloudForge.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={groups.isFetching}
+            health={[
+              "groups.isError ? 'Flow log groups could not be loaded.' : `${rows.length} group(s) listed.`",
+            "Capture calls the engine CollectTelemetry; engine down means an honest 503 and zero records.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — networking track', to: '/learn' },
+            { label: 'CloudWatch (metrics & alarms)', to: '/services/cloudwatch' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {groups.isPending && <Loading label="Loading flow log groups" />}
       {groups.isError && <ErrorBox message={`Flow log groups could not be loaded (${groups.error.message}).`} />}
@@ -541,6 +646,63 @@ export function FlowLogsConsole() {
           />
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
+  )
+}
+
+/**
+ * Standalone Transit Gateway shell (kept for the old
+ * /services/transitgateway bookmark, which App.tsx redirects to the
+ * VPC console's Transit Gateways section). Home counts come from the
+ * same React Query key as TransitGatewayListContent.
+ */
+export function TransitGatewayConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
+  const queryClient = useQueryClient()
+  const tgws = useQuery({ queryKey: ['tgws'], queryFn: () => request<Rec>('/api/v1/aws/transit-gateways'), retry: 1 })
+  const rows = listOf(tgws.data, 'transit_gateways')
+  return (
+    <ConsoleWithHome
+      icon="network"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Transit Gateway' }]}
+      title="Transit Gateway — Transit gateways"
+      description="Central hub for lab VPCs. Attachments are real route-table entries in the attached VPCs' lab state. Per the 2026-11-22 console survey, Transit Gateway has no standalone console; it is a VPC console section — this page is kept as the old bookmark target."
+      fidelity="SIMULATED"
+      fidelityFootnote="real route entries · no engine TGW RPC"
+      homeLabel="Transit Gateway dashboard"
+      listLabel="Transit gateways"
+      initialSection={initialSection}
+      home={(goToList) => (
+        <ServiceHomeDashboard
+          serviceName="Transit Gateway"
+          banner="Central hub for lab VPCs. Attachments are real route-table entries in the attached VPCs' lab state — no engine transit-gateway RPC exists."
+          actions={[
+            { label: 'Create transit gateway', primary: true, onClick: goToList },
+            { label: 'Open VPC console — Transit Gateways section', to: '/services/vpc?section=tgw' },
+          ]}
+          cards={[
+            { label: 'Transit gateways', count: rows.length, onSelect: goToList },
+            { label: 'Attachments', count: rows.reduce((n, r) => n + (Array.isArray(r.attachments) ? r.attachments.length : 0), 0), onSelect: goToList, note: 'Each attachment writes a 0.0.0.0/0 route into the VPC' },
+            { label: 'Route tables', count: '—', onSelect: goToList, note: 'Transit gateway route tables are not modelled' },
+            { label: 'Policy tables', count: 0, disabledReason: 'Not modelled.' },
+          ]}
+          onRefresh={() => void queryClient.invalidateQueries()}
+          refreshing={tgws.isFetching}
+          health={[
+            tgws.isError ? 'Transit gateways could not be loaded.' : `${rows.length} transit gateway(s) listed.`,
+            'Delete is refused (409) while attachments exist.',
+          ]}
+          settings={[
+            { label: 'Resource Explorer', to: '/explorer' },
+            { label: 'All services', to: '/services' },
+          ]}
+          info={[
+            { label: 'Learning Center — networking track', to: '/learn' },
+            { label: 'VPN (unsupported — exam concept)', to: '/services/vpc?section=vpn' },
+          ]}
+        />
+      )}
+    >
+      <TransitGatewayListContent />
+    </ConsoleWithHome>
   )
 }

@@ -5,6 +5,8 @@ import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ConsoleTabs, ServiceConsole } from '../components/ServiceConsole.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { useService } from '../services/registry.ts'
+import { LiteServiceConsole } from './LiteServiceConsole.tsx'
+import { LITE_GENERIC_SERVICES } from '../services/liteServices.ts'
 
 /**
  * Generic service console (Phase 1). Every registry service without a
@@ -33,6 +35,13 @@ export function ServiceDetail() {
 
   if (DEDICATED[id] !== undefined) {
     return <Navigate to={DEDICATED[id]} replace />
+  }
+
+  // v3 lite exam services with no dedicated console get the full
+  // Home + list + detail treatment (honest UNSUPPORTED) instead of
+  // this page's plain overview.
+  if (LITE_GENERIC_SERVICES[id] !== undefined) {
+    return <LiteServiceConsole />
   }
 
   const svc = serviceQuery.data

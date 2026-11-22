@@ -271,6 +271,191 @@ func httpRouteFor(service, operation string) string {
 		return "POST /api/v1/aws/cloudformation/stacks"
 	case "cloudformation/CreateChangeSet":
 		return "POST /api/v1/aws/cloudformation/stacks/{id}/changesets"
+	// v3 exam services (SAA-C03 / SAP-C02) in lite mode.
+	case "autoscaling/CreateAutoScalingGroup":
+		return "POST /api/v1/aws/autoscaling/groups"
+	case "autoscaling/DescribeAutoScalingGroups":
+		return "GET /api/v1/aws/autoscaling/groups"
+	case "autoscaling/UpdateAutoScalingGroup":
+		return "POST /api/v1/aws/autoscaling/groups/{id}/scale"
+	case "autoscaling/DeleteAutoScalingGroup":
+		return "DELETE /api/v1/aws/autoscaling/groups/{id}"
+	case "globalaccelerator/CreateAccelerator":
+		return "POST /api/v1/aws/globalaccelerator/accelerators"
+	case "globalaccelerator/DescribeAccelerator":
+		return "GET /api/v1/aws/globalaccelerator/accelerators"
+	case "globalaccelerator/UpdateAccelerator":
+		return "POST /api/v1/aws/globalaccelerator/accelerators/{id}/failover"
+	case "globalaccelerator/DeleteAccelerator":
+		return "DELETE /api/v1/aws/globalaccelerator/accelerators/{id}"
+	case "directconnect/CreateConnection":
+		return "POST /api/v1/aws/directconnect/connections"
+	case "directconnect/DescribeConnections":
+		return "GET /api/v1/aws/directconnect/connections"
+	case "directconnect/ConfirmConnection":
+		return "POST /api/v1/aws/directconnect/connections/{id}/confirm"
+	case "directconnect/DeleteConnection":
+		return "DELETE /api/v1/aws/directconnect/connections/{id}"
+	case "controltower/CreateLandingZone":
+		return "POST /api/v1/aws/controltower/landing-zones"
+	case "controltower/DescribeLandingZone":
+		return "GET /api/v1/aws/controltower/landing-zones"
+	case "controltower/EnableGuardrail":
+		return "POST /api/v1/aws/controltower/landing-zones/{id}/guardrails"
+	case "controltower/DeleteLandingZone":
+		return "DELETE /api/v1/aws/controltower/landing-zones/{id}"
+	case "identitycenter/CreatePermissionSet":
+		return "POST /api/v1/aws/identitycenter/permission-sets"
+	case "identitycenter/DescribePermissionSet":
+		return "GET /api/v1/aws/identitycenter/permission-sets"
+	case "identitycenter/CreateAccountAssignment":
+		return "POST /api/v1/aws/identitycenter/permission-sets/{id}/assignments"
+	case "identitycenter/DeletePermissionSet":
+		return "DELETE /api/v1/aws/identitycenter/permission-sets/{id}"
+	case "ram/CreateResourceShare":
+		return "POST /api/v1/aws/ram/resource-shares"
+	case "ram/DescribeResourceShares":
+		return "GET /api/v1/aws/ram/resource-shares"
+	case "ram/AssociateResourceShare":
+		return "POST /api/v1/aws/ram/resource-shares/{id}/principals"
+	case "ram/DeleteResourceShare":
+		return "DELETE /api/v1/aws/ram/resource-shares/{id}"
+	case "storagegateway/CreateGateway":
+		return "POST /api/v1/aws/storagegateway/gateways"
+	case "storagegateway/DescribeGateway":
+		return "GET /api/v1/aws/storagegateway/gateways"
+	case "storagegateway/ActivateGateway":
+		return "POST /api/v1/aws/storagegateway/gateways/{id}/activate"
+	case "storagegateway/DeleteGateway":
+		return "DELETE /api/v1/aws/storagegateway/gateways/{id}"
+	case "snowball/CreateJob":
+		return "POST /api/v1/aws/snowball/jobs"
+	case "snowball/DescribeJob":
+		return "GET /api/v1/aws/snowball/jobs"
+	case "snowball/UpdateJob":
+		return "POST /api/v1/aws/snowball/jobs/{id}/advance"
+	case "snowball/DeleteJob":
+		return "DELETE /api/v1/aws/snowball/jobs/{id}"
+	case "lakeformation/GrantPermissions":
+		return "POST /api/v1/aws/lakeformation/permissions"
+	case "lakeformation/ListPermissions":
+		return "GET /api/v1/aws/lakeformation/permissions"
+	case "lakeformation/RevokePermissions":
+		return "DELETE /api/v1/aws/lakeformation/permissions/{id}"
+	case "macie/CreateClassificationJob":
+		return "POST /api/v1/aws/macie/jobs"
+	case "macie/DescribeClassificationJob":
+		return "GET /api/v1/aws/macie/jobs"
+	case "macie/ListFindings":
+		return "GET /api/v1/aws/macie/findings"
+	case "macie/DeleteClassificationJob":
+		return "DELETE /api/v1/aws/macie/jobs/{id}"
+	case "computeoptimizer/GetEC2InstanceRecommendations":
+		return "POST /api/v1/aws/computeoptimizer/recommendations/refresh"
+	case "computeoptimizer/DeleteRecommendation":
+		return "DELETE /api/v1/aws/computeoptimizer/recommendations/{id}"
+	case "savingsplans/CreateSavingsPlan":
+		return "POST /api/v1/aws/savingsplans/plans"
+	case "savingsplans/DescribeSavingsPlans":
+		return "GET /api/v1/aws/savingsplans/plans"
+	case "savingsplans/GetSavingsPlanUtilization":
+		return "GET /api/v1/aws/savingsplans/plans/{id}/utilization"
+	case "savingsplans/DeleteSavingsPlan":
+		return "DELETE /api/v1/aws/savingsplans/plans/{id}"
+	case "auditmanager/CreateAssessment":
+		return "POST /api/v1/aws/auditmanager/assessments"
+	case "auditmanager/DescribeAssessment":
+		return "GET /api/v1/aws/auditmanager/assessments"
+	case "auditmanager/CollectEvidence":
+		return "POST /api/v1/aws/auditmanager/assessments/{id}/collect-evidence"
+	case "auditmanager/DeleteAssessment":
+		return "DELETE /api/v1/aws/auditmanager/assessments/{id}"
+	case "artifact/ListReports":
+		return "GET /api/v1/aws/artifact/reports"
+	case "artifact/CreateAgreement":
+		return "POST /api/v1/aws/artifact/agreements"
+	case "artifact/DescribeAgreements":
+		return "GET /api/v1/aws/artifact/agreements"
+	case "artifact/DeleteAgreement":
+		return "DELETE /api/v1/aws/artifact/agreements/{id}"
+	case "aurora/CreateDBCluster":
+		return "POST /api/v1/aws/aurora/clusters"
+	case "aurora/DescribeDBClusters":
+		return "GET /api/v1/aws/aurora/clusters"
+	case "aurora/FailoverDBCluster":
+		return "POST /api/v1/aws/aurora/clusters/{id}/failover"
+	case "aurora/DeleteDBCluster":
+		return "DELETE /api/v1/aws/aurora/clusters/{id}"
+	case "backup/CreateBackupPlan":
+		return "POST /api/v1/aws/backup/plans"
+	case "backup/CreateBackupVault":
+		return "POST /api/v1/aws/backup/vaults"
+	case "backup/StartBackupJob":
+		return "POST /api/v1/aws/backup/plans/{id}/run"
+	case "backup/DeleteBackupPlan":
+		return "DELETE /api/v1/aws/backup/plans/{id}"
+	case "mgn/CreateSourceServer":
+		return "POST /api/v1/aws/mgn/source-servers"
+	case "mgn/DescribeSourceServers":
+		return "GET /api/v1/aws/mgn/source-servers"
+	case "mgn/StartReplication":
+		return "POST /api/v1/aws/mgn/source-servers/{id}/start-replication"
+	case "mgn/DeleteSourceServer":
+		return "DELETE /api/v1/aws/mgn/source-servers/{id}"
+	case "fsx/CreateFileSystem":
+		return "POST /api/v1/aws/fsx/file-systems"
+	case "fsx/DescribeFileSystems":
+		return "GET /api/v1/aws/fsx/file-systems"
+	case "fsx/CreateMountTarget":
+		return "POST /api/v1/aws/fsx/file-systems/{id}/mount-targets"
+	case "fsx/DeleteFileSystem":
+		return "DELETE /api/v1/aws/fsx/file-systems/{id}"
+	case "shield/CreateProtection":
+		return "POST /api/v1/aws/shield/protections"
+	case "shield/DescribeProtections":
+		return "GET /api/v1/aws/shield/protections"
+	case "shield/DeleteProtection":
+		return "DELETE /api/v1/aws/shield/protections/{id}"
+	case "ebs/CreateVolume":
+		return "POST /api/v1/aws/ebs/volumes"
+	case "ebs/DescribeVolumes":
+		return "GET /api/v1/aws/ebs/volumes"
+	case "ebs/AttachVolume":
+		return "POST /api/v1/aws/ebs/volumes/{id}/attach"
+	case "ebs/DeleteVolume":
+		return "DELETE /api/v1/aws/ebs/volumes/{id}"
+	case "efs/CreateFileSystem":
+		return "POST /api/v1/aws/efs/file-systems"
+	case "efs/DescribeFileSystems":
+		return "GET /api/v1/aws/efs/file-systems"
+	case "efs/CreateMountTarget":
+		return "POST /api/v1/aws/efs/file-systems/{id}/mount-targets"
+	case "efs/DeleteFileSystem":
+		return "DELETE /api/v1/aws/efs/file-systems/{id}"
+	case "cloudfront/CreateDistribution":
+		return "POST /api/v1/aws/cloudfront/distributions"
+	case "cloudfront/DescribeDistributions":
+		return "GET /api/v1/aws/cloudfront/distributions"
+	case "cloudfront/CreateInvalidation":
+		return "POST /api/v1/aws/cloudfront/distributions/{id}/invalidations"
+	case "cloudfront/DeleteDistribution":
+		return "DELETE /api/v1/aws/cloudfront/distributions/{id}"
+	case "vpn/CreateCustomerGateway":
+		return "POST /api/v1/aws/vpn/customer-gateways"
+	case "vpn/CreateVpnGateway":
+		return "POST /api/v1/aws/vpn/vpn-gateways"
+	case "vpn/CreateVpnConnection":
+		return "POST /api/v1/aws/vpn/connections"
+	case "vpn/DeleteVpnConnection":
+		return "DELETE /api/v1/aws/vpn/connections/{id}"
+	case "nacl/CreateNetworkAcl":
+		return "POST /api/v1/aws/nacl/acls"
+	case "nacl/DescribeNetworkAcls":
+		return "GET /api/v1/aws/nacl/acls"
+	case "nacl/CreateNetworkAclEntry":
+		return "POST /api/v1/aws/nacl/acls/{id}/rules"
+	case "nacl/EvaluateNetworkAcl":
+		return "POST /api/v1/aws/nacl/acls/{id}/evaluate"
 	}
 	return ""
 }
@@ -327,12 +512,18 @@ var serviceCatalog = []serviceMeta{
 		[]string{"bucket", "object"}, []string{"storage"},
 		"Buckets list; bucket detail tabs Objects / Properties / Permissions / Management / Metrics; Create-bucket wizard",
 		"Buckets are local to this deployment (no global S3 namespace); backed by local MinIO, not AWS S3; objects upload/download/delete through the backend (10 MiB cap); versioning toggle and bucket policy are real MinIO operations; object ACLs are not exposed by the MinIO adapter and are shown as unavailable."),
-	svc("ebs", "EBS", "Storage", "Block storage volumes attached to instances.", "hard-drive", "/services/ebs", "unavailable", "UNSUPPORTED",
-		[]string{"volume"}, []string{"storage"}, "", "Not started — no volume API; lab instances carry their own disks."),
-	svc("efs", "EFS", "Storage", "Elastic file systems and mount targets.", "hard-drive", "/services/efs", "unavailable", "UNSUPPORTED",
-		[]string{"file-system"}, []string{"storage"}, "", "Not started."),
-	svc("fsx", "FSx", "Storage", "Managed file systems.", "hard-drive", "/services/fsx", "unavailable", "UNSUPPORTED",
-		[]string{"file-system"}, nil, "", "Not started."),
+	svc("ebs", "EBS", "Storage", "Block storage volumes — durable records with attach/detach against real labs.", "hard-drive", "/services/ebs", "available", "API_EMULATED",
+		[]string{"volume"}, []string{"aws-saa"},
+		"Volumes list; Create-volume wizard; Attach/Detach actions",
+		"Volumes are durable records, not real block devices: nothing is provisioned, formatted or mounted. Attach validates that the lab exists and records the attachment; the lab's disk is unchanged. In-use volumes cannot be deleted."),
+	svc("efs", "EFS", "Storage", "Elastic file systems and mount targets — durable records.", "hard-drive", "/services/efs", "available", "API_EMULATED",
+		[]string{"file-system"}, []string{"aws-saa"},
+		"File systems list; Create-file-system wizard; Mount targets",
+		"No NFS endpoint exists and nothing can be mounted; mount targets are recorded against teaching subnet names."),
+	svc("fsx", "FSx", "Storage", "Managed file systems (Lustre, Windows, ONTAP, OpenZFS) — durable records.", "hard-drive", "/services/fsx", "available", "API_EMULATED",
+		[]string{"file-system"}, []string{"aws-saa", "aws-sap"},
+		"File systems list; Create-file-system wizard; Mount targets",
+		"No Lustre/Windows/ONTAP volume exists and nothing can be mounted; mount targets are recorded against teaching subnet names."),
 	svc("glacier", "S3 Glacier", "Storage", "Archive storage and retrieval.", "hard-drive", "/services/glacier", "unavailable", "UNSUPPORTED",
 		[]string{"archive"}, []string{"storage"}, "", "Not started."),
 	// Networking
@@ -360,8 +551,10 @@ var serviceCatalog = []serviceMeta{
 		[]string{"security-group"}, []string{"networking"},
 		"Security Groups list; Inbound/Outbound rules tabs; Edit-rules flow",
 		"Pure rule evaluation; default-deny; no AWS SG referencing."),
-	svc("nacl", "Network ACLs", "Networking", "Stateless network ACLs (numbered allow/deny rules).", "shield", "/services/nacl", "unavailable", "UNSUPPORTED",
-		[]string{"network-acl"}, []string{"networking"}, "", "Not started."),
+	svc("nacl", "Network ACLs", "Networking", "Stateless network ACLs — durable records with real rule evaluation.", "shield", "/services/nacl", "available", "API_EMULATED",
+		[]string{"network-acl"}, []string{"aws-saa", "aws-sap"},
+		"Network ACLs list; Numbered rules; Evaluate-packet flow",
+		"Rules are really evaluated (lowest number first match, stateless, default deny) by the evaluate endpoint — but the ACL is not attached to any subnet and filters no live traffic."),
 	svc("elb", "Elastic Load Balancing", "Networking", "Load balancers, listeners and target groups — in-process round-robin with real health probes.", "scale", "/services/elb", "available", "SIMULATED",
 		[]string{"load-balancer", "target-group"}, []string{"networking"},
 		"Load Balancers list; Listeners / Target Groups tabs; health-check action; round-robin route preview",
@@ -370,8 +563,10 @@ var serviceCatalog = []serviceMeta{
 		[]string{"hosted-zone", "record"}, []string{"networking"},
 		"Hosted Zones / Records; Create-record wizard; Resolve action",
 		"SIMULATED: no DNS server serves these records to the lab network; A, CNAME and TXT only; resolution is against the stored records via the resolve endpoint."),
-	svc("cloudfront", "CloudFront", "Networking", "Content delivery distributions.", "network", "/services/cloudfront", "unavailable", "UNSUPPORTED",
-		[]string{"distribution"}, nil, "", "Not started."),
+	svc("cloudfront", "CloudFront", "Networking", "Content delivery distributions — durable records with invalidations.", "network", "/services/cloudfront", "available", "API_EMULATED",
+		[]string{"distribution"}, []string{"aws-saa"},
+		"Distributions list; Create-distribution wizard; Invalidations",
+		"No edge location caches anything and the domain name is a teaching name, not registered or served. Invalidations are recorded COMPLETED; nothing is actually invalidated at an edge."),
 	svc("vpcpeering", "VPC Peering", "Networking", "Peering connections between lab VPCs — real route-table entries.", "network", "/services/vpcpeering", "available", "SIMULATED",
 		[]string{"peering-connection"}, []string{"networking"},
 		"Peering connections list; Create-peering wizard (CIDR overlap rejected); Delete removes routes",
@@ -392,8 +587,10 @@ var serviceCatalog = []serviceMeta{
 		[]string{"flow-log"}, []string{"networking"},
 		"Flow log groups; Capture action; Records list",
 		"Records are built ONLY from real engine telemetry snapshots taken by /capture — no per-packet flows are synthesised."),
-	svc("vpn", "VPN / Direct Connect", "Networking", "VPN connections and dedicated links.", "network", "/services/vpn", "unavailable", "UNSUPPORTED",
-		[]string{"vpn-connection"}, nil, "", "Not started."),
+	svc("vpn", "VPN", "Networking", "Site-to-site VPN: customer gateways, VPN gateways and connections — durable records.", "network", "/services/vpn", "available", "API_EMULATED",
+		[]string{"vpn-connection"}, []string{"aws-sap"},
+		"Customer gateways / VPN gateways / Connections; Tunnel activate/deactivate",
+		"Tunnel state is a teaching field: activating a tunnel records it UP, but no IPsec tunnel exists and no traffic flows. Direct Connect is a separate service entry."),
 	// Databases
 	svc("dynamodb", "DynamoDB", "Databases", "Key-value / NoSQL tables — DynamoDB Local when it answers, else a Postgres-backed subset.", "table", "/services/dynamodb", "available", "PARTIAL",
 		[]string{"table", "item"}, []string{"databases"},
@@ -403,8 +600,10 @@ var serviceCatalog = []serviceMeta{
 		[]string{"database", "snapshot"}, []string{"databases"},
 		"Databases list (DB identifier / Engine / Status / Endpoint); detail tabs Connectivity & security / Monitoring / Logs & events / Configuration / Maintenance & backups; Create-database wizard; Snapshots",
 		"PostgreSQL-compatible, not Aurora: each instance is a real Postgres database + role on the platform Postgres (engine postgres 14/15/16 only; mysql rejected). Master password generated, shown once, hash at rest. Start/stop per instance is UNSUPPORTED (shared platform database). Snapshots are real pg_dump -Fc files; restore creates a new instance. No Multi-AZ; no containerised per-instance Postgres (not built)."),
-	svc("aurora", "Aurora", "Databases", "Aurora clusters.", "database", "/services/aurora", "unavailable", "UNSUPPORTED",
-		[]string{"cluster"}, []string{"databases"}, "", "Not started."),
+	svc("aurora", "Aurora", "Databases", "Aurora clusters — durable records with writer/reader instances and failover.", "database", "/services/aurora", "available", "API_EMULATED",
+		[]string{"cluster"}, []string{"aws-saa", "aws-sap"},
+		"Clusters list; Cluster detail (instances, endpoints); Failover action",
+		"No Aurora storage engine runs and no data is replicated; instances are teaching records and endpoints are teaching names. Failover swaps the recorded writer/reader roles. Use RDS for a real Postgres database."),
 	svc("elasticache", "ElastiCache", "Databases", "In-memory caches — real namespaced Redis databases on the platform Redis (lite mode).", "database", "/services/elasticache", "available", "PARTIAL",
 		[]string{"cluster"}, []string{"databases"},
 		"Clusters list; cluster detail (node info, keys browser with TTL, flush, metrics)",
@@ -436,8 +635,10 @@ var serviceCatalog = []serviceMeta{
 		[]string{"web-acl", "rule"}, []string{"iam"},
 		"Web ACLs list; Rules; Evaluate-request flow",
 		"SIMULATED: rules are really evaluated (first match, path/header/query/body/IP matchers) but only by the /evaluate endpoint against a request you supply — they are NOT inline in the API request path, so nothing is live-blocked."),
-	svc("shield", "Shield", "Security and Identity", "DDoS protection.", "shield", "/services/shield", "unavailable", "UNSUPPORTED",
-		[]string{"protection"}, nil, "", "Not started."),
+	svc("shield", "Shield", "Security and Identity", "DDoS protection records — which resources are covered.", "shield", "/services/shield", "available", "API_EMULATED",
+		[]string{"protection"}, []string{"aws-saa"},
+		"Protections list; Create-protection flow",
+		"Protections are records only: no traffic is inspected, no attack is mitigated and no Shield Advanced subscription exists."),
 	svc("guardduty", "GuardDuty", "Security and Identity", "Threat detection — findings from the real audit log.", "shield", "/services/guardduty", "available", "PARTIAL",
 		[]string{"finding"}, []string{"iam"},
 		"Findings list (severity / status); Detectors; Run-scan action",
@@ -590,8 +791,10 @@ var serviceCatalog = []serviceMeta{
 		[]string{"task", "endpoint"}, []string{"databases"},
 		"Replication tasks list; Task detail (row counts, migration log); Create-task wizard",
 		"Full-load row copies between the platform Postgres and RDS instance databases (up to 5000 rows per table) with real row counts and a migration log. No CDC, no ongoing replication."),
-	svc("mgn", "Application Migration", "Migration and Transfer", "Lift-and-shift migration.", "layers", "/services/mgn", "unavailable", "UNSUPPORTED",
-		[]string{"source-server"}, nil, "", "Not started (Phase 5)."),
+	svc("mgn", "Application Migration", "Migration and Transfer", "Lift-and-shift source servers with a replication lifecycle — records plus a teaching state machine.", "layers", "/services/mgn", "available", "API_EMULATED",
+		[]string{"source-server"}, []string{"aws-sap"},
+		"Source servers list; Start-replication / Test-launch / Cutover actions",
+		"No agent is installed and no blocks are copied: replication, test launch and cutover move the server along a teaching lifecycle (SIMULATED) so the cutover lesson can be practised end to end."),
 	svc("datasync", "DataSync", "Migration and Transfer", "Data transfer — real copies with SHA-256 verification.", "layers", "/services/datasync", "available", "PARTIAL",
 		[]string{"task", "agent"}, []string{"databases"},
 		"Tasks list; Task detail (files/bytes copied, verified count); transfer log",
@@ -609,44 +812,72 @@ var serviceCatalog = []serviceMeta{
 		[]string{"stack"}, []string{"terraform"},
 		"Stacks list; Stack detail (Resources / Events / Template); Create-stack wizard; change-set preview",
 		"A separate template engine from Terraform (JSON/YAML, own stack state, change-set diff, rollback on failure). Provisions SQS, SNS, DynamoDB (subset), Lambda, S3 (MinIO) and RDS only; other resource types are UNSUPPORTED in the change set. Rollback deletes resources created in the failed execution; resources deleted by an update are NOT restored."),
-	svc("backup", "Backup", "Additional", "Local backup and restore (pg_dump/pg_restore scripts).", "hard-drive", "/services/backup", "partial", "REAL",
-		[]string{"backup-plan", "vault"}, nil,
-		"Backup plans / Vaults screens",
-		"Local pg_dump only; no AWS Backup vaults; no in-app console — runs are scripts."),
+	svc("backup", "Backup", "Additional", "Backup plans, vaults and jobs — plans/vaults are records; a run is a real pg_dump.", "hard-drive", "/services/backup", "available", "REAL",
+		[]string{"backup-plan", "vault"}, []string{"aws-saa"},
+		"Backup plans / Vaults / Jobs screens; Run-plan action",
+		"Plans and vaults are durable records (no schedule runs by itself). A run is a real pg_dump -Fc of the platform Postgres with SHA-256 recorded; without a platform database or pg_dump on the API host the job is FAILED with the reason. No AWS Backup vaults; restore is scripts/backup.sh + restore.sh."),
 	svc("servicecatalog", "Service Catalog", "Additional", "Portfolios and products.", "book", "/services/servicecatalog", "unavailable", "UNSUPPORTED",
 		[]string{"portfolio", "product"}, nil, "", "Not started."),
 	svc("licensemanager", "License Manager", "Additional", "Software licences.", "book", "/services/licensemanager", "unavailable", "UNSUPPORTED",
 		[]string{"license"}, nil, "", "Not started."),
 	// Certification coverage (SAA-C03 / SAP-C02) — catalogued honestly as
 	// unavailable until a console or runtime exists.
-	svc("autoscaling", "EC2 Auto Scaling", "Compute", "Auto Scaling groups, launch configurations and scaling policies.", "server", "/services/autoscaling", "unavailable", "UNSUPPORTED",
-		[]string{"auto-scaling-group"}, []string{"aws-saa", "aws-sap"}, "", "Not started — labs use a fixed instance count; scale by launching or stopping instances."),
-	svc("globalaccelerator", "Global Accelerator", "Networking", "Anycast IPs and fast regional failover.", "network", "/services/globalaccelerator", "unavailable", "UNSUPPORTED",
-		[]string{"accelerator"}, []string{"aws-saa", "aws-sap"}, "", "Not started — practice failover with Route 53-style DNS and load-balancer health rules."),
-	svc("directconnect", "Direct Connect", "Networking", "Dedicated private connectivity to AWS.", "network", "/services/directconnect", "unavailable", "UNSUPPORTED",
-		[]string{"connection"}, []string{"aws-sap"}, "", "Not started — VPN and Transit Gateway concepts are simulated in the VPC console."),
-	svc("controltower", "Control Tower", "Management", "Landing-zone guardrails and account vending.", "shield", "/services/controltower", "unavailable", "UNSUPPORTED",
-		[]string{"landing-zone"}, []string{"aws-sap"}, "", "Not started — Organizations and SCP concepts are taught in the SAP track."),
-	svc("identitycenter", "IAM Identity Center", "Security", "Workforce SSO and permission sets.", "shield", "/services/identitycenter", "unavailable", "UNSUPPORTED",
-		[]string{"permission-set"}, []string{"aws-sap"}, "", "Not started — IAM users, roles and policy evaluation are available."),
-	svc("ram", "Resource Access Manager", "Security", "Cross-account resource sharing.", "share", "/services/ram", "unavailable", "UNSUPPORTED",
-		[]string{"resource-share"}, []string{"aws-sap"}, "", "Not started."),
-	svc("storagegateway", "Storage Gateway", "Storage", "Hybrid file, volume and tape gateways.", "hard-drive", "/services/storagegateway", "unavailable", "UNSUPPORTED",
-		[]string{"gateway"}, []string{"aws-sap"}, "", "Not started."),
-	svc("snowball", "Snowball", "Storage", "Petabyte-scale offline data transfer.", "hard-drive", "/services/snowball", "unavailable", "UNSUPPORTED",
-		[]string{"job"}, []string{"aws-sap"}, "", "Not started — DataSync and DMS records are the available migration practice."),
-	svc("lakeformation", "Lake Formation", "Analytics", "Fine-grained data-lake permissions.", "database", "/services/lakeformation", "unavailable", "UNSUPPORTED",
-		[]string{"permission"}, []string{"aws-sap"}, "", "Not started."),
-	svc("macie", "Macie", "Security", "Sensitive-data discovery in object storage.", "shield", "/services/macie", "unavailable", "UNSUPPORTED",
-		[]string{"finding"}, []string{"aws-saa", "aws-sap"}, "", "Not started — GuardDuty and Security Hub findings are available."),
-	svc("computeoptimizer", "Compute Optimizer", "Management", "Rightsizing recommendations from utilization.", "trending-up", "/services/computeoptimizer", "unavailable", "UNSUPPORTED",
-		[]string{"recommendation"}, []string{"aws-saa"}, "", "Not started — Cost Explorer and Budgets are available."),
-	svc("savingsplans", "Savings Plans", "Management", "Commitment-based compute discounts.", "trending-up", "/services/savingsplans", "unavailable", "UNSUPPORTED",
-		[]string{"savings-plan"}, []string{"aws-saa"}, "", "Not started — cost concepts are taught in the SAA track."),
-	svc("auditmanager", "Audit Manager", "Security", "Automated evidence collection for audits.", "clipboard", "/services/auditmanager", "unavailable", "UNSUPPORTED",
-		[]string{"assessment"}, []string{"aws-sap"}, "", "Not started — the audit log export is the available evidence surface."),
-	svc("artifact", "Artifact", "Security", "On-demand compliance reports and agreements.", "file-text", "/services/artifact", "unavailable", "UNSUPPORTED",
-		[]string{"report"}, []string{"aws-sap"}, "", "Not started."),
+	svc("autoscaling", "EC2 Auto Scaling", "Compute", "Auto Scaling groups — durable records with min/desired/max and scaling.", "server", "/services/autoscaling", "available", "API_EMULATED",
+		[]string{"auto-scaling-group"}, []string{"aws-saa", "aws-sap"},
+		"Auto Scaling groups list; Create-group wizard; Scale action",
+		"Groups record min/desired/max and the launch profile; scaling sets the recorded desired capacity. No instances are launched or terminated — use a lab to launch real instances. Group size capped at 10."),
+	svc("globalaccelerator", "Global Accelerator", "Networking", "Anycast accelerators with endpoint groups and failover history.", "network", "/services/globalaccelerator", "available", "API_EMULATED",
+		[]string{"accelerator"}, []string{"aws-saa", "aws-sap"},
+		"Accelerators list; Endpoint groups; Failover action",
+		"Static IPs are teaching addresses in 192.0.2.0/24 (TEST-NET-1); no traffic is routed and no health checks run. Failover switches the recorded active endpoint group."),
+	svc("directconnect", "Direct Connect", "Networking", "Dedicated connections — durable records with a confirm step.", "network", "/services/directconnect", "available", "API_EMULATED",
+		[]string{"connection"}, []string{"aws-sap"},
+		"Connections list; Create-connection wizard; Confirm action",
+		"No physical cross-connect, LOA-CFA or BGP session exists; confirming a connection is a teaching state change from REQUESTED to AVAILABLE."),
+	svc("controltower", "Control Tower", "Management", "Landing zones with guardrails — durable records.", "shield", "/services/controltower", "available", "API_EMULATED",
+		[]string{"landing-zone"}, []string{"aws-sap"},
+		"Landing zones list; Guardrails enable/disable",
+		"No accounts are vended and no SCPs or Config rules are enforced; guardrails are recorded settings. Enforcement is modelled in the Organizations/SCP lessons."),
+	svc("identitycenter", "IAM Identity Center", "Security", "Workforce SSO permission sets and account assignments — durable records.", "shield", "/services/identitycenter", "available", "API_EMULATED",
+		[]string{"permission-set"}, []string{"aws-saa", "aws-sap"},
+		"Permission sets list; Create-permission-set wizard; Assignments",
+		"No IdP is federated and assignments grant no access to any account; they are recorded for teaching. The IAM evaluator is the enforcement model."),
+	svc("ram", "Resource Access Manager", "Security", "Cross-account resource sharing — durable share records.", "share", "/services/ram", "available", "API_EMULATED",
+		[]string{"resource-share"}, []string{"aws-sap"},
+		"Resource shares list; Principals add/remove",
+		"No second account exists, so sharing changes no access; principals are recorded names, not validated against any account."),
+	svc("storagegateway", "Storage Gateway", "Storage", "Hybrid file, volume and tape gateways — durable records with activation.", "hard-drive", "/services/storagegateway", "available", "API_EMULATED",
+		[]string{"gateway"}, []string{"aws-sap"},
+		"Gateways list; Activate action; File shares",
+		"No gateway appliance is deployed, no iSCSI/NFS endpoint exists and no data is cached or uploaded. Activation is a teaching state change."),
+	svc("snowball", "Snowball", "Storage", "Petabyte-scale offline transfer jobs — durable records with a shipping lifecycle.", "hard-drive", "/services/snowball", "available", "API_EMULATED",
+		[]string{"job"}, []string{"aws-sap"},
+		"Jobs list; Advance action along the lifecycle",
+		"No device is shipped and no data is copied; the lifecycle (created → preparing → shipped → delivered → completed) is a teaching state machine. DataSync and DMS records are the available migration practice."),
+	svc("lakeformation", "Lake Formation", "Analytics", "Fine-grained data-lake permissions — durable grant records.", "database", "/services/lakeformation", "available", "API_EMULATED",
+		[]string{"permission"}, []string{"aws-sap"},
+		"Permissions list; Grant/Revoke flows",
+		"Grants are recorded, not enforced: no data lake exists and grants do not change access to any Glue table or S3 location."),
+	svc("macie", "Macie", "Security", "Sensitive-data discovery — classification jobs that scan real local metadata.", "shield", "/services/macie", "available", "API_EMULATED",
+		[]string{"finding"}, []string{"aws-saa", "aws-sap"},
+		"Classification jobs list; Run action; Findings",
+		"A run scans S3 bucket names (when MinIO answers) and DynamoDB table names for sensitive-data name patterns and records findings in the shared findings table. Object/table contents are never read; no finding is invented."),
+	svc("computeoptimizer", "Compute Optimizer", "Management", "Rightsizing recommendations computed from real lab state.", "trending-up", "/services/computeoptimizer", "available", "API_EMULATED",
+		[]string{"recommendation"}, []string{"aws-saa"},
+		"Recommendations list; Refresh action",
+		"Recommendations come from lab profile and state only — no CloudWatch utilization exists here, so every recommendation says so and carries LOW confidence (MEDIUM for a stopped lab). Never presented as measured rightsizing."),
+	svc("savingsplans", "Savings Plans", "Management", "Commitment plans with utilization computed from real lab hours.", "trending-up", "/services/savingsplans", "available", "API_EMULATED",
+		[]string{"savings-plan"}, []string{"aws-saa"},
+		"Savings plans list; Utilization view",
+		"Plans are records, not real AWS commitments: no money is committed and no discount is applied. Utilization is real arithmetic over lab hours at the teaching rates."),
+	svc("auditmanager", "Audit Manager", "Security", "Audit assessments with evidence counted from the real audit log.", "clipboard", "/services/auditmanager", "available", "API_EMULATED",
+		[]string{"assessment"}, []string{"aws-sap"},
+		"Assessments list; Collect-evidence action",
+		"Evidence is a count of real audit-log entries since the assessment started; no AWS evidence is collected and no evidence set is fabricated."),
+	svc("artifact", "Artifact", "Security", "Compliance reports catalogue and the organization's own agreements.", "file-text", "/services/artifact", "available", "API_EMULATED",
+		[]string{"report"}, []string{"aws-sap"},
+		"Reports catalogue; Agreements list",
+		"The report list is a catalogue of real AWS Artifact report names; CloudForge does not redistribute AWS compliance documents. Agreements are the organization's own records; accepting here accepts nothing with AWS."),
 	// Products (not AWS services): Learning Center + Terraform Learning
 	svc("learning-center", "Learning Center", "Learning Center", "Tracks, lessons, assessments, achievements and XP.", "book", "/learn", "available", "PARTIAL",
 		[]string{"track", "lesson", "assessment"}, nil,

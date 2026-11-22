@@ -6,13 +6,14 @@ description: >-
   module pairs exam concepts with a real production incident so learners can
   explain a design decision and then operate it under pressure.
 difficulty: intermediate
-estimated_hours: 12
+estimated_hours: 14
 learning_objectives:
 - Choose multi-AZ, multi-region and backup strategies from stated RTO and RPO
 - Design least-privilege IAM and layered network controls for a regulated workload
 - Select caching, storage and compute services from access patterns and cost data
 - Diagnose a live architecture failure and defend the fix against the Well-Architected pillars
 - Map each design decision to the SAA-C03 task statements
+- 'Operate the SAA exam services hands-on in lite mode: Auto Scaling, CloudFront, EBS/EFS/FSx, Aurora, Backup, NACLs, Macie, Shield, Compute Optimizer and Savings Plans'
 modules:
 - id: saa-resilience
   title: Designing Resilient Architectures
@@ -254,6 +255,129 @@ modules:
     - Savings Plans fit steady baselines; do not commit spiky workloads
     - Compute Optimizer and Trusted Advisor find over-provisioning
     - 'Example: tagging and scheduled shutdown remove forgotten dev spend'
+- id: saa-exam-services
+  title: Exam Services in Practice — Scaling, Storage and Cost
+  lessons:
+  - id: saa-autoscaling
+    title: Auto Scaling Groups and Elastic Capacity
+    theory: |
+      An Auto Scaling group keeps the right number of instances running
+      without an operator watching a dashboard. You set a minimum, a
+      desired capacity and a maximum; the group launches instances when
+      demand rises and terminates them when it falls. Target tracking
+      scaling adjusts capacity to hold a metric such as average CPU or
+      requests per target at a value you choose, while step scaling
+      reacts to alarm thresholds with different adjustments at different
+      severities. Scheduled scaling handles known patterns such as a
+      weekday morning peak. Health checks decide which instances count:
+      EC2 status checks catch a broken host, and load-balancer health
+      checks catch an application that answers the port but fails real
+      requests. Spread the group across at least two Availability Zones
+      so one zone loss leaves capacity in the other, and keep a minimum
+      that survives that loss — this is static stability applied to
+      scaling. Hands on: launch the saa-exam-services lab, then create
+      a group with POST /api/v1/aws/autoscaling/groups giving min_size
+      2, max_size 6 and desired_capacity 2 with launch_profile Micro,
+      and scale it with POST /api/v1/aws/autoscaling/groups/{id}/scale
+      to desired_capacity 4. In CloudForge the group is a durable
+      record: scaling sets the recorded desired capacity, it launches
+      no real instances, and the group size is capped at 10. Real
+      instances come from the lab itself; the group teaches the
+      control plane you will operate on AWS.
+    key_points:
+    - Minimum, desired and maximum bound the group; target tracking holds a metric steady
+    - Load-balancer health checks reflect real request success, not just a listening port
+    - Spread across two Availability Zones and keep a minimum that survives a zone loss
+    - 'Scaling policies: target tracking, step, scheduled and predictive'
+    - 'Example: scale the lab group from 2 to 4 and watch desired capacity change'
+    architecture_diagram_mermaid: |
+      flowchart LR
+        ALARM[CloudWatch alarm] --> POL[Scaling policy]
+        POL --> ASG[Auto Scaling group]
+        ASG --> AZ1[AZ-a instances]
+        ASG --> AZ2[AZ-b instances]
+        AZ1 --> ELB[Load balancer]
+        AZ2 --> ELB
+  - id: saa-storage-edge
+    title: Choosing Block, File and Edge Storage
+    theory: |
+      Storage questions on the exam are decided by who reads the data
+      and how. EBS is block storage for one instance at a time: gp3 is
+      the general-purpose default, io2 is for IOPS-critical databases,
+      st1 and sc1 are throughput-optimized for large sequential reads.
+      EFS is a shared file system many instances mount at once over
+      NFS, with general-purpose or max-I/O performance modes. FSx is
+      managed file storage for specific workloads: Lustre for HPC and
+      machine learning, Windows File Server for Windows applications,
+      NetApp ONTAP for enterprise file features, OpenZFS for ZFS
+      workloads. Aurora is a managed relational cluster with one writer
+      and up to fifteen readers, storage that grows automatically, and
+      failover that promotes a reader in seconds; it is not the same as
+      RDS, which runs a single database engine on one instance. Backup
+      plans and vaults schedule and retain recovery points, and
+      CloudFront caches content at edge locations so repeated requests
+      never reach the origin. Hands on, in the saa-exam-services lab:
+      create an EBS volume with POST /api/v1/aws/ebs/volumes and attach
+      it to your lab with POST /api/v1/aws/ebs/volumes/{id}/attach;
+      create an Aurora cluster with POST /api/v1/aws/aurora/clusters
+      and fail it over; create a CloudFront distribution and record an
+      invalidation; create a backup plan and run it with POST
+      /api/v1/aws/backup/plans/{id}/run — the run is a real pg_dump of
+      the platform database. Every one of these is a durable record in
+      CloudForge, not real AWS storage, and each response says so.
+    key_points:
+    - EBS is block for one instance; EFS is shared file; FSx is workload-specific file
+    - Aurora is a cluster with writer and readers; RDS is a single database instance
+    - CloudFront caches at the edge; invalidations are recorded, not served
+    - Backup plans schedule recovery points; a run here is a real pg_dump
+    - 'Example: attach an EBS volume to the lab, then fail an Aurora cluster over'
+    architecture_diagram_mermaid: |
+      flowchart LR
+        EC2[EC2 instance] --> EBS[EBS volume]
+        EC2 --> EFS[EFS file system]
+        APP[Application] --> AUR[Aurora writer]
+        AUR --> READ[Aurora reader]
+        USER[Users] --> CF[CloudFront]
+        CF --> ORIGIN[S3 origin]
+  - id: saa-cost-detection
+    title: Cost Governance and Detection Services
+    theory: |
+      Cost and detection services only help if you know what their
+      numbers are made of. Compute Optimizer recommends instance types
+      from utilization history; in CloudForge there is no utilization
+      pipeline, so POST /api/v1/aws/computeoptimizer/recommendations/refresh
+      computes recommendations from real lab state — profile and whether
+      the lab is stopped — and every recommendation says so, with LOW
+      confidence except a stopped lab, which is a MEDIUM-confidence
+      suggestion to terminate it. Savings Plans trade a one- or
+      three-year hourly commitment for a discount; Compute plans cover
+      EC2, Lambda and Fargate, EC2 plans cover one family. Check
+      utilization with GET /api/v1/aws/savingsplans/plans/{id}/utilization,
+      which divides your real lab burn at the teaching rates by the
+      commitment — below one hundred percent means you committed more
+      than you use. Macie finds sensitive data: a classification job
+      scans S3 bucket names and DynamoDB table names for patterns such
+      as ssn or credit-card and records findings; it never reads object
+      contents. Shield records which resources are protected against
+      DDoS, and network ACLs give stateless, numbered subnet rules —
+      create one with POST /api/v1/aws/nacl/acls, add rules, and test a
+      packet with POST /api/v1/aws/nacl/acls/{id}/evaluate, which really
+      evaluates first match wins with a default deny. None of these
+      filters live traffic in CloudForge; they teach the control plane.
+    key_points:
+    - Compute Optimizer here uses lab state, not utilization — read the confidence
+    - Savings Plan utilization below 100% means over-commitment
+    - Macie scans names only, never object contents; findings come only from real matches
+    - NACLs are stateless and numbered; evaluate really matches first rule wins
+    - Shield protections are records; no traffic is inspected or mitigated here
+    - 'Example: create a Savings Plan, check utilization, then refresh Compute Optimizer'
+    architecture_diagram_mermaid: |
+      flowchart LR
+        LAB[Lab state] --> CO[Compute Optimizer]
+        LAB --> SP[Savings Plans utilization]
+        S3[S3 bucket names] --> MAC[Macie job]
+        MAC --> FIND[Findings]
+        NACL[Network ACL] --> EVAL[Evaluate packet]
 guided_lab:
   lab_definition_id: saa-ha-web
   title: Build a highly available web tier across two Availability Zones
@@ -362,7 +486,31 @@ assessment:
   - Add a read replica of the origin database
   correct_answer: 0
   explanation: CloudFront caches cacheable segments close to viewers, reducing repeated origin requests and long-haul latency.
-xp_reward: 250
+- question: A web tier runs in an Auto Scaling group with min 2, max 6 and desired 2 across two Availability Zones. One zone fails completely. Which statement is true?
+  options:
+  - The group can keep serving from the surviving zone if the minimum survives there
+  - The group must be recreated in the surviving zone
+  - The load balancer stops routing until the zone recovers
+  - Desired capacity must be set to zero first
+  correct_answer: 0
+  explanation: With instances spread across two zones and a minimum that survives one zone loss, the group keeps serving from the remaining zone.
+- question: A database needs shared file access from many instances at once, and a separate workload needs high-throughput scratch space for one instance. Which pairing fits?
+  options:
+  - EFS for the shared access, EBS for the single-instance scratch space
+  - EBS for the shared access, S3 Glacier for the scratch space
+  - FSx for Lustre for the shared access, EFS for the scratch space
+  - EBS for both workloads
+  correct_answer: 0
+  explanation: EFS is a shared file system many instances mount at once; EBS is block storage for one instance at a time.
+- question: A Savings Plan shows 40% utilization over the last month. What does that mean?
+  options:
+  - The commitment exceeds current steady usage; reduce the commitment or grow steady usage
+  - The plan is saving 40% on every workload
+  - Utilization is measured against the largest instance only
+  - The plan must be deleted immediately
+  correct_answer: 0
+  explanation: Utilization is covered usage divided by commitment; 40% means most of the committed spend is unused, so the commitment is too large for the current baseline.
+xp_reward: 300
 prerequisites:
 - fundamentals
 - networking

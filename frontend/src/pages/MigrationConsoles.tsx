@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { FidelityBadge } from '../components/AwsBadge.tsx'
@@ -30,7 +31,7 @@ function Notice({ text }: { text: string }) {
  * and RDS instances, with real row counts and a migration log.
  * Full-load only, ≤5000 rows/table, no CDC.
  */
-export function DmsConsole() {
+export function DmsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [sourceKind, setSourceKind] = useState('platform')
@@ -76,13 +77,46 @@ export function DmsConsole() {
   })
   const sel = taskRows.find((t) => t.id === selected)
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Migration', to: '/services' }, { label: 'DMS' }]}
-        title="Database Migration Service — Replication tasks"
-        description="Real schema/data migration between the platform Postgres and RDS instances, with real row counts and a migration log."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="full-load only · ≤5000 rows/table · no CDC" />}
-      />
+    <ConsoleWithHome
+      icon="layers"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Migration', to: '/services' }, { label: 'Database Migration Service' }]}
+      title="Database Migration Service — Replication tasks"
+      description="Real schema/data migration between the platform Postgres and RDS instances, with real row counts and a migration log."
+      fidelity="PARTIAL"
+      fidelityFootnote="full-load only · ≤5000 rows/table · no CDC"
+      homeLabel="DMS dashboard"
+      listLabel="Replication tasks"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="DMS"
+            banner="Full-load row copies between the platform Postgres and RDS instance databases (up to 5000 rows per table) with real row counts and a migration log. No CDC, no ongoing replication. Survey note: in the 2026-11-22 reference account DMS was NOT ACCESSIBLE (search card not supported, no layout captured) — this console's layout follows public console documentation, not an observed layout."
+            actions={[
+              { label: 'Create replication task', primary: true, onClick: goToList },
+            { label: 'Open DataSync', to: '/services/datasync' },
+            ]}
+            cards={[
+              { label: 'Replication tasks', count: taskRows.length, onSelect: goToList },
+            { label: 'Endpoints', count: '—', onSelect: goToList, note: 'Source/target are platform Postgres or RDS instances' },
+            { label: 'Migration logs', count: selected !== '' ? logRows.length : '—', onSelect: goToList },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={tasks.isFetching}
+            health={[
+              "tasks.isError ? 'Tasks could not be loaded.' : `${taskRows.length} replication task(s) listed.`",
+            "Target table is built from source information_schema column types.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — databases track', to: '/learn' },
+            { label: 'Migration Hub (task tracking)', to: '/services/migrationhub' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {tasks.isPending && <Loading label="Loading migration tasks" />}
       {tasks.isError && <ErrorBox message={`Tasks could not be loaded (${tasks.error.message}).`} />}
@@ -161,7 +195,7 @@ export function DmsConsole() {
           />
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -170,7 +204,7 @@ export function DmsConsole() {
  * screens: real file/object copy between S3 buckets and local paths
  * under the workdir, with SHA-256 verification per file.
  */
-export function DataSyncConsole() {
+export function DataSyncConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [source, setSource] = useState('local:')
@@ -202,13 +236,47 @@ export function DataSyncConsole() {
   })
   const sel = taskRows.find((t) => t.id === selected)
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Migration', to: '/services' }, { label: 'DataSync' }]}
-        title="DataSync — Transfer tasks"
-        description="Real file/object copy between S3 buckets and local paths, with SHA-256 verification per file."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="local paths confined to the workdir" />}
-      />
+    <ConsoleWithHome
+      icon="layers"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Migration', to: '/services' }, { label: 'DataSync' }]}
+      title="DataSync — Transfer tasks"
+      description="Real file/object copy between S3 buckets and local paths, with SHA-256 verification per file."
+      fidelity="PARTIAL"
+      fidelityFootnote="local paths confined to the workdir"
+      homeLabel="DataSync dashboard"
+      listLabel="Transfer tasks"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="DataSync"
+            banner="Real copies between local workdir paths and S3 buckets with SHA-256 verification per file. Local paths are confined to the workdir root; S3 needs MinIO. No DataSync agents. Survey note: DataSync was NOT YET CHECKED in the 2026-11-22 survey (the browser became unavailable before its page was reached) — this layout is from public console documentation and is UNVERIFIED against the observed console. Do not treat it as an observed layout."
+            actions={[
+              { label: 'Create task', primary: true, onClick: goToList },
+            { label: 'Open DMS', to: '/services/dms' },
+            ]}
+            cards={[
+              { label: 'Transfer tasks', count: taskRows.length, onSelect: goToList },
+            { label: 'Agents', count: 0, disabledReason: 'No DataSync agents.' },
+            { label: 'Locations', count: '—', onSelect: goToList, note: 's3:<bucket>[/prefix] or local:<path>' },
+            { label: 'Transfer logs', count: selected !== '' ? logRows.length : '—', onSelect: goToList },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={tasks.isFetching}
+            health={[
+              "tasks.isError ? 'Tasks could not be loaded.' : `${taskRows.length} task(s) listed.`",
+            "SHA-256 verification per file; local paths confined to the workdir root, .. rejected.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — databases track', to: '/learn' },
+            { label: 'Migration Hub (task tracking)', to: '/services/migrationhub' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {tasks.isPending && <Loading label="Loading transfer tasks" />}
       {tasks.isError && <ErrorBox message={`Tasks could not be loaded (${tasks.error.message}).`} />}
@@ -262,7 +330,7 @@ export function DataSyncConsole() {
           />
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }
 

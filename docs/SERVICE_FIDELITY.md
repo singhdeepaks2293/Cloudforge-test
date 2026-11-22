@@ -82,7 +82,7 @@
 | SQS — CreateQueue / SendMessage / ReceiveMessage / DeleteMessage | API_EMULATED (durable Postgres queues, since Phase 3) | `backend/internal/httpapi/phase3.go`; `backend/internal/store/phase3.go` (`p3_sqs_queues` / `p3_sqs_messages`); `backend/internal/phase3/phase3.go` (`SQSMessageVisible`, `SQSShouldDLQ`). Receive hides until the visibility timeout (does not delete); at `max_receives` the message moves to the DLQ instead of being returned; redrive re-enqueues (new id). No FIFO, no long polling. The old in-memory simulator (`providers/simulators.go`) is superseded for these operations. |
 | SNS — CreateTopic / Publish / Subscribe | API_EMULATED (durable Postgres topics, real fan-out, since Phase 3) | `backend/internal/httpapi/phase3.go` (`p3_sns_topics` / `p3_sns_subscriptions` / `p3_sns_deliveries`). Fan-out to SQS queues (durable enqueue), HTTP(S) endpoints (real POST, SSRF-guarded to loopback), Lambda functions (real invocation); every delivery recorded. Email/SMS not built (400). The old in-memory simulator is superseded for these operations. |
 | EventBridge — PutRule / PutEvents | API_EMULATED (durable Postgres rules, since Phase 3) | `backend/internal/httpapi/phase3.go` (`p3_eventbridge_rules`); `backend/internal/phase3/phase3.go` (`PatternMatches`: source / detail-type arrays + nested detail subset). Targets SQS/SNS/Lambda, validated at rule creation. No schedule expressions, no input transformers, no AWS service events (PutEvents only). The old in-memory simulator is superseded for these operations. |
-| VPC — CreateVpc (registry) | SIMULATED | `providers.go` vpc entry ("simulation on Linux network namespaces, bridges and nftables — not AWS VPC"). The real path is lab resources + engine, not this registry entry. Phase 2: full lifecycle via `backend/internal/httpapi/vpc.go` + `resources.go` (VPC/subnet CRUD with CIDR validation, routes, SG rules, IGW attach/detach, NAT, tags); engine firewall policy is a one-shot snapshot (no update/delete RPC). NACLs UNSUPPORTED (no engine RPC). |
+| VPC — CreateVpc (registry) | SIMULATED | `providers.go` vpc entry ("simulation on Linux network namespaces, bridges and nftables — not AWS VPC"). The real path is lab resources + engine, not this registry entry. Phase 2: full lifecycle via `backend/internal/httpapi/vpc.go` + `resources.go` (VPC/subnet CRUD with CIDR validation, routes, SG rules, IGW attach/detach, NAT, tags); engine firewall policy is a one-shot snapshot (no update/delete RPC). NACLs: API_EMULATED since v3 (`backend/internal/httpapi/exam.go`, real first-match evaluation) — still no engine RPC, so no live traffic is filtered. |
 | EC2 — RunInstances / DescribeInstances (registry) | API_EMULATED **(claim disputed — see note)** | `providers.go` ec2 entries claim `aws-emulator` backend requiring `AWS_EMULATOR_ENDPOINT` (`http://localhost:4566`); no emulator service in compose, no EC2 HTTP handler. Real instance provisioning is labs/host-agent, not this entry. Until the emulator is deployed or the entry is corrected, treat EC2-as-an-API as **not started**. Phase 2 (real path): Start/Reboot wired (`backend/internal/httpapi/instances.go`); instance creation now starts the VM (was left `"defined"` — fixed 2026-11-22). |
 | Lambda — CreateFunction / InvokeFunction | PARTIAL (subprocess sandbox, since Phase 3 — the Docker-invoker claim is corrected, not built) | `backend/internal/phase3/phase3.go` (`RunLambda`: python3/node, timeout, output cap, prlimit memory cap, temp workdir, uid 65534 when root, no host shell); `backend/internal/httpapi/phase3.go` (versions/aliases, SQS/EventBridge triggers, invocations list). NOT container isolation, NOT AWS Lambda: no VPC attachment, managed scaling, layers, or execution-role model. Timeout → honest 504 with `timed_out: true`, invocation recorded. |
 | API Gateway — CreateRestApi / CreateResource / CreateDeployment | PARTIAL (real routing + real request logs, since Phase 3) | `backend/internal/httpapi/phase3.go` (`p3_apigw_apis` / `p3_apigw_resources` / `p3_apigw_stages` / `p3_apigw_logs`). Integrations `lambda` (function id/name resolved) or `http` (SSRF-guarded URL). Deploy snapshots resources into a stage; invoke via `/api/v1/gateway/{apiId}/{stage}/*` (platform auth required); every invocation logged. REST/HTTP only (no WebSocket APIs); Lambda error → 502, timeout → 504. |
@@ -156,3 +156,139 @@ Badge text must name the backend where it matters, e.g.
 `API_EMULATED · local MinIO, not AWS S3`. The catalog's per-service
 "Differs" column (`SERVICE_CATALOG.md`) is the source of the badge
 footnotes.
+
+## 5. v3 — AWS-reference console UI (lite exam set, 2026-11-22)
+
+Every service in the lite (SAA-C03 / SAP-C02) set has a console in the
+pattern captured from the real VPC console (ap-southeast-2):
+
+- **Home dashboard** (default landing): notification banner, action
+  links ("Create X", "Launch…"), "Resources by Region" — a two-column
+  grid of resource cards, NOT a table. Every card: linked resource-type
+  heading, region label, linked live count, collapsed "Regions"
+  expander. Then Service Health, Settings (link list) and Additional
+  Information (link list). No data table, columns, pagination or detail
+  tabs on Home; those live on the list/detail pages.
+- **Left nav**: grouped like the reference (VPC: Virtual private cloud
+  / Security / PrivateLink and Lattice / Network Firewall / VPN /
+  Transit Gateways / Traffic Mirroring, plus standalone items). Items
+  that are separate consoles link to them; items with no backend are
+  shown disabled with the reason.
+- **List pages**: `AwsTable` with the AWS console's columns, filters
+  and Actions menu; **detail tabs** via `ConsoleTabs` (Details /
+  Configuration / Monitoring / Tags / … per service).
+- **Wiring**: every action calls the real backend endpoint where one
+  exists (see §2). Where a capability is SIMULATED / PARTIAL /
+  UNSUPPORTED the button is disabled with the reason and the Home card
+  says so — never a no-op pretending success, never simulated data
+  presented as real AWS.
+- **Services with no backend** (Auto Scaling, Aurora, Backup, Macie,
+  Audit Manager, Artifact, CloudFront, EBS, EFS, FSx, Shield, Control
+  Tower, IAM Identity Center, RAM, VPN, Direct Connect, Global
+  Accelerator, MGN, Compute Optimizer, Savings Plans) get the same
+  Home + operations-list + detail-tab treatment in
+  `frontend/src/pages/LiteServiceConsole.tsx`, driven by the live
+  registry (`GET /api/v1/services`) and the Resource Explorer counts
+  (0 recorded, never invented), with a "What you can do instead" link
+  to the available service teaching the same concept. Backup notes the
+  host-side `scripts/backup.sh` / `scripts/restore.sh` model.
+- **Branding**: CloudForge's own (dark navy header, orange primary
+  buttons, CloudForge name). No AWS logo, brand colours, trademarks,
+  and no claim this is AWS.
+- Non-lite services keep their v2 consoles unchanged in v3.
+
+### 5.1 Survey reconciliation (Workstream 1b, 2026-11-22)
+
+The consoles above were reconciled against the read-only survey in
+`docs/reference/aws-console-survey-2026-11-22.md` (45 of 46 services
+checked; DataSync unchecked). List tables use the survey's exact
+columns; a column with no backend data renders "Not available" with
+the reason, never an invented value. Columns that were CloudForge-only
+inventions were dropped from the tables (their data, where real, moved
+to the detail panel — e.g. Lambda version/timeout/memory, IAM role
+ARN/max session). Services the survey found to be sections of another
+console are sections, with the old route redirecting to the section:
+
+| Service | Survey outcome applied |
+|---|---|
+| S3 | Buckets table: Name, Region, IAM Access Analyzer, Creation date. Lands on the Buckets list, not a dashboard. |
+| IAM | Lands on Roles. Roles table: Role name, Trusted entities (read from the stored trust policy), Last activity (Not available — no backend source). |
+| Lambda | Functions table: Function name, Description (Not available), Runtime, Last modified (updated_at). |
+| ELB | Section of the EC2 console (Load Balancing group); `/services/elb` redirects to `/services/ec2?section=load-balancers`. Load Balancers table: Name, State, Type, Scheme, IP address type, VPC ID, Availability Zones, Security groups, DNS name, ARN, Date created. |
+| Auto Scaling | Section of the EC2 console; `/services/autoscaling` redirects to `/services/ec2?section=autoscaling`. Empty-state marketing intro with a disabled Create button. |
+| EBS | Section of the EC2 console (Elastic Block Store group); `/services/ebs` redirects to `/services/ec2?section=volumes`. Empty Volumes table with the survey's exact columns. |
+| Transit Gateway | Section of the VPC console; `/services/transitgateway` redirects to `/services/vpc?section=tgw`. Attachments table: Name, Transit gateway attachment ID, Transit gateway ID, State (+ VPC). |
+| VPN | Section of the VPC console; `/services/vpn` redirects to `/services/vpc?section=vpn`. Empty VPN Connections table with the survey's exact columns. |
+| Cost Explorer | Breakdown table: Service, Total cost, % of total cost (grouped from the real priced usage lines, kept in a details block). |
+| Budgets | Table: Name, Thresholds, Budget, Amount used, Forecasted amount (Not available — no forecasting), Current vs. budgeted, Forecasted vs. budgeted. |
+| CloudFront | Distributions list with the survey's exact columns, empty (UNSUPPORTED). |
+| EKS | Clusters list with the survey's exact columns, empty (UNSUPPORTED). |
+| CloudFormation | Stacks table: Stack name, Status, Created time, Description (Not available). |
+| CodeBuild | Projects table: Name, Source provider, Repository, Latest build status, Description (Not available), Last Modified. |
+| CodePipeline | Pipelines table: Name, Latest execution status, Latest source revisions (Not available), Latest execution started, Most recent executions. |
+| GuardDuty, Security Hub, Organizations, Redshift, Kinesis, DMS | RESTRICTED / not accessible in the reference account — no layout was captured beyond the restriction dialog. The consoles' layouts follow public console documentation, not an observed layout; each console's Home banner says so. The restriction is never presented as the design. Redshift has no CloudForge console at all. |
+| DataSync | NOT YET CHECKED in the survey (browser unavailable) — layout is from public console documentation and is marked UNVERIFIED in the console's Home banner and in the survey file. |
+| Wizards | No create/edit wizard was opened in the survey (read-only), so no AWS wizard steps were observed. CloudForge wizard steps (EC2 Launch instance, S3 Create bucket, Lambda Create function) are CloudForge's own design, inferred from the list-page actions, and each wizard carries a footnote saying so. |
+| Batch | No CloudForge console exists; the survey entry is backup reference only — nothing to reconcile. |
+| All other surveyed services (VPC, EC2, RDS, Route 53, DynamoDB, ElastiCache, SQS, SNS, EventBridge, API Gateway, ECS, CloudWatch, CloudTrail, KMS, Secrets Manager, WAF, Backup, EFS, Cognito, SES, Athena, Glue, SageMaker) | Already matched the survey pattern (Home dashboard with resource cards, no table on Home; list page with the service's own columns) — no change. |
+
+## 6. v3 — exam services in lite (SAA-C03 / SAP-C02, 2026-11-22)
+
+The 24 services listed in §5 as "with no backend" now have a real
+backend: `backend/internal/httpapi/exam.go` (generic CRUD +
+custom actions, routes `/api/v1/aws/<service>/...`), the providers
+registry (`backend/internal/providers/providers.go`), the service
+catalog (`backend/internal/httpapi/services.go`, 109 `svc()` rows
+in total per the Workstream 4 audit), and one shared Postgres
+table `p7_exam_services` (migration `014_exam_services.sql`).
+§5's "no backend" list is superseded for these services — the
+frontend wiring (Workstream 1) can now show real counts and call
+real endpoints instead of the "What you can do instead" fallback.
+
+| Service | Fidelity | What is real, what is not |
+|---|---|---|
+| Auto Scaling | API_EMULATED | Groups are durable records (min/desired/max, scale action, bounds enforced, max 10). Scaling sets the recorded desired capacity; no instances are launched — real instances come from the lab itself. |
+| Global Accelerator | API_EMULATED | Accelerators + endpoint groups are durable records; failover switches the recorded active region and appends history. Static IPs are teaching addresses in `192.0.2.0/24` (TEST-NET-1); no traffic is routed. |
+| Direct Connect | API_EMULATED | Connections are durable records; confirm moves REQUESTED → AVAILABLE. No carrier, LOA-CFA or BGP session exists. |
+| Control Tower | API_EMULATED | Landing zones + guardrails are durable records. A guardrail is a recorded setting, not an enforced SCP. |
+| IAM Identity Center | API_EMULATED | Permission sets + assignments are durable records. No login or federation is created. |
+| RAM | API_EMULATED | Resource shares + principals are durable records. No second account exists, so sharing changes no access. |
+| Storage Gateway | API_EMULATED | Gateways + file shares are durable records; activation is a teaching state change (OFFLINE → ONLINE). No appliance is deployed, no data is cached. |
+| Snowball | API_EMULATED | Jobs are durable records advanced along a teaching lifecycle (created → preparing → shipped → delivered → completed); forward-only, no device ships. |
+| Lake Formation | API_EMULATED | Permission grants are durable records, not enforced — no data lake exists here. |
+| Macie | API_EMULATED | Classification jobs scan S3 bucket names, DynamoDB table names and job-scope names for sensitive-data patterns and write real findings to the shared `findings` table. Names only — object contents are never read. |
+| Compute Optimizer | API_EMULATED | Recommendations are computed from real lab state (profile, stopped/running) and say so: LOW confidence, except a stopped lab (terminate, MEDIUM). There is no utilization pipeline — the basis string states this. |
+| Savings Plans | API_EMULATED | Plans are durable records; utilization divides the real hourly lab burn (teaching rates) by the commitment. No billing data exists. |
+| Audit Manager | API_EMULATED | Assessments are durable records; collect-evidence counts real entries from this deployment's audit log since the assessment was created. |
+| Artifact | API_EMULATED | A catalogue of 8 real AWS Artifact report names plus agreement records. No documents are served or redistributed. |
+| Aurora | API_EMULATED | Clusters are durable records with writer/reader instances and teaching endpoints; failover swaps the recorded writer/reader roles. No database runs. |
+| Backup | REAL (runs) / API_EMULATED (plans, vaults) | A run is a real `pg_dump -Fc` of the platform Postgres into the API workdir, with size + SHA-256 recorded. No database or no `pg_dump` → a FAILED job with the reason, never a fake success. The registry entry for `StartBackupJob` is PARTIAL (the codebase rule `TestNoCapabilityClaimsReal` forbids any registry operation claiming REAL); the catalog row stays REAL, as in v2. |
+| MGN | API_EMULATED | Source servers are durable records; the replication lifecycle (NOT_STARTED → REPLICATING → TEST_LAUNCHED → CUTOVER) is a teaching state machine — wrong order is refused. No servers are replicated. |
+| FSx | API_EMULATED | File systems + mount targets are durable records. No file system is provisioned. |
+| Shield | API_EMULATED | Protections are durable records. No traffic is inspected or mitigated. |
+| EBS | API_EMULATED | Volumes are durable records; attach validates the lab really exists (404 otherwise) and marks the volume in-use; delete is refused while in-use. No disk is attached — the lab's disk is unchanged. |
+| EFS | API_EMULATED | File systems + mount targets are durable records. No file system is mounted. |
+| CloudFront | API_EMULATED | Distributions are durable records with teaching domain names; invalidations are recorded COMPLETED. Nothing is cached or served. |
+| VPN | API_EMULATED | Customer/VPN gateways + connections are durable records; a connection validates its gateways exist; tunnel activate/deactivate is a teaching field. No IPsec tunnel exists. |
+| NACLs | API_EMULATED | ACLs + numbered rules are durable records; **evaluate is a real evaluation** (lowest number first, stateless, default deny, protocol/port/CIDR matching). Rules do not filter live traffic — no engine RPC. |
+
+**Design.** All 24 services share one collection/table because
+their record semantics are identical (CRUD + a few state
+transitions); a service that later grows real behaviour gets its
+own collection then. Name uniqueness is per (service, kind, owner),
+enforced in the handler — not a DB unique constraint — because
+different services/kinds may legitimately share a name. Ownership
+follows the Phase 3 rule: non-admin users see only their own
+records (403 on another user's id).
+
+**Lite cap.** `quota.LiteExamResourceMax`: learner 10, instructor
+25, admin 50 records per service per user; full mode uncapped.
+Enforced in the create handler (429 `quota_exceeded`). Lab caps
+(1 lab / Micro / 30 min) and compose limits are unchanged.
+
+**Still honest gaps in lite (see also the cert map).** S3 object
+operations return 503 in lite (MinIO is not in the lite compose
+file). Transit Gateway attachments remain route-table entries in
+lab state. EKS, Elastic Beanstalk, Batch, Step Functions, Redshift,
+Cognito and ACM remain UNSUPPORTED by prior decision or because
+they are outside the assigned lite set.

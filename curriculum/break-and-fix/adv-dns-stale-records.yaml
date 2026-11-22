@@ -1,0 +1,40 @@
+id: adv-dns-stale-records
+title: 'Incident: DNS Answers with Yesterday''s Addresses'
+symptom: >-
+  After a migration, some services connect and some do not — the same hostname resolves to the old
+  on-prem address from one subnet and the new cloud address from another. Logs show connection
+  timeouts to an IP that no longer runs anything, and the failures move around as caches expire.
+injected_fault:
+  kind: dns
+  target: vpc_dns_resolver
+  parameters:
+    vpc_id: vpc-main
+    failure_mode: stale_records
+    affected: app.internal
+diagnosis_hints:
+- 'The same name resolving to different addresses in different places means stale records or split DNS, not a routing fault.'
+- Resolve the name from several subnets and compare the answers; the pattern of wrong answers locates the stale source.
+- 'Check TTLs: a long TTL keeps a stale record alive long after the correct one exists.'
+- Inspect the DHCP options set and which resolver each subnet is actually using.
+- Confirm the correct record exists in the authoritative zone before blaming the resolver.
+fix_steps:
+- Resolve the affected name from each subnet and map which answers are stale.
+- 'Find the stale source: the old zone, the cached record, or the wrong resolver.'
+- Correct the record or point the affected subnets at the right resolver.
+- Flush or wait out the caches, respecting the TTL.
+- Verify the name resolves to the new address from every subnet.
+validation_rules:
+- rule: dns_resolves
+  description: VPC DNS resolves internal names
+  params:
+    name: example.internal
+- rule: dns_resolves
+  description: VPC DNS resolves external names
+  params:
+    name: archive.ubuntu.com
+- rule: instance_reachable
+  description: An instance can reach a host by name
+  params:
+    protocol: http
+    port: 80
+xp_reward: 220

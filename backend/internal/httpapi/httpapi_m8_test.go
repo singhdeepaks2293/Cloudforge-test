@@ -18,7 +18,7 @@ func seedTestCurriculum(t *testing.T, srv *Server) {
 	if err != nil {
 		t.Fatalf("SeedDir: %v", err)
 	}
-	if rep.Tracks != 16 || rep.Lessons != 88 {
+	if rep.Tracks != 23 || rep.Lessons != 122 {
 		t.Fatalf("seed report: %+v", rep)
 	}
 }
@@ -34,8 +34,8 @@ func TestCurriculumFlow(t *testing.T) {
 		t.Fatalf("list tracks: %d %v", status, body)
 	}
 	tracks, _ := body["tracks"].([]any)
-	if len(tracks) < 16 {
-		t.Fatalf("tracks: %d, want >= 16", len(tracks))
+	if len(tracks) < 23 {
+		t.Fatalf("tracks: %d, want >= 23", len(tracks))
 	}
 
 	// Track detail includes theory and hides correct answers.
@@ -231,11 +231,15 @@ func TestCurriculumLabValidationRulesField(t *testing.T) {
 	seedTestCurriculum(t, srv)
 	token := registerAs(t, ts, "learner-m8b@example.com")
 	// A lab created from a curriculum lab definition carries its
-	// validation rules in GET /labs/{id}. Memory labs only know the
-	// M1 definitions, so use the Postgres-backed definition id via
-	// the curriculum store: the memory lab store rejects unknown
-	// definitions, so assert the negative instead — a lab from an
-	// M1 definition has no validation_rules field.
+	// validation rules in GET /labs/{id}. M1 lab ids have NO
+	// curriculum definition of their own (the networking track uses
+	// lab-networking-vpc), so a vpc-fundamentals lab carries no
+	// attached rules and validates against its 5 DefaultRules at
+	// validate time. (v3 regression, fixed in integration: the
+	// Advanced HA-DR track reused the id "vpc-fundamentals" for its
+	// guided lab, upserting 7 stricter rules under the M1 id and
+	// breaking the E2E acceptance test. Advanced guided labs now use
+	// their own adv-* ids; the 7 rules live on adv-ha-dr.)
 	status, body := do(t, "POST", ts.URL+"/api/v1/labs", token,
 		map[string]any{"definition_id": "vpc-fundamentals", "name": "m8 rules lab"})
 	if status != http.StatusCreated {
@@ -246,8 +250,23 @@ func TestCurriculumLabValidationRulesField(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("get lab: %d %v", status, body)
 	}
-	if _, has := body["validation_rules"]; has {
-		t.Fatalf("M1-definition lab should not carry validation_rules, got %v", body["validation_rules"])
+	if rules, ok := body["validation_rules"].([]any); ok && len(rules) != 0 {
+		t.Fatalf("vpc-fundamentals lab must carry no attached validation_rules (it uses DefaultRules), got %v", rules)
+	}
+	// The Advanced HA-DR lab carries its own 7 rules under adv-ha-dr.
+	status, body = do(t, "POST", ts.URL+"/api/v1/labs", token,
+		map[string]any{"definition_id": "adv-ha-dr", "name": "adv ha-dr rules lab"})
+	if status != http.StatusCreated {
+		t.Fatalf("create adv-ha-dr lab: %d %v", status, body)
+	}
+	advLabID := body["lab"].(map[string]any)["id"].(string)
+	status, body = do(t, "GET", ts.URL+"/api/v1/labs/"+advLabID, token, nil)
+	if status != http.StatusOK {
+		t.Fatalf("get adv-ha-dr lab: %d %v", status, body)
+	}
+	rules, ok := body["validation_rules"].([]any)
+	if !ok || len(rules) != 7 {
+		t.Fatalf("adv-ha-dr lab should carry its 7 validation_rules, got %v", body["validation_rules"])
 	}
 	// The curriculum definition itself does carry rules.
 	def, err := srv.Curriculum.GetLabDefinition(context.Background(), "lab-networking-vpc")

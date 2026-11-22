@@ -19,25 +19,41 @@ func TestLoadCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(b.Tracks) != 16 {
-		t.Fatalf("tracks: got %d, want 16", len(b.Tracks))
+	if len(b.Tracks) != 23 {
+		t.Fatalf("tracks: got %d, want 23", len(b.Tracks))
 	}
 	lessons, questions := 0, 0
 	for _, tr := range b.Tracks {
 		lessons += tr.LessonCount()
 		questions += len(tr.Assessment)
 	}
-	if lessons != 88 {
-		t.Fatalf("lessons: got %d, want 70", lessons)
+	if lessons != 122 {
+		t.Fatalf("lessons: got %d, want 122", lessons)
 	}
-	if questions != 94 {
-		t.Fatalf("questions: got %d, want 84", questions)
+	if questions != 142 {
+		t.Fatalf("questions: got %d, want 142", questions)
 	}
-	if len(b.Scenarios) != 10 {
-		t.Fatalf("scenarios: got %d, want 6", len(b.Scenarios))
+	if len(b.Scenarios) != 16 {
+		t.Fatalf("scenarios: got %d, want 16", len(b.Scenarios))
 	}
-	if len(b.Achievements) != 19 {
-		t.Fatalf("achievements: got %d, want 15", len(b.Achievements))
+	if len(b.Achievements) != 30 {
+		t.Fatalf("achievements: got %d, want 30", len(b.Achievements))
+	}
+	// v3 exam services: the SAA/SAP tracks gained one 3-lesson module
+	// each, taking each from 9 lessons / 5 questions to 12 / 8.
+	for _, want := range []struct{ id string }{{"aws-saa"}, {"aws-sap"}} {
+		var tr *curriculum.Track
+		for i := range b.Tracks {
+			if b.Tracks[i].ID == want.id {
+				tr = b.Tracks[i]
+			}
+		}
+		if tr == nil {
+			t.Fatalf("track %q missing", want.id)
+		}
+		if tr.LessonCount() != 12 || len(tr.Assessment) != 8 {
+			t.Fatalf("track %q: %d lessons / %d questions, want 12 / 8", want.id, tr.LessonCount(), len(tr.Assessment))
+		}
 	}
 	net := b.Tracks[0]
 	for _, tr := range b.Tracks {
@@ -90,6 +106,14 @@ func TestFaultMapping(t *testing.T) {
 		"loss":            {2, 100},
 		"dns":             {4, 100},
 	}
+	// Per-scenario magnitudes differ from the per-kind default:
+	// adv-db-replica-lag deliberately injects 8s of replica lag
+	// (the 5s figure in its fix steps is the post-fix target, not
+	// the injected magnitude).
+	magOverrides := map[string]float64{
+		"adv-db-replica-lag":           8000,
+		"adv-intermittent-packet-loss": 25,
+	}
 	b, err := curriculum.Load(curriculumDir(t))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -103,8 +127,12 @@ func TestFaultMapping(t *testing.T) {
 		if err != nil || kind != want.kind {
 			t.Fatalf("scenario %s: EngineKind=%v err=%v want %d", s.ID, kind, err, want.kind)
 		}
-		if mag := s.Fault.EngineMagnitude(); mag != want.mag {
-			t.Fatalf("scenario %s: magnitude=%v want %v", s.ID, mag, want.mag)
+		wantMag := want.mag
+		if ov, ok := magOverrides[s.ID]; ok {
+			wantMag = ov
+		}
+		if mag := s.Fault.EngineMagnitude(); mag != wantMag {
+			t.Fatalf("scenario %s: magnitude=%v want %v", s.ID, mag, wantMag)
 		}
 	}
 	if _, err := (curriculum.Fault{Kind: "explode"}).EngineKind(); err == nil {

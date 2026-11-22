@@ -162,8 +162,8 @@ export function CloudFormationConsole() {
             columns={[
               { header: 'Stack name', render: (r) => <span className="font-mono">{str(r, 'name')}</span> },
               { header: 'Status', render: (r) => str(r, 'status') || '—' },
-              { header: 'Resources', render: (r) => String(typeof r.resource_count === 'number' ? (r.resource_count as number) : 0) },
-              { header: 'Failure reason', render: (r) => <span className="text-xs">{str(r, 'failure_reason') || '—'}</span> },
+              { header: 'Created time', render: (r) => <span className="text-aws-muted">{str(r, 'created_at').slice(0, 19).replace('T', ' ') || '—'}</span> },
+              { header: 'Description', render: () => <span title="CloudForge does not store a stack description">Not available</span> },
               {
                 header: 'Actions',
                 render: (r) => (

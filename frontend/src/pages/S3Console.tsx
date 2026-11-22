@@ -4,8 +4,8 @@ import { Link } from 'react-router-dom'
 import { AwsCard } from '../components/AwsCard.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ConsoleTabs, ServiceConsole } from '../components/ServiceConsole.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import {
   AwsActionsMenu,
@@ -48,10 +48,10 @@ import type { S3Bucket, S3Object } from '../types/index.ts'
  */
 const CREATE_STEPS = ['General configuration', 'Ownership', 'Block Public Access', 'Versioning', 'Summary']
 
-export function S3Console() {
+export function S3Console({ initialSection }: { initialSection?: string }) {
   const queryClient = useQueryClient()
   const buckets = useQuery({ queryKey: ['s3-buckets'], queryFn: fetchS3Buckets, retry: 1 })
-  const [activeSub, setActiveSub] = useState('buckets')
+  const [activeSub, setActiveSub] = useState(initialSection ?? 'buckets')
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [checked, setChecked] = useState<string[]>([])
   const [tab, setTab] = useState('objects')
@@ -100,6 +100,7 @@ export function S3Console() {
       fidelity="PARTIAL"
       fidelityFootnote="buckets + objects over HTTP · MinIO-backed"
       subNav={[
+        { id: 'home', label: 'S3 dashboard' },
         { id: 'buckets', label: 'Buckets' },
         { id: 'access-points', label: 'Access points', disabledReason: 'Not supported by the local adapter' },
         { id: 'object-lambda', label: 'Object Lambda access points', disabledReason: 'Not modelled' },
@@ -128,6 +129,50 @@ export function S3Console() {
       {minioDown && (
         <ErrorBox
           message={`MinIO is unreachable (${buckets.error?.message ?? 'backend unavailable'}). Bucket operations return an honest 503 until MinIO is running — no buckets are shown as a fake empty list.`}
+        />
+      )}
+
+      {activeSub === 'home' && (
+        <ServiceHomeDashboard
+          serviceName="S3"
+          banner={
+            minioDown
+              ? 'MinIO is unreachable — bucket operations return an honest 503 until MinIO is running; no buckets are shown as a fake empty list.'
+              : 'Buckets are local to this deployment (no global S3 namespace), backed by local MinIO — object storage, not AWS S3.'
+          }
+          actions={[
+            {
+              label: 'Create bucket',
+              primary: true,
+              onClick: () => {
+                setWizardOpen(true)
+                setWizardStep(0)
+                setActiveSub('buckets')
+              },
+              disabledReason: minioDown ? 'MinIO is unreachable — create would fail.' : undefined,
+            },
+            { label: 'Learning Center — storage track', to: '/learn' },
+          ]}
+          cards={[
+            { label: 'Buckets', count: rows.length, onSelect: () => setActiveSub('buckets'), note: 'Local MinIO buckets' },
+            { label: 'Objects', count: '—', onSelect: () => setActiveSub('buckets'), note: 'Counted per bucket on the Objects tab' },
+            { label: 'Access Points', count: 0, disabledReason: 'Not supported by the local adapter.' },
+            { label: 'Block Public Access', count: '—', onSelect: () => setActiveSub('bpa'), note: 'Account-level settings' },
+          ]}
+          onRefresh={() => void queryClient.invalidateQueries({ queryKey: ['s3-buckets'] })}
+          refreshing={buckets.isFetching}
+          health={[
+            minioDown ? 'MinIO: unreachable.' : `MinIO: reachable — ${rows.length} bucket(s) listed.`,
+            'Objects upload/download/delete go through the backend (10 MiB cap); object ACLs are not exposed by the MinIO adapter.',
+          ]}
+          settings={[
+            { label: 'Resource Explorer', to: '/explorer' },
+            { label: 'All services', to: '/services' },
+          ]}
+          info={[
+            { label: 'Learning Center — storage track', to: '/learn' },
+            { label: 'Backup (host-side scripts)', to: '/services/backup' },
+          ]}
         />
       )}
 
@@ -212,6 +257,12 @@ export function S3Console() {
               )}
             </AwsWizard>
           )}
+          {wizardOpen && (
+            <p className="text-xs text-aws-muted">
+              Wizard steps inferred from the console&apos;s Create bucket action, not observed — the 2026-11-22
+              survey opened no create wizard, so no AWS wizard steps were recorded.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <AwsStat label="Buckets" value={rows.length} hint="Local MinIO" />
@@ -261,7 +312,7 @@ export function S3Console() {
                 onToggleAll={(all) => setChecked(all ? rows.map((r) => r.id) : [])}
                 columns={[
                   {
-                    header: 'Bucket name',
+                    header: 'Name',
                     render: (b) => (
                       <button
                         type="button"
@@ -275,9 +326,9 @@ export function S3Console() {
                       </button>
                     ),
                   },
-                  { header: 'Created', render: (b) => (b.created_at ? new Date(b.created_at).toLocaleString() : '—') },
                   { header: 'Region', render: () => 'cf-local-1' },
-                  { header: 'Fidelity', render: () => <FidelityBadge fidelity="API_EMULATED" footnote="" /> },
+                  { header: 'IAM Access Analyzer', render: () => <span title="No Access Analyzer data exists in CloudForge">Not available</span> },
+                  { header: 'Creation date', render: (b) => (b.created_at ? new Date(b.created_at).toLocaleString() : '—') },
                   {
                     header: 'Actions',
                     render: (b) => (

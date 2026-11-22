@@ -1,0 +1,210 @@
+id: advanced-cicd-pipeline
+title: 'End-to-End CI/CD: Staging to Production'
+description: 'Build the whole path from commit to production: a pipeline that tests every change,
+  deploys to staging, waits for a human approval, promotes the same artifact to production — and can
+  roll it back.'
+difficulty: advanced
+estimated_hours: 8
+learning_objectives:
+- Build a CI pipeline that tests every change before it can deploy
+- Promote one immutable artifact through staging to production
+- Add an approval gate between staging and production
+- Design a rollback path before the first production deploy
+- Wire monitoring and alerting into the deployment so a bad release is seen, not guessed
+modules:
+- id: adv-cicd-build
+  title: From Commit to Artifact
+  lessons:
+  - id: adv-cicd-pipeline
+    title: The Pipeline as a Product
+    theory: 'A CI/CD pipeline is a product in its own right, with users — the engineers who depend on
+      it — and the same quality bar as anything else the team ships. Its stages are: checkout, build,
+      lint, unit tests, integration tests against real services, and packaging into one immutable
+      artifact. Immutable is the key word: the artifact built here is the artifact that runs in
+      staging and in production, promoted unchanged, because rebuilding per environment is how
+      works-on-staging bugs are born. The pipeline must be fast enough that engineers do not route
+      around it and reliable enough that a red build means something — a flaky pipeline is ignored,
+      and an ignored pipeline is no pipeline at all. Every stage records its evidence: which commit,
+      which tests ran, which artifact came out, so any deployed version can be traced back to the
+      exact change that produced it. In the lab you build the deployment end of this: staging and
+      production running the same artifact, with the load balancer proving both serve traffic.'
+    key_points:
+    - Build the artifact once; promote it unchanged through environments
+    - 'Stages: checkout, build, lint, unit tests, integration tests, package'
+    - A slow or flaky pipeline gets routed around or ignored
+    - 'Every stage records evidence: commit, tests, artifact'
+    - Any deployed version traces back to the exact change that made it
+    architecture_diagram_mermaid: "flowchart LR\n    Commit[Commit] --> Build[Build + lint]\\n    Build --> Test[Unit + integration tests]\\n    Test --> Artifact[Immutable artifact]\\n    Artifact --> Stag[Staging]\\n    Stag --> Prod[Production]"
+  - id: adv-cicd-promotion
+    title: Staging, Approval and Promotion
+    theory: 'Staging exists to catch what tests cannot: the behaviour of the real system under real
+      conditions, with production-like data and configuration. A staging deployment that differs from
+      production — different variables, different topology, different data shape — catches nothing,
+      which is why staging mirrors production as closely as the budget allows. Between staging and
+      production sits the approval gate: a human decision, recorded, with the staging evidence in
+      front of them — test results, the plan, and what changed since the last deploy. Promotion moves
+      the same artifact, never a rebuild, and the promotion itself is an event the system records:
+      who approved, what version, when. Configuration is injected per environment at deploy time, so
+      the artifact stays identical and the differences are visible, reviewable variables. The whole
+      sequence is designed so that the boring case — a good change going out — needs no heroics, and
+      the interesting case — a bad change — is caught in staging, where it is cheap.'
+    key_points:
+    - Staging must mirror production or it catches nothing
+    - The approval gate is a recorded human decision with the evidence in front of them
+    - Promotion moves the same artifact, never a rebuild
+    - Configuration is injected per environment, never baked into the artifact
+    - The boring case needs no heroics; the bad case is caught in staging
+    architecture_diagram_mermaid: "flowchart LR\n    Artifact[Artifact] --> Stag[Staging]\\n    Stag --> Evidence[Evidence: tests + plan]\\n    Evidence --> Approve[Approval]\\n    Approve --> Prod[Production]"
+- id: adv-cicd-operate
+  title: Operating the Pipeline
+  lessons:
+  - id: adv-cicd-rollback
+    title: Rollback Before You Need It
+    theory: 'Every deployment plan needs a rollback plan written before the deploy, not during the
+      incident it causes. Rollback is a first-class operation: the previous artifact is kept, the
+      traffic shift that put the new version in can be reversed, and the database changes are
+      designed to be compatible with both versions — expand then contract, never a breaking change in
+      one step. The decision to roll back is made against numbers, not feelings: an error-rate or
+      latency threshold, agreed in advance, that triggers the rollback without a meeting. The rollback
+      itself is practised, because a rollback that has never been run is as theoretical as an untested
+      backup. And the rollback is verified the same way the deploy is: the validator confirms the
+      system is healthy afterwards — the load balancer has healthy targets, the error rate is back
+      below threshold, and the old version is serving traffic again. A team that can roll back in
+      minutes deploys with confidence; a team that cannot, deploys with fear.'
+    key_points:
+    - The rollback plan is written before the deploy, not during the incident
+    - Keep the previous artifact; make the traffic shift reversible
+    - Database changes are expand-then-contract, compatible with both versions
+    - Roll back on agreed numeric thresholds, not feelings
+    - Practise rollbacks and verify them like deploys
+    architecture_diagram_mermaid: "flowchart LR\n    Deploy[Deploy v2] --> Watch[Watch error rate]\\n    Watch -->|Threshold breached| Back[Shift traffic to v1]\\n    Back --> Verify[Verify healthy + error rate down]"
+  - id: adv-cicd-monitoring
+    title: Monitoring and Alerting on Every Deploy
+    theory: 'A deployment without monitoring is a change made blind. Every deploy is an experiment,
+      and the experiment needs its instruments: error rate, latency and saturation, watched from the
+      moment traffic shifts. The alerting rules are written alongside the deployment, not added after
+      the first bad release: an error-rate threshold that pages a human, a latency threshold that
+      warns, and a dashboard that shows the new version next to the old one so a regression is
+      visible at a glance. Alerts must be actionable — an alert that fires and tells nobody what to
+      do is noise, and noise trains people to ignore alerts. The deploy itself is marked on the
+      graphs, so the moment the error rate moves, anyone looking can see it moved with the deploy.
+      After the deploy, the metrics are reviewed: did the new version behave, did the thresholds hold,
+      and does the runbook say what to do next time? In the lab you practise the verification half of
+      this: record the error rate as a metric on the load balancer resource and prove it is below
+      threshold after the rollout.'
+    key_points:
+    - Every deploy is an experiment; it needs instruments from the first second
+    - Alert rules are written with the deployment, not after the first bad release
+    - Alerts must be actionable or they train people to ignore them
+    - Mark deploys on the graphs so regressions are visibly tied to a change
+    - Review the metrics after every deploy and update the runbook
+    architecture_diagram_mermaid: "flowchart LR\n    Deploy[Deploy] --> Metrics[Error rate + latency]\\n    Metrics --> Alert[Alert on threshold]\\n    Alert --> Runbook[Runbook action]"
+guided_lab:
+  lab_definition_id: adv-cicd
+  title: Deploy the Same Artifact to Staging and Production
+  tasks:
+  - Build a VPC with public and private subnets for the staging and production environments
+  - Run at least two instances — one per environment — behind a load balancer with healthy targets
+  - Expose the application on its secure port and confirm an instance is reachable
+  - Record the staging error rate as a metric on the load balancer resource and confirm it is below 1%
+  - Run the lab validator and fix every failing check before finishing
+  validation_rules:
+  - rule: vpc_exists
+    description: A VPC exists in the lab
+  - rule: subnet_count
+    description: At least two subnets exist
+    params:
+      operator: '>='
+      value: 2
+  - rule: instance_running
+    description: At least two instances are running (staging and production)
+    params:
+      operator: '>='
+      count: 2
+  - rule: load_balancer_healthy_targets
+    description: At least two targets are healthy behind the load balancer
+    params:
+      min_count: 2
+  - rule: instance_reachable
+    description: An instance is running with a recorded address
+    params:
+      protocol: http
+      port: 80
+  - rule: security_group_allows
+    description: The application port is reachable
+    params:
+      port: 443
+challenge:
+  title: A bad release reached staging
+  task: 'A bad release reached staging and the error rate is climbing. Roll it back: restore the
+    previous version, prove the load balancer still has healthy targets, prove at least one instance
+    is running, and record the error rate after rollback as a metric on the load balancer resource —
+    it must be below 1% before the challenge passes.'
+  validation_rules:
+  - rule: instance_running
+    description: At least one instance is running after the rollback
+    params:
+      operator: '>='
+      count: 1
+  - rule: load_balancer_healthy_targets
+    description: At least two targets are healthy behind the load balancer
+    params:
+      min_count: 2
+  - rule: metric_below
+    description: Error rate after rollback is below 1%
+    params:
+      metric: error_rate
+      threshold: 1
+assessment:
+- question: Why build the artifact once and promote it unchanged?
+  options:
+  - It is faster
+  - So what was tested is exactly what ships
+  - Artifacts cannot be rebuilt
+  - It saves disk space
+  correct_answer: 1
+  explanation: Rebuilding per environment can introduce differences; promoting the tested artifact guarantees identity.
+- question: What makes staging useful?
+  options:
+  - It is cheaper than production
+  - It mirrors production closely enough to catch what tests cannot
+  - It has no traffic
+  - It runs older code
+  correct_answer: 1
+  explanation: Staging that differs from production catches nothing; its value is production-like behaviour before users see it.
+- question: When should the rollback plan be written?
+  options:
+  - During the incident
+  - Before the deploy
+  - After the deploy succeeds
+  - Only for risky changes
+  correct_answer: 1
+  explanation: A rollback plan written during the incident is improvised under stress; it belongs in the deploy plan.
+- question: How should database changes be made for safe rollback?
+  options:
+  - Change the schema and the code in one step
+  - Expand then contract, keeping each step compatible with both versions
+  - Never change the database
+  - Migrate the database after the code
+  correct_answer: 1
+  explanation: Expand-then-contract keeps the old and new versions working against the same schema, so rollback stays possible.
+- question: What decides a rollback?
+  options:
+  - A feeling that something is wrong
+  - Agreed numeric thresholds on error rate or latency
+  - A vote in the team chat
+  - The on-call engineer''s seniority
+  correct_answer: 1
+  explanation: Thresholds agreed in advance trigger rollback without a meeting; feelings delay it.
+- question: What makes an alert useful rather than noise?
+  options:
+  - It fires often
+  - It tells the responder what to do
+  - It goes to everyone
+  - It is loud
+  correct_answer: 1
+  explanation: An actionable alert names the next step; an alert with no action trains people to ignore alerts.
+xp_reward: 350
+prerequisites:
+- devops
+- containers

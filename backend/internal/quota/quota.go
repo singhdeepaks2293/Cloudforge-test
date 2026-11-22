@@ -58,6 +58,27 @@ type Limits struct {
 // LiteMaxLabMinutes is the lightweight-mode lab duration: 30 minutes.
 const LiteMaxLabMinutes = 30
 
+// LiteExamResourceMax is the per-service resource cap for the v3 exam
+// services (Auto Scaling, Global Accelerator, …) in lightweight mode.
+// Exam-service resources are tiny Postgres rows in the shared
+// p7_exam_services table — they cost no container, VM or engine
+// capacity — so the cap is generous for study but still bounds one
+// learner from filling the table on a classroom laptop: 10 per
+// service for a learner (10 ASGs, 10 accelerators, …), 25 for an
+// instructor, 50 for an admin. Full mode has no cap (0 = unlimited
+// here; the create handler only enforces the cap when Lite is set).
+// See backend/internal/httpapi/exam.go and docs/DEPLOYMENT.md.
+func LiteExamResourceMax(role string) int {
+	switch role {
+	case "admin":
+		return 50
+	case "instructor":
+		return 25
+	default: // learner and anything unknown
+		return 10
+	}
+}
+
 // LiteLimits returns the per-role limits for lightweight mode
 // (CLOUDFORGE_LITE=true): 1 active lab and the Micro profile only
 // for learners, short labs, small disks. The intent is a classroom

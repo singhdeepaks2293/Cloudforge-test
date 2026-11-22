@@ -1,0 +1,40 @@
+id: adv-intermittent-packet-loss
+title: 'Incident: The Flaky Egress Nobody Can Reproduce'
+symptom: >-
+  Deployments fail one time in four. Package installs time out, API calls drop, and the failures are
+  never the same endpoint twice. The application logs show nothing — the requests simply never arrive
+  — and the problem vanishes for hours at a time, then comes back.
+injected_fault:
+  kind: loss
+  target: nat_gateway
+  parameters:
+    nat_gateway_id: nat-1
+    loss_percent: 25
+    direction: egress
+diagnosis_hints:
+- 'Intermittent, endpoint-independent failures point at the shared egress path, not at any one service.'
+- 'The pattern is the clue: one failure in four, across unrelated destinations, is packet loss, not an application bug.'
+- Check the NAT gateway''s error metrics and connection counts, not just its status.
+- 'Compare private-subnet egress with public-subnet egress: if only private fails, the fault is on the private path.'
+- A healthy-looking gateway can still drop packets; status green does not mean traffic flows.
+fix_steps:
+- 'Confirm the split: public egress works, private egress drops packets intermittently.'
+- Inspect the NAT gateway metrics for errors and connection exhaustion.
+- If the gateway is degraded or saturated, replace it or add a second gateway per zone.
+- Update the private route tables to point at the healthy gateway.
+- Re-test outbound connectivity repeatedly — an intermittent fault needs repeated proof, not one success.
+validation_rules:
+- rule: nat_gateway_exists
+  description: At least one NAT gateway exists and is available
+  params:
+    min_count: 1
+- rule: route_to_nat
+  description: Private subnets route 0.0.0.0/0 to a NAT gateway
+  params:
+    subnet_type: private
+- rule: instance_reachable
+  description: A private instance can reach the internet
+  params:
+    protocol: http
+    port: 80
+xp_reward: 240

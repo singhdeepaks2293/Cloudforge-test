@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -22,7 +22,7 @@ const listOf = (v: unknown, key: string): Rec[] => {
  * resources into a stage. REST/HTTP only (no WebSocket APIs);
  * invoke requires platform auth (no API keys / usage plans).
  */
-export function ApiGatewayConsole() {
+export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [selected, setSelected] = useState('')
@@ -95,13 +95,47 @@ export function ApiGatewayConsole() {
   const stages = listOf(detail.data, 'stages')
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Serverless', to: '/services' }, { label: 'API Gateway' }]}
-        title="API Gateway — APIs"
-        description="REST/HTTP APIs routing to Lambda functions and SSRF-guarded HTTP targets, with real request logging."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="real routing · real logs · no WebSocket APIs" />}
-      />
+    <ConsoleWithHome
+      icon="zap"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Serverless', to: '/services' }, { label: 'API Gateway' }]}
+      title="API Gateway — APIs"
+      description="REST/HTTP APIs routing to Lambda functions and SSRF-guarded HTTP targets, with real request logging."
+      fidelity="PARTIAL"
+      fidelityFootnote="real routing · real logs · no WebSocket APIs"
+      homeLabel="API Gateway dashboard"
+      listLabel="APIs"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="API Gateway"
+            banner="Real routing to Lambda functions and SSRF-guarded HTTP targets with real request logging; a deployment snapshots resources into a stage. REST/HTTP only (no WebSocket APIs)."
+            actions={[
+              { label: 'Create API', primary: true, onClick: goToList },
+            { label: 'View Lambda functions', to: '/services/lambda' },
+            ]}
+            cards={[
+              { label: 'APIs', count: rows.length, onSelect: goToList },
+            { label: 'Resources', count: selected !== '' ? resources.length : '—', onSelect: goToList },
+            { label: 'Stages', count: selected !== '' ? stages.length : '—', onSelect: goToList, note: 'A deployment snapshots resources into a stage' },
+            { label: 'WebSocket APIs', count: 0, disabledReason: 'REST/HTTP only — no WebSocket APIs.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={apis.isFetching}
+            health={[
+              "apis.isError ? 'APIs could not be loaded.' : `${rows.length} API(s) listed.`",
+            "Invoke requires platform auth (no API keys / usage plans).",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — serverless track', to: '/learn' },
+            { label: 'Lambda (integration target)', to: '/services/lambda' },
+            ]}
+          />
+        )}
+    >
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {invokeResult !== '' && <pre className="overflow-auto border border-aws-border bg-white px-4 py-2 font-mono text-sm" role="status">{invokeResult}</pre>}
       {apis.isPending && <Loading label="Loading APIs" />}
@@ -271,6 +305,6 @@ export function ApiGatewayConsole() {
           </AwsCard>
         </>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }

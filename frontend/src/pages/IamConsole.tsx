@@ -5,7 +5,7 @@ import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { FidelityBadge, StateBadge } from '../components/AwsBadge.tsx'
 import { ServiceConsole } from '../components/ServiceConsole.tsx'
-import { AwsStat } from '../components/AwsShell.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import {
   addIamGroupMember,
@@ -85,8 +85,9 @@ const SAMPLE_TRUST = `{
 
 type Section = 'dashboard' | 'users' | 'groups' | 'roles' | 'policies' | 'analyzer' | 'simulator'
 
-export function IamConsole() {
-  const [section, setSection] = useState<Section>('dashboard')
+export function IamConsole({ initialSection }: { initialSection?: Section }) {
+  // Survey 2026-11-22: IAM lands on Roles, not a dashboard.
+  const [section, setSection] = useState<Section>(initialSection ?? 'dashboard')
   return (
     <ServiceConsole
       icon="key"
@@ -158,12 +159,36 @@ function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) 
   return (
     <div className="space-y-4">
       {error && <AdminOnly error={error} />}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <AwsStat label="Users" value={count(users)} hint="Teaching IAM identities" />
-        <AwsStat label="Groups" value={count(groups)} hint="Policy bundles" />
-        <AwsStat label="Roles" value={count(roles)} hint="Assumable locally" />
-        <AwsStat label="Policies" value={count(policies)} hint="Validated documents" />
-      </div>
+      <ServiceHomeDashboard
+        serviceName="IAM"
+        banner="Teaching IAM identities (users, groups, roles, policies) stored in CloudForge — not AWS IAM, and not the platform's learner/instructor/admin roles."
+        actions={[
+          { label: 'Add users', primary: true, onClick: () => onNavigate('users') },
+          { label: 'Open Policy Simulator', onClick: () => onNavigate('simulator') },
+        ]}
+        cards={[
+          { label: 'Users', count: count(users), onSelect: () => onNavigate('users'), note: 'Teaching IAM identities' },
+          { label: 'Groups', count: count(groups), onSelect: () => onNavigate('groups'), note: 'Policy bundles' },
+          { label: 'Roles', count: count(roles), onSelect: () => onNavigate('roles'), note: 'Assumable locally' },
+          { label: 'Policies', count: count(policies), onSelect: () => onNavigate('policies'), note: 'Validated documents' },
+          { label: 'Access Analyzer', count: 0, disabledReason: 'UNSUPPORTED — no analyzer API exists.' },
+        ]}
+        health={[
+          error !== null
+            ? 'IAM management is admin-only; other roles see this page as unavailable, not as an empty list.'
+            : 'Policy documents are validated and probe-evaluated before storage.',
+          'Access keys show their secret once; only a SHA-256 hash is stored.',
+          'Assume Role sessions are short-lived and expire with a real 410 from the backend.',
+        ]}
+        settings={[
+          { label: 'Resource Explorer', to: '/explorer' },
+          { label: 'All services', to: '/services' },
+        ]}
+        info={[
+          { label: 'Learning Center — IAM track', to: '/learn' },
+          { label: 'IAM Identity Center (unsupported — exam concept)', to: '/services/identitycenter' },
+        ]}
+      />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <AwsCard title="Security recommendations">
           <p className="mb-2 text-sm text-aws-muted">
@@ -622,9 +647,8 @@ function RolesSection() {
             totalCount={roles.data.length}
             columns={[
               { header: 'Role name', render: (r) => <button type="button" className="text-aws-link hover:underline" onClick={() => setSelectedId(r.id)}>{r.name}</button> },
-              { header: 'ARN', render: (r) => <span className="break-all font-mono text-xs">{r.arn}</span> },
-              { header: 'Max session', render: (r) => `${r.max_session_duration_seconds}s` },
-              { header: 'Policies', render: (r) => String(r.policies?.length ?? 0) },
+              { header: 'Trusted entities', render: (r) => trustedEntities(r.trust_policy) },
+              { header: 'Last activity', render: () => <span title="CloudForge does not record role activity">Not available</span> },
             ]}
           />
         </AwsCard>
@@ -634,6 +658,35 @@ function RolesSection() {
       )}
     </div>
   )
+}
+
+/**
+ * Trusted entities for a role, read from its stored trust policy
+ * (survey 2026-11-22: the Roles table's Trusted entities column).
+ * Trust policies are recorded, not evaluated; the principals named
+ * in them are shown verbatim. Last activity has no backend source —
+ * the table says "Not available" instead of inventing one.
+ */
+function trustedEntities(trustPolicy: unknown): string {
+  try {
+    const doc = typeof trustPolicy === 'string' ? JSON.parse(trustPolicy) : trustPolicy
+    const statements = (doc as { Statement?: unknown })?.Statement
+    const list = Array.isArray(statements) ? statements : [statements]
+    const principals: string[] = []
+    for (const st of list) {
+      const principal = (st as { Principal?: unknown } | null)?.Principal
+      if (typeof principal === 'string') principals.push(principal)
+      else if (principal !== null && typeof principal === 'object') {
+        for (const v of Object.values(principal as Record<string, unknown>)) {
+          if (typeof v === 'string') principals.push(v)
+          else if (Array.isArray(v)) for (const x of v) if (typeof x === 'string') principals.push(x)
+        }
+      }
+    }
+    return principals.length > 0 ? [...new Set(principals)].join(', ') : '—'
+  } catch {
+    return '—'
+  }
 }
 
 function RoleDetail({ role, policies, onDelete }: { role: IamRole; policies: IamPolicy[]; onDelete: () => void }) {
@@ -652,6 +705,8 @@ function RoleDetail({ role, policies, onDelete }: { role: IamRole; policies: Iam
     <AwsCard title={`Role ${role.name}`}>
       <dl className="space-y-1 text-sm">
         <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">ARN</dt><dd className="break-all font-mono text-xs">{role.arn}</dd></div>
+        <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">Max session</dt><dd>{role.max_session_duration_seconds}s</dd></div>
+        <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">Trusted entities</dt><dd className="break-all font-mono text-xs">{trustedEntities(role.trust_policy)}</dd></div>
         <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">Trust policy</dt><dd className="break-all font-mono text-xs">{JSON.stringify(role.trust_policy)}</dd></div>
       </dl>
       <h3 className="mt-4 text-sm font-semibold">Attached policies</h3>

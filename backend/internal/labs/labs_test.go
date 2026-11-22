@@ -207,3 +207,23 @@ func TestStopInvalidState(t *testing.T) {
 		t.Fatalf("Get missing: got %v, want ErrLabNotFound", err)
 	}
 }
+
+// v3 exam-service labs: 30-minute, lite-compatible definitions tied
+// to the aws-saa / aws-sap tracks.
+func TestExamServiceLabDefinitions(t *testing.T) {
+	for _, want := range []struct{ id, course string }{
+		{"saa-exam-services", "aws-saa"},
+		{"sap-exam-services", "aws-sap"},
+	} {
+		def, ok := GetDefinition(want.id)
+		if !ok {
+			t.Fatalf("lab definition %q missing", want.id)
+		}
+		if def.CourseID != want.course {
+			t.Fatalf("%q course: got %q, want %q", want.id, def.CourseID, want.course)
+		}
+		if def.DurationMin != 30 {
+			t.Fatalf("%q duration: got %d, want 30 (lite cap)", want.id, def.DurationMin)
+		}
+	}
+}

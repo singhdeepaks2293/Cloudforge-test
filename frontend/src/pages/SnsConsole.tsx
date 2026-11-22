@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -21,7 +21,7 @@ const listOf = (v: unknown, key: string): Rec[] => {
  * Lambda functions. Every delivery is recorded, success or failure.
  * Email/SMS delivery is not built.
  */
-export function SnsConsole() {
+export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [selected, setSelected] = useState('')
@@ -82,13 +82,46 @@ export function SnsConsole() {
   const sel = rows.find((t) => String(t.id) === selected)
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Application Integration', to: '/services' }, { label: 'SNS' }]}
-        title="SNS — Topics"
-        description="Durable topics with real fan-out to SQS queues, HTTP(S) endpoints and Lambda functions. Every delivery is recorded."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="durable Postgres topics · no email/SMS" />}
-      />
+    <ConsoleWithHome
+      icon="layers"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Application Integration', to: '/services' }, { label: 'SNS' }]}
+      title="SNS — Topics"
+      description="Durable topics with real fan-out to SQS queues, HTTP(S) endpoints and Lambda functions. Every delivery is recorded."
+      fidelity="PARTIAL"
+      fidelityFootnote="durable Postgres topics · no email/SMS"
+      homeLabel="SNS dashboard"
+      listLabel="Topics"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="SNS"
+            banner="Durable Postgres topics; fan-out to SQS queues, HTTP(S) endpoints (loopback only, SSRF-guarded) and Lambda functions, with every delivery recorded. No email/SMS delivery."
+            actions={[
+              { label: 'Create topic', primary: true, onClick: goToList },
+            { label: 'View SQS queues (subscriber)', to: '/services/sqs' },
+            ]}
+            cards={[
+              { label: 'Topics', count: rows.length, onSelect: goToList },
+            { label: 'Subscriptions', count: selected !== '' ? listOf(subs.data, 'subscriptions').length : '—', onSelect: goToList },
+            { label: 'Deliveries', count: selected !== '' ? listOf(deliveries.data, 'deliveries').length : '—', onSelect: goToList, note: 'Every delivery is recorded' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={topics.isFetching}
+            health={[
+              "topics.isError ? 'Topics could not be loaded.' : `${rows.length} topic(s) listed.`",
+            "The old in-memory simulator is replaced.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — messaging track', to: '/learn' },
+            { label: 'EventBridge (event rules)', to: '/services/eventbridge' },
+            ]}
+          />
+        )}
+    >
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {topics.isPending && <Loading label="Loading topics" />}
       {topics.isError && <ErrorBox message={`Topics could not be loaded (${topics.error.message}).`} />}
@@ -220,6 +253,6 @@ export function SnsConsole() {
           </AwsCard>
         </>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }

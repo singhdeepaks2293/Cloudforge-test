@@ -94,6 +94,26 @@ var Definitions = []Definition{
 	{ID: "three-tier-app", Title: "Build a three-tier application", CourseID: "vpc-fundamentals", Description: "Web, application and database tiers across public and private subnets.", DurationMin: 120},
 	{ID: "saa-ha-web", Title: "Build a highly available web tier", CourseID: "aws-saa", Description: "Two Availability Zones, public and private subnets, resilient egress and a healthy load balancer.", DurationMin: 30},
 	{ID: "sap-hybrid-network", Title: "Build a segmented hybrid network", CourseID: "aws-sap", Description: "Segmented VPC, resilient NAT egress, private application tier and a healthy load balancer.", DurationMin: 30},
+	// v3 exam-service labs: 30-minute labs (lite-compatible) that give
+	// the new SAA/SAP lessons a live lab to run the exam-service API
+	// exercises against. Provisioning is the same engine-backed path
+	// as every other lab; the services themselves are exercised
+	// through the API, not through the lab's network.
+	{ID: "saa-exam-services", Title: "Exercise the SAA exam services", CourseID: "aws-saa", Description: "Launch this lab, then create an Auto Scaling group, a CloudFront distribution, EBS/EFS storage and a Savings Plan through the API and compare their cost and resilience trade-offs.", DurationMin: 30},
+	{ID: "sap-exam-services", Title: "Exercise the SAP exam services", CourseID: "aws-sap", Description: "Launch this lab, then build a landing zone with guardrails, federate a permission set, share a subnet with RAM, and walk a migration server through replication to cutover.", DurationMin: 30},
+	// v3 Advanced section: each Advanced guided lab has its OWN
+	// definition id. They MUST NOT reuse M1 ids (vpc-fundamentals,
+	// ec2-basics, three-tier-app, iam-security): curriculum lab
+	// definitions are keyed by id, so reusing an M1 id overwrites the
+	// M1 lab's validation rules (broke the E2E acceptance test, which
+	// validates vpc-fundamentals against its 5 default rules).
+	{ID: "adv-multi-tier", Title: "Advanced: multi-tier production deployment", CourseID: "advanced-multi-tier", Description: "Public web tier, private application tier and isolated data tier across two Availability Zones.", DurationMin: 120},
+	{ID: "adv-ha-dr", Title: "Advanced: high availability and disaster recovery", CourseID: "advanced-ha-dr", Description: "Multi-AZ network that survives a zone failure, with a NAT gateway per zone.", DurationMin: 60},
+	{ID: "adv-migration", Title: "Advanced: migration on-prem to cloud", CourseID: "advanced-migration", Description: "Migrate a workload on-prem to cloud and prove the new home works.", DurationMin: 30},
+	{ID: "adv-cost", Title: "Advanced: cost optimisation in production", CourseID: "advanced-cost-optimisation", Description: "Measure the bill, right-size from evidence, and keep the savings with guardrails.", DurationMin: 30},
+	{ID: "adv-incident", Title: "Advanced: security incident response", CourseID: "advanced-incident-response", Description: "Detect, contain, eradicate and recover from a security incident.", DurationMin: 30},
+	{ID: "adv-cicd", Title: "Advanced: CI/CD staging to production", CourseID: "advanced-cicd-pipeline", Description: "One immutable artifact through staging to production, with approval and rollback.", DurationMin: 30},
+	{ID: "adv-rollout", Title: "Advanced: production rollout, canary and alerting", CourseID: "advanced-production-rollout", Description: "Canary rollout with health gates, rollback and alerting.", DurationMin: 30},
 }
 
 // GetDefinition returns a definition by ID.

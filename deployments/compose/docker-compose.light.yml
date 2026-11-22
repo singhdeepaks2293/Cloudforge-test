@@ -81,6 +81,12 @@ services:
       # and the /metrics scrape token. Fail-closed: compose
       # refuses to start without them unless CLOUDFORGE_DEV=1.
       CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
+      # Phase 7 fail-closed: the API/worker refuse to start while
+      # MINIO_ACCESS_KEY/SECRET_KEY are still the minioadmin defaults.
+      # Compose never passed them before, so .env's MINIO_ROOT_* values
+      # never reached the API — wire them through here. In lite mode
+      # MinIO does not run, but the check still runs, so the values
+      # must be non-default regardless.
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-cloudforge}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
       CLOUDFORGE_METRICS_TOKEN: ${CLOUDFORGE_METRICS_TOKEN:?set CLOUDFORGE_METRICS_TOKEN in .env}
@@ -141,6 +147,12 @@ services:
       CLOUDFORGE_JWT_SECRET: ${CLOUDFORGE_JWT_SECRET:?set CLOUDFORGE_JWT_SECRET in .env}
       CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
       CLOUDFORGE_METRICS_TOKEN: ${CLOUDFORGE_METRICS_TOKEN:?set CLOUDFORGE_METRICS_TOKEN in .env}
+      # Phase 7 fail-closed: the API/worker refuse to start while
+      # MINIO_ACCESS_KEY/SECRET_KEY are still the minioadmin defaults.
+      # Compose never passed them before, so .env's MINIO_ROOT_* values
+      # never reached the API — wire them through here. In lite mode
+      # MinIO does not run, but the check still runs, so the values
+      # must be non-default regardless.
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-cloudforge}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
       CLOUDFORGE_DEV: ${CLOUDFORGE_DEV:-0}
@@ -208,7 +220,6 @@ services:
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-8080}:8080"
-      - "80:8080"
     networks:
       - frontend_net
     depends_on:
@@ -293,10 +304,6 @@ services:
       retries: 5
 
 networks:
-  # Explicit subnets: Docker's automatic /16 allocation picked
-  # 172.21.0.0/16, which overlaps this classroom LAN (172.21.98.0/24).
-  # Containers then treated LAN clients as on-link on the bridge and
-  # their replies never left the host.
   frontend_net:
     name: cloudforge_lite_frontend_net
     ipam:

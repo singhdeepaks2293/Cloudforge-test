@@ -6,6 +6,7 @@
  * tabs and tables behave the same way everywhere.
  */
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { PageHeader } from './AwsCard.tsx'
 import { FidelityBadge } from './AwsBadge.tsx'
 import { ServiceIcon } from './AwsNav.tsx'
@@ -15,6 +16,18 @@ export interface SubNavItem {
   label: string
   /** When set, the item is disabled with this reason (no backend op). */
   disabledReason?: string
+  /**
+   * v3 — AWS-reference grouped left nav: items sharing a `group` render
+   * under that group heading (e.g. VPC's "Virtual private cloud").
+   * A heading renders the first time a group value appears.
+   */
+  group?: string
+  /**
+   * v3 — when set, the item navigates to another console instead of
+   * switching this console's section (e.g. VPC nav linking to the
+   * Transit Gateway console). Rendered as a Link, never as a button.
+   */
+  to?: string
 }
 
 export function ServiceConsole({
@@ -68,25 +81,53 @@ export function ServiceConsole({
             <p className="border-b border-aws-border px-3 py-2 text-[11px] font-semibold tracking-wide text-aws-muted uppercase">
               {title}
             </p>
-            {subNav.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                disabled={item.disabledReason !== undefined}
-                title={item.disabledReason ?? item.label}
-                onClick={() => onSubChange(item.id)}
-                className={`block w-full border-l-2 px-3 py-2 text-left text-sm ${
-                  item.id === activeSub
-                    ? 'border-aws-orange bg-aws-orange-light font-medium text-aws-orange-dark'
-                    : 'border-transparent text-aws-text hover:bg-[#f2f3f3]'
-                } ${item.disabledReason !== undefined ? 'cursor-not-allowed opacity-50' : ''}`}
-              >
-                {item.label}
-                {item.disabledReason !== undefined && (
-                  <span className="block text-[11px] font-normal text-aws-muted">{item.disabledReason}</span>
-                )}
-              </button>
-            ))}
+            {subNav.map((item, index) => {
+              const groupHeading =
+                item.group !== undefined && (index === 0 || subNav[index - 1].group !== item.group) ? (
+                  <p
+                    key={`group-${item.group}`}
+                    className="border-t border-aws-border bg-[#f7f8f8] px-3 py-1.5 text-[11px] font-semibold tracking-wide text-aws-muted uppercase"
+                  >
+                    {item.group}
+                  </p>
+                ) : null
+              const cls = `block w-full border-l-2 px-3 py-2 text-left text-sm ${
+                item.id === activeSub
+                  ? 'border-aws-orange bg-aws-orange-light font-medium text-aws-orange-dark'
+                  : 'border-transparent text-aws-text hover:bg-[#f2f3f3]'
+              } ${item.disabledReason !== undefined ? 'cursor-not-allowed opacity-50' : ''}`
+              const body = (
+                <>
+                  {item.label}
+                  {item.disabledReason !== undefined && (
+                    <span className="block text-[11px] font-normal text-aws-muted">{item.disabledReason}</span>
+                  )}
+                </>
+              )
+              const entry =
+                item.to !== undefined ? (
+                  <Link key={item.id} to={item.to} title={item.label} className={cls}>
+                    {body}
+                  </Link>
+                ) : (
+                  <button
+                    key={item.id}
+                    type="button"
+                    disabled={item.disabledReason !== undefined}
+                    title={item.disabledReason ?? item.label}
+                    onClick={() => onSubChange(item.id)}
+                    className={cls}
+                  >
+                    {body}
+                  </button>
+                )
+              return (
+                <span key={item.id} className="block">
+                  {groupHeading}
+                  {entry}
+                </span>
+              )
+            })}
           </nav>
         </aside>
         <div className="min-w-0 flex-1">{children}</div>

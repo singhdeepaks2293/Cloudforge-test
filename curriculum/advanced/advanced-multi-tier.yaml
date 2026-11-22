@@ -1,0 +1,216 @@
+id: advanced-multi-tier
+title: Multi-Tier Production Deployment
+description: 'Design, build and prove a production three-tier application: public web tier, private
+  application tier and isolated data tier, deployed with Terraform and validated against real state.'
+difficulty: advanced
+estimated_hours: 8
+learning_objectives:
+- Design a production three-tier architecture with clear trust boundaries
+- Place each tier in the right subnets across two Availability Zones
+- Harden the data tier so it is private, backed up and recoverable
+- Scale the web tier behind a load balancer and prove it stays healthy
+- Deploy the whole stack with Terraform and validate it against real state
+modules:
+- id: adv-mtier-design
+  title: Designing for Production
+  lessons:
+  - id: adv-mtier-architecture
+    title: Production Three-Tier Architecture
+    theory: 'A production three-tier application separates concerns into layers that fail independently.
+      The web tier sits in public subnets and is the only tier that accepts traffic from the internet,
+      through a load balancer. The application tier sits in private subnets and is reachable only from
+      the web tier. The data tier sits in isolated private subnets and is reachable only from the
+      application tier — never from the internet, and never directly from the web tier. Each tier runs
+      in at least two Availability Zones, so the loss of one zone degrades the system instead of killing
+      it. Traffic between tiers is controlled by security groups that reference each other rather than
+      open CIDR ranges: the database group allows port 3306 only from the application group, so even a
+      misconfigured route cannot expose the database. The design is written down before anything is
+      built, as an architecture decision record, because the decisions that matter — where the trust
+      boundaries are, what happens when a zone fails, how the system scales — are the ones that are
+      hardest to change later. CloudForge grades this lab against real state: subnets, routes, security
+      groups and load balancer health, not against a diagram.'
+    key_points:
+    - 'Three tiers, three trust boundaries: web, application, data'
+    - Each tier spans at least two Availability Zones
+    - Security groups reference each other, not open CIDR ranges
+    - The data tier is reachable only from the application tier
+    - Decisions are recorded before building, as decision records
+    architecture_diagram_mermaid: "flowchart LR\n    User[Users] --> LB[Load balancer]\\n    LB --> Web[Web tier - public]\\n    Web --> App[App tier - private]\\n    App --> DB[Data tier - isolated]"
+  - id: adv-mtier-data
+    title: The Data Tier
+    theory: 'The data tier is where a production deployment is won or lost, because it holds the state
+      that cannot be rebuilt from a container image. It lives in isolated private subnets with no route
+      to the internet at all — no internet gateway route, no NAT gateway route — so the only path in is
+      through the application tier. Access is controlled twice: the subnet has no internet route, and the
+      database security group allows its port only from the application security group. Backups are
+      automated and tested, not just enabled: a backup that has never been restored is a hope, not a
+      recovery plan. The restore is practised on a schedule, and the time it takes is measured, because
+      the recovery time objective is a number you can defend, not a feeling. Encryption at rest is on
+      from the start, and credentials are never stored in the application configuration — they come from
+      a secrets store and are rotated. In the CloudForge lab you prove the isolation with the validator:
+      the database port must be denied from the internet while the application tier can still reach it.'
+    key_points:
+    - Data subnets have no route to the internet at all
+    - 'Defence in depth: no route plus a restrictive security group'
+    - Backups are tested by restoring them, on a schedule
+    - Measure restore time; the recovery objective is a number
+    - Credentials come from a secrets store, never from config files
+    architecture_diagram_mermaid: "flowchart TD\n    App[App tier] -->|3306 only| DB[(Database)]\n    DB --> Backup[(Automated backups)]\n    Backup --> Restore[Restore drill]"
+- id: adv-mtier-scale
+  title: Scaling and Proving It
+  lessons:
+  - id: adv-mtier-scaling
+    title: Scaling and Load Balancing
+    theory: 'A production web tier scales horizontally: more instances behind a load balancer, never a
+      bigger single instance that becomes a single point of failure. The load balancer is the only
+      internet-facing component, and it health-checks every target continuously — an instance that fails
+      its health check stops receiving traffic within seconds, without anyone being paged. Instances are
+      stateless, so any of them can serve any request: sessions live in a shared store, uploads go to
+      object storage, and nothing important is written to a local disk. Scaling is driven by metrics,
+      not by hunches: CPU, request count and latency per target tell you when to add capacity, and the
+      scaling policy is tested under load before it is needed in anger. The application tier scales the
+      same way, behind an internal load balancer that the web tier talks to. The database is the one
+      tier that does not scale by adding copies casually: read replicas take read load, but writes still
+      go to one primary, and that constraint shapes the whole design. In the lab you prove the pattern
+      with the validator: at least two healthy targets behind the load balancer.'
+    key_points:
+    - Scale horizontally behind a load balancer, never by growing one box
+    - Health checks remove bad targets automatically
+    - Instances are stateless; state lives in shared stores
+    - Scaling is driven by metrics and tested under load
+    - Read replicas scale reads; writes still go to one primary
+    architecture_diagram_mermaid: "flowchart LR\n    LB[Load balancer] --> W1[Web 1 - AZ a]\\n    LB --> W2[Web 2 - AZ b]\\n    W1 --> ALB[Internal LB]\\n    W2 --> ALB\\n    ALB --> A1[App 1]\\n    ALB --> A2[App 2]"
+  - id: adv-mtier-deploy
+    title: Deploying with Terraform and Proving It
+    theory: 'The production stack is deployed with Terraform, not by clicking: the same configuration
+      that builds staging builds production, with different variables, so what was tested is what ships.
+      State is remote and locked, so two people cannot apply conflicting changes at the same time. Every
+      change goes through plan first, and the plan is reviewed — the plan is the change, and an
+      unreviewed plan is an unreviewed outage. Drift is detected, not discovered during an incident: a
+      scheduled plan runs against the live environment and reports anything that changed outside
+      Terraform. Deployment itself is a rolling or blue-green update, never a big-bang replacement of
+      everything at once. And the deployment is not finished when Terraform reports success — it is
+      finished when the validator passes against real state: the VPC exists, the subnets span zones, the
+      routes point where they should, the database is unreachable from the internet, and the load
+      balancer has healthy targets. That validation step is the difference between a deployment that
+      looks done and one that is done.'
+    key_points:
+    - Same Terraform configuration for staging and production, different variables
+    - Remote, locked state; plan is reviewed before every apply
+    - Drift is detected by scheduled plans, not during incidents
+    - Deployments are rolling or blue-green, never big-bang
+    - Done means the validator passes against real state
+    architecture_diagram_mermaid: "flowchart LR\n    Code[Terraform code] --> Plan[Plan + review]\\n    Plan --> Apply[Apply]\\n    Apply --> Validate[Validate real state]\\n    Validate --> Prod[Production]"
+guided_lab:
+  lab_definition_id: adv-multi-tier
+  title: Deploy a Production Three-Tier Application
+  tasks:
+  - Build a VPC with public, private application and isolated data subnets across two Availability Zones
+  - Place the web tier in public subnets behind a load balancer with at least two healthy targets
+  - Place the application tier in private subnets with egress through a NAT gateway
+  - 'Isolate the data tier: no internet route and a security group that denies its port from the internet'
+  - Run the lab validator and fix every failing check before finishing
+  validation_rules:
+  - rule: vpc_exists
+    description: A VPC exists in the lab
+  - rule: subnet_count
+    description: At least four subnets exist across the tiers
+    params:
+      operator: '>='
+      value: 4
+  - rule: route_to_igw
+    description: Public subnets route 0.0.0.0/0 to the internet gateway
+  - rule: route_to_nat
+    description: Private subnets route 0.0.0.0/0 to a NAT gateway
+  - rule: nat_gateway_exists
+    description: At least one NAT gateway exists
+    params:
+      min_count: 1
+  - rule: instance_running
+    description: At least two instances are running
+    params:
+      operator: '>='
+      count: 2
+  - rule: load_balancer_healthy_targets
+    description: At least two targets are healthy behind the load balancer
+    params:
+      min_count: 2
+  - rule: security_group_denies
+    description: The database port is denied from the internet
+    params:
+      port: 3306
+      source: 0.0.0.0/0
+challenge:
+  title: One zone fails during peak traffic
+  task: An Availability Zone has gone down during peak traffic. Rebalance the web tier so the load
+    balancer still has at least two healthy targets in the surviving zones, prove the database is still
+    unreachable from the internet, and keep at least two instances running.
+  validation_rules:
+  - rule: load_balancer_healthy_targets
+    description: At least two targets are healthy behind the load balancer
+    params:
+      min_count: 2
+  - rule: instance_running
+    description: At least two instances are running
+    params:
+      operator: '>='
+      count: 2
+  - rule: security_group_denies
+    description: The database port is still denied from the internet
+    params:
+      port: 3306
+      source: 0.0.0.0/0
+assessment:
+- question: Which tier is the only one allowed to accept traffic from the internet?
+  options:
+  - The application tier
+  - The data tier
+  - The web tier, through a load balancer
+  - All tiers, behind the same security group
+  correct_answer: 2
+  explanation: Only the web tier is internet-facing, and only through the load balancer; the other tiers are private.
+- question: How should the database security group allow access?
+  options:
+  - Port 3306 from 0.0.0.0/0
+  - Port 3306 only from the application tier security group
+  - Port 22 from the internet for administration
+  - No rules at all; the subnet route is enough
+  correct_answer: 1
+  explanation: The database allows its port only from the application security group — defence in depth on top of the isolated subnet.
+- question: Why must web instances be stateless?
+  options:
+  - Stateless instances are cheaper
+  - So any instance can serve any request and failed ones can be replaced
+  - Stateless instances need no security groups
+  - So the load balancer can be removed
+  correct_answer: 1
+  explanation: Statelessness is what makes horizontal scaling and automatic replacement of failed instances possible.
+- question: What is the correct way to prove a backup works?
+  options:
+  - Enable automated backups
+  - Check the backup job succeeded
+  - Restore the backup and measure how long it takes
+  - Copy the backup to another region
+  correct_answer: 2
+  explanation: A backup that has never been restored is a hope, not a recovery plan; only a restore drill proves it.
+- question: Why use the same Terraform configuration for staging and production?
+  options:
+  - To save disk space
+  - So what was tested is what ships, with only variables differing
+  - Because Terraform requires it
+  - To avoid writing tests
+  correct_answer: 1
+  explanation: Identical configuration with different variables guarantees the tested artifact is the shipped one.
+- question: When is a deployment finished?
+  options:
+  - When Terraform reports success
+  - When the change is merged
+  - When the validator passes against real state
+  - When the team is notified
+  correct_answer: 2
+  explanation: Terraform success means the API calls worked; validation against real state proves the system is actually as designed.
+xp_reward: 300
+prerequisites:
+- networking
+- ec2
+- databases

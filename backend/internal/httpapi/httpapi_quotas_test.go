@@ -192,3 +192,54 @@ func TestMemoryQuotaStore(t *testing.T) {
 		t.Fatalf("upserted row: %+v %v", one, err)
 	}
 }
+
+// v3 exam services: the lite per-service cap (quota.LiteExamResourceMax)
+// bounds one learner's exam-service rows without touching the lab
+// caps. A learner may hold 10 Auto Scaling groups; the 11th is a
+// 429 with code quota_exceeded. Full mode is uncapped.
+func TestLiteExamServiceCap(t *testing.T) {
+	users := auth.NewStore("test-secret")
+	labStore := labs.NewStore()
+	labStore.ProvisionDelay = 5 * time.Millisecond
+	labStore.CheckNetwork = func() bool { return true }
+	srv := NewServerWithDeps(Deps{
+		Users: users, Labs: store.NewMemoryLabStore(labStore),
+		Courses: store.NewMemoryCourseStore(), Audit: store.NewMemoryAuditStore(),
+		Cache: &cache.Cache{}, Registry: providers.NewRegistry(),
+		Network: networkclient.New("127.0.0.1:1"), Logger: nil,
+		AdminEmail: "admin@example.com", Lite: true,
+		P3: store.NewMemoryPhase3Store(), P3WorkdirRoot: t.TempDir(),
+	})
+	ts := httptest.NewServer(srv.Routes())
+	t.Cleanup(ts.Close)
+	learnerToken := registerAs(t, ts, "learner@example.com")
+	for i := 0; i < quota.LiteExamResourceMax("learner"); i++ {
+		if status, body := do(t, "POST", ts.URL+"/api/v1/aws/autoscaling/groups", learnerToken, map[string]any{
+			"name": "asg-" + string(rune('a'+i)), "min_size": 1, "max_size": 2, "desired_capacity": 1,
+		}); status != http.StatusCreated {
+			t.Fatalf("asg %d: got %d, want 201: %v", i, status, body)
+		}
+	}
+	if status, body := do(t, "POST", ts.URL+"/api/v1/aws/autoscaling/groups", learnerToken, map[string]any{
+		"name": "asg-over", "min_size": 1, "max_size": 2, "desired_capacity": 1,
+	}); status != http.StatusTooManyRequests {
+		t.Fatalf("11th ASG over the lite cap: got %d, want 429: %v", status, body)
+	} else if body["error"].(map[string]any)["code"] != "quota_exceeded" {
+		t.Fatalf("quota error must carry code quota_exceeded: %v", body)
+	}
+	// The cap is per service: a different service still accepts creates.
+	if status, body := do(t, "POST", ts.URL+"/api/v1/aws/ebs/volumes", learnerToken, map[string]any{
+		"name": "vol-1", "size_gb": 10,
+	}); status != http.StatusCreated {
+		t.Fatalf("ebs volume under a full autoscaling cap: got %d, want 201: %v", status, body)
+	}
+	// Full mode (same code, Lite false) is uncapped: 11 groups succeed.
+	_, ts2, adminToken := p3TestServer(t)
+	for i := 0; i < 11; i++ {
+		if code, _ := p3Call(t, "POST", ts2.URL+"/api/v1/aws/autoscaling/groups", adminToken, map[string]any{
+			"name": "full-asg-" + string(rune('a'+i)) + string(rune('a'+i%5)), "min_size": 1, "max_size": 2, "desired_capacity": 1,
+		}); code != 201 {
+			t.Fatalf("full-mode asg %d: got %d, want 201", i, code)
+		}
+	}
+}

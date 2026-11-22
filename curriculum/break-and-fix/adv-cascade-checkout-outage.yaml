@@ -1,0 +1,41 @@
+id: adv-cascade-checkout-outage
+title: 'Outage: Checkout Cascades and the Logs Disagree'
+symptom: >-
+  Checkout p99 latency climbs from 300 ms to more than five seconds, users retry, traffic doubles,
+  and the database looks healthy. The load balancer reports timeouts, the application logs blame the
+  database, and the database logs blame the network — every log points somewhere else.
+injected_fault:
+  kind: latency
+  target: load_balancer
+  parameters:
+    load_balancer_id: alb-checkout
+    latency_ms: 5000
+    affected: target_response
+diagnosis_hints:
+- 'Separate client latency from server latency: compare load-balancer latency with application request duration before believing any single log.'
+- 'Check whether only one target group or Availability Zone is slow — a single slow target poisons the whole checkout path.'
+- 'The retry storm is a symptom, not the cause: find what made the first requests slow.'
+- Review the load balancer and target-group timeout settings against the observed delay.
+- Confirm the database is genuinely healthy with its own metrics, not with the application logs that blame it.
+fix_steps:
+- Identify the slow target group and its registered targets from load balancer metrics.
+- Remove or replace the degraded target, or correct the introduced delay.
+- Align the target-group timeout with the application's real response budget.
+- Record the checkout error rate as a metric on the load balancer resource so the fix can be verified.
+- Re-test checkout latency and confirm healthy targets and an error rate below 1%.
+validation_rules:
+- rule: load_balancer_healthy_targets
+  description: At least two targets are healthy behind the load balancer
+  params:
+    min_count: 2
+- rule: instance_reachable
+  description: A running target has a recorded address and is reachable
+  params:
+    protocol: http
+    port: 443
+- rule: metric_below
+  description: Checkout error rate is below 1% after the fix
+  params:
+    metric: error_rate
+    threshold: 1
+xp_reward: 250

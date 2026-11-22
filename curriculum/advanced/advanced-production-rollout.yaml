@@ -1,0 +1,212 @@
+id: advanced-production-rollout
+title: 'Production Rollout: Canary, Rollback & Alerting'
+description: 'Ship to production the way the best teams do: a canary that proves itself on real
+  traffic, a rollback that runs in minutes, and alerting that tells you before your users do.'
+difficulty: advanced
+estimated_hours: 8
+learning_objectives:
+- Design a canary rollout with traffic steps and health gates
+- Compare canary, blue-green and rolling strategies and choose between them
+- Build alerting that detects a bad rollout in minutes
+- Execute and verify a rollback
+- Write the runbook that makes the next rollout boring
+modules:
+- id: adv-rollout-strategies
+  title: Rollout Strategies
+  lessons:
+  - id: adv-rollout-canary
+    title: Canary Rollouts with Health Gates
+    theory: 'A canary rollout sends a small share of real traffic — one percent, then ten, then fifty
+      — to the new version, and grows the share only while the new version behaves. The behaviour is
+      judged by health gates: error rate, latency and saturation compared against the old version
+      serving the same traffic at the same time, so a bad release is caught on one percent of users
+      instead of all of them. The gates are numeric and agreed before the rollout: error rate below
+      one percent, p99 latency within ten percent of baseline, no new error types. If a gate fails,
+      the rollout stops automatically and traffic returns to the old version — no meeting, no debate.
+      The canary needs the same foundations as any safe deployment: health checks that actually
+      reflect user experience, metrics that can be compared between versions, and a traffic control
+      that can shift in seconds. The common failure is a canary with no gates — traffic shifts on a
+      timer while nobody watches the metrics — which is just a slow bad deployment.'
+    key_points:
+    - Canary grows traffic in steps only while the new version stays healthy
+    - Health gates are numeric and agreed before the rollout
+    - A failed gate stops the rollout automatically and returns traffic
+    - Gates compare the new version against the old one on the same traffic
+    - A canary with no gates is just a slow bad deployment
+    architecture_diagram_mermaid: "flowchart LR\n    Users[Users] --> Split[Traffic split]\\n    Split -->|1% then 10%| New[New version]\\n    Split -->|99% then 90%| Old[Old version]\\n    New --> Gates[Health gates]\\n    Gates -->|Pass| Grow[Grow share]\\n    Gates -->|Fail| Back[Roll back]"
+  - id: adv-rollout-compare
+    title: Canary, Blue-Green or Rolling
+    theory: 'Three strategies, three tradeoffs, and the right choice depends on what failure costs.
+      Rolling replaces instances gradually: cheap, always available, but two versions run side by
+      side for a while and rollback means rolling back. Blue-green runs the new version fully
+      alongside the old, tests it, then flips all traffic at once: the fastest rollback — flip it
+      back — but double the capacity during the switch, and the database must serve both versions.
+      Canary is the safest for user-facing services because a bad release reaches a few percent of
+      users, but it is the most complex: traffic splitting, per-version metrics, and gates. The
+      decision is made per service, not per company: the payment service gets a canary, the internal
+      admin tool gets a rolling deploy, and the service where rollback speed matters most gets
+      blue-green. Whichever is chosen, the foundations are the same — health checks, metrics, and a
+      traffic control that moves fast in both directions.'
+    key_points:
+    - Rolling is cheap; rollback means rolling back
+    - Blue-green flips traffic instantly both ways but costs double capacity
+    - Canary limits a bad release to a few percent of users but is the most complex
+    - Choose per service, by what failure costs
+    - All three need health checks, metrics and fast traffic control
+    architecture_diagram_mermaid: "flowchart TD\n    S[Service] --> C[Canary: safest, complex]\\n    S --> B[Blue-green: fastest rollback]\\n    S --> R[Rolling: cheapest]"
+- id: adv-rollout-operate
+  title: Alerting, Rollback and Runbooks
+  lessons:
+  - id: adv-rollout-alerting
+    title: Alerting That Catches a Bad Rollout
+    theory: 'A bad rollout is detected by comparing the new version against the old one, not by
+      watching the new version alone. The alerting rules live with the rollout: error rate on the
+      canary above the agreed threshold for five minutes, latency p99 above baseline, saturation
+      climbing on the new instances. The alerts page a human with the context to act — which version,
+      which gate failed, what the numbers are — and the runbook linked from the alert says what to
+      do next, starting with the rollback. False positives are tuned out, because an alert that fires
+      on every deploy is ignored on the deploy that matters. And the alerting is tested: a synthetic
+      bad deploy, or a fault injection, proves the alert fires before users notice. In the lab you
+      practise the verification half directly: record the canary error rate as a metric on the load
+      balancer resource and prove it is below threshold before promoting, and again after a rollback.'
+    key_points:
+    - Compare the canary against the old version, not against nothing
+    - Alert rules live with the rollout and page with context
+    - The runbook linked from the alert starts with the rollback
+    - Tune out false positives or the real alert gets ignored
+    - Test alerting with a synthetic bad deploy or fault injection
+    architecture_diagram_mermaid: "flowchart LR\n    Canary[Canary metrics] --> Compare[Compare vs old version]\\n    Compare --> Alert[Alert on threshold]\\n    Alert --> Runbook[Runbook: roll back]"
+  - id: adv-rollout-runbook
+    title: The Rollout Runbook
+    theory: 'A rollout runbook turns a stressful event into a checklist. It starts before the rollout:
+      the version, the change summary, the expected traffic steps, the health gates and their
+      thresholds, and the name of the person who can stop the rollout. During the rollout it is the
+      record: each traffic step, the metrics at that step, and the decision to proceed. If a gate
+      fails, the runbook says exactly what happens — who rolls back, how, and what is checked
+      afterwards — so the decision is already made and only the execution remains. After the rollout
+      it is the evidence: the rollout is marked complete only when the validator confirms the system
+      is healthy — the load balancer has healthy targets, the error rate is below threshold, and the
+      old version is fully drained. The runbook is updated after every rollout, especially the ones
+      that went wrong, because the next rollout inherits the lessons of this one. A team with a good
+      runbook ships often and calmly; a team without one ships rarely and nervously.'
+    key_points:
+    - 'The runbook starts before the rollout: version, steps, gates, who can stop it'
+    - Each traffic step is recorded with its metrics and the decision to proceed
+    - A failed gate means the rollback decision is already made
+    - Complete means the validator confirms the system is healthy afterwards
+    - Update the runbook after every rollout, especially the bad ones
+    architecture_diagram_mermaid: "flowchart LR\n    Pre[Pre-rollout checklist] --> Steps[Traffic steps + metrics]\\n    Steps --> Done[Validator confirms healthy]\\n    Done --> Update[Update runbook]"
+guided_lab:
+  lab_definition_id: adv-rollout
+  title: Run a Canary Rollout with Health Gates
+  tasks:
+  - Build a VPC with public and private subnets for the canary and stable fleets
+  - Run at least two instances — canary and stable — behind a load balancer with healthy targets
+  - Expose the application on its secure port and confirm an instance is reachable
+  - Record the canary error rate as a metric on the load balancer resource and confirm it is below 1%
+  - Run the lab validator and fix every failing check before finishing
+  validation_rules:
+  - rule: vpc_exists
+    description: A VPC exists in the lab
+  - rule: subnet_count
+    description: At least two subnets exist
+    params:
+      operator: '>='
+      value: 2
+  - rule: instance_running
+    description: At least two instances are running (canary and stable)
+    params:
+      operator: '>='
+      count: 2
+  - rule: load_balancer_healthy_targets
+    description: At least two targets are healthy behind the load balancer
+    params:
+      min_count: 2
+  - rule: instance_reachable
+    description: An instance is running with a recorded address
+    params:
+      protocol: http
+      port: 80
+  - rule: security_group_allows
+    description: The application port is reachable
+    params:
+      port: 443
+  - rule: metric_below
+    description: Canary error rate is below 1%
+    params:
+      metric: error_rate
+      threshold: 1
+challenge:
+  title: The canary is failing its health gate
+  task: 'The canary error rate has breached its health gate. Roll it back: return all traffic to the
+    stable version, prove the load balancer still has healthy targets, prove at least one instance is
+    running, and record the error rate after rollback as a metric on the load balancer resource — it
+    must be below 1% before the challenge passes.'
+  validation_rules:
+  - rule: instance_running
+    description: At least one instance is running after the rollback
+    params:
+      operator: '>='
+      count: 1
+  - rule: load_balancer_healthy_targets
+    description: At least two targets are healthy behind the load balancer
+    params:
+      min_count: 2
+  - rule: metric_below
+    description: Error rate after rollback is below 1%
+    params:
+      metric: error_rate
+      threshold: 1
+assessment:
+- question: What is a canary rollout?
+  options:
+  - Deploying to all users at once
+  - Sending a small share of traffic to the new version and growing it only while it stays healthy
+  - Deploying only at night
+  - Testing in production without users
+  correct_answer: 1
+  explanation: A canary grows traffic in steps gated on health, so a bad release reaches a few percent of users.
+- question: What is a health gate?
+  options:
+  - A firewall rule
+  - A numeric threshold agreed before the rollout that must hold for traffic to grow
+  - A manual approval step
+  - A load balancer health check
+  correct_answer: 1
+  explanation: Gates are numeric thresholds (error rate, latency) agreed in advance; a failed gate stops the rollout automatically.
+- question: Why is blue-green rollback the fastest?
+  options:
+  - It uses fewer instances
+  - The old version is still running, so rollback is a single traffic flip
+  - It needs no load balancer
+  - It deploys the fastest
+  correct_answer: 1
+  explanation: Blue-green keeps both versions running, so switching — and switching back — is one traffic flip.
+- question: How is a bad rollout best detected?
+  options:
+  - Watching the new version alone
+  - Comparing the new version against the old one on the same traffic
+  - Waiting for user complaints
+  - Checking the bill
+  correct_answer: 1
+  explanation: Comparison against the old version on the same traffic isolates the release as the cause.
+- question: What should an alert that fires during a rollout contain?
+  options:
+  - Only the alert name
+  - Which version, which gate failed, the numbers, and a runbook link starting with the rollback
+  - A link to the dashboard
+  - The on-call rota
+  correct_answer: 1
+  explanation: An actionable alert carries the context and the next step; anything less is noise during an incident.
+- question: When is a rollout marked complete?
+  options:
+  - When traffic reaches 100%
+  - When the validator confirms the system is healthy afterwards
+  - When the team is notified
+  - When the old version is deleted
+  correct_answer: 1
+  explanation: Traffic at 100% is not proof; validation against real state — healthy targets, error rate below threshold — is.
+xp_reward: 350
+prerequisites:
+- devops
+- monitoring

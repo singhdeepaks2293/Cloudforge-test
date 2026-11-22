@@ -1,0 +1,208 @@
+id: advanced-migration
+title: 'Migration: On-Prem to Cloud'
+description: 'Move a real workload out of the server room: discover what exists, choose a migration
+  strategy per workload, cut over without a big-bang outage, and prove the new home works.'
+difficulty: advanced
+estimated_hours: 8
+learning_objectives:
+- Discover and inventory an on-prem estate before moving anything
+- Choose rehost, replatform, refactor, retire or retain per workload
+- Plan a cutover that keeps the business running
+- Migrate data with minimal downtime and verify it
+- Decommission the old estate safely
+modules:
+- id: adv-mig-discover
+  title: Discover and Decide
+  lessons:
+  - id: adv-mig-discovery
+    title: Discovery Before Migration
+    theory: 'Every migration that goes wrong goes wrong in discovery. The server room has machines
+      nobody remembers, applications whose owners left years ago, batch jobs that run at 2 a.m. and
+      databases that other systems quietly depend on. Discovery is the unglamorous work of listing
+      every server, every application, every dependency and every data flow before anything moves — and
+      it always finds surprises: the reporting job that reads directly from the production database,
+      the file share that three departments treat as an API, the licence tied to a MAC address. The
+      inventory is then scored: what the workload costs to run, how critical it is, how coupled it is
+      to everything else. The output is a wave plan — groups of workloads that move together because
+      they depend on each other — ordered so the easiest, lowest-risk waves go first and teach the team
+      the process before the hard ones. Skipping discovery does not save time; it moves the discovery
+      into the cutover weekend, where it is ten times more expensive.'
+    key_points:
+    - 'Discovery always finds surprises: hidden dependencies and forgotten jobs'
+    - Inventory servers, applications, dependencies and data flows first
+    - Score each workload on cost, criticality and coupling
+    - Move in waves grouped by dependency, easiest first
+    - Skipped discovery reappears during cutover, ten times more expensive
+    architecture_diagram_mermaid: "flowchart LR\n    Inv[Inventory] --> Score[Score workloads]\\n    Score --> Waves[Wave plan]\\n    Waves --> Pilot[Pilot wave]\\n    Pilot --> Migrate[Migrate waves]"
+  - id: adv-mig-strategies
+    title: The Six Migration Strategies
+    theory: 'Not every workload deserves the same treatment, and the six strategies are a menu, not a
+      ladder. Rehost — lift and shift — moves the workload as it is: fast, low risk, and it carries
+      every inefficiency with it. Replatform makes small changes during the move, like swapping a
+      self-managed database for a managed one: a little more work for a real operational saving.
+      Repurchase replaces the workload with a SaaS product, which is often the right answer for
+      commodity systems like email. Refactor rebuilds the workload for the cloud, which is the most
+      expensive and the most rewarding, and should be reserved for systems that earn it. Retire
+      switches off the workloads nobody needs — discovery usually finds several — and retain leaves
+      the workload where it is, deliberately, because it cannot or should not move yet. The mistake is
+      choosing one strategy for everything: lift-and-shift everything wastes money, and refactoring
+      everything never finishes. The skill is choosing per workload and being able to say why.'
+    key_points:
+    - Rehost is fast but carries every inefficiency with it
+    - Replatform trades small changes for real operational savings
+    - Repurchase commodity systems as SaaS; retire what nobody needs
+    - Refactor only the systems that earn the investment
+    - Retain is a deliberate decision, not a failure to migrate
+    architecture_diagram_mermaid: "flowchart TD\n    W[Workload] --> R1[Rehost]\\n    W --> R2[Replatform]\\n    W --> R3[Repurchase]\\n    W --> R4[Refactor]\\n    W --> R5[Retire]\\n    W --> R6[Retain]"
+- id: adv-mig-execute
+  title: Cutover and Landing
+  lessons:
+  - id: adv-mig-cutover
+    title: Cutover Without a Big Bang
+    theory: 'The cutover is the moment the users switch from the old system to the new one, and the
+      goal is to make it boring. A big-bang cutover — everything switches at once, on one weekend —
+      concentrates all the risk into one moment and is how migrations make the news. The safer pattern
+      is to move in waves and switch traffic gradually: run both systems in parallel, replicate data
+      continuously, and move a small group of users first. DNS or a load balancer shifts traffic, and
+      the shift can be reversed in minutes if something is wrong — that rollback path is planned and
+      tested before the cutover, not improvised during it. The cutover window is chosen with the
+      business, not by the engineers alone: what does an hour of degraded service cost, and when is it
+      cheapest? And the cutover is rehearsed: a dry run against a copy of the data, with the same
+      steps, the same people and a stopwatch. The rehearsal is where the missing step is found, while
+      it is still cheap to fix.'
+    key_points:
+    - Big-bang cutovers concentrate all risk into one moment
+    - Run old and new in parallel; replicate data continuously
+    - Shift a small group of users first; keep a tested rollback path
+    - Choose the window with the business, not alone
+    - Rehearse the cutover against a copy of the data
+    architecture_diagram_mermaid: "flowchart LR\n    Old[On-prem] --> Sync[Continuous replication]\\n    Sync --> New[Cloud]\\n    New --> Shift[Gradual traffic shift]\\n    Shift --> Rollback[Rollback path]"
+  - id: adv-mig-data
+    title: Moving the Data
+    theory: 'Data is the hard part of every migration, because the application can be rebuilt but the
+      data cannot. The plan starts with the shape of the data: how much of it there is, how fast it
+      changes, and how long the business can tolerate it being out of sync. A small, slow-changing
+      dataset can be copied in one go during a maintenance window. A large, fast-changing one needs
+      continuous replication: an initial bulk load, then a stream of changes, then a final catch-up
+      and a brief freeze while the last writes drain. After the move, the data is verified — row
+      counts, checksums, and spot checks of the records the business actually cares about — because a
+      migration that silently loses one record in a million is worse than one that fails loudly. The
+      old system stays available, read-only, until the new one has run in production long enough to
+      trust, and only then is it decommissioned. Decommissioning is itself a project: licences
+      cancelled, backups retained for the required period, and the hardware wiped or returned.'
+    key_points:
+    - Data cannot be rebuilt; the application can
+    - Large, fast-changing data needs continuous replication, not one copy
+    - Verify with row counts, checksums and spot checks
+    - Keep the old system read-only until the new one is trusted
+    - 'Decommissioning is a project: licences, retention, wiping'
+    architecture_diagram_mermaid: "flowchart LR\n    Bulk[Bulk load] --> Stream[Change stream]\\n    Stream --> Catch[Final catch-up]\\n    Catch --> Verify[Verify counts + checksums]\\n    Verify --> Go[Go live]"
+guided_lab:
+  lab_definition_id: adv-migration
+  title: 'Rehost a Workload: The Landing Zone'
+  tasks:
+  - Build the landing VPC the migrated workload will live in, with public and private subnets
+  - Launch the replacement instance for the on-prem server and confirm it is running and reachable
+  - Restrict access so the migrated service is reachable on its application port only
+  - Verify the new home resolves by name and the old estate can be reached during parallel running
+  - Run the lab validator and fix every failing check before finishing
+  validation_rules:
+  - rule: vpc_exists
+    description: A landing VPC exists in the lab
+  - rule: subnet_count
+    description: At least two subnets exist
+    params:
+      operator: '>='
+      value: 2
+  - rule: instance_running
+    description: At least one migrated instance is running
+    params:
+      operator: '>='
+      count: 1
+  - rule: instance_reachable
+    description: The migrated instance is running with a recorded address
+    params:
+      protocol: http
+      port: 80
+  - rule: security_group_allows
+    description: The application port is reachable
+    params:
+      port: 443
+  - rule: dns_resolves
+    description: The migrated service resolves by name
+    params:
+      name: archive.ubuntu.com
+challenge:
+  title: The cutover window is shrinking
+  task: 'The maintenance window has been cut in half. Prove the landing zone is ready anyway: the
+    migrated instance must be running and reachable, the application port open, and the VPC and
+    subnets in place — then write down the rollback step you would use if the cutover failed.'
+  validation_rules:
+  - rule: instance_running
+    description: At least one migrated instance is running
+    params:
+      operator: '>='
+      count: 1
+  - rule: instance_reachable
+    description: The migrated instance is running with a recorded address
+    params:
+      protocol: http
+      port: 80
+  - rule: security_group_allows
+    description: The application port is reachable
+    params:
+      port: 443
+assessment:
+- question: What is the first step of any migration?
+  options:
+  - Lift and shift the easiest server
+  - 'Discovery: inventory every server, application, dependency and data flow'
+  - Buy reserved instances
+  - Write the runbook
+  correct_answer: 1
+  explanation: Discovery first — migrations that go wrong go wrong in discovery, when hidden dependencies surface during cutover.
+- question: Which strategy swaps a self-managed database for a managed one during the move?
+  options:
+  - Rehost
+  - Replatform
+  - Refactor
+  - Retire
+  correct_answer: 1
+  explanation: Replatform makes small changes during the move, like adopting a managed database, for a real operational saving.
+- question: Why move in waves instead of all at once?
+  options:
+  - It is slower
+  - Waves group dependent workloads and let the team learn the process on low-risk moves first
+  - Waves use less bandwidth
+  - The cloud requires it
+  correct_answer: 1
+  explanation: Waves follow dependency order and build team skill on easy moves before the hard ones.
+- question: How is a large, fast-changing dataset migrated with minimal downtime?
+  options:
+  - One big copy during a long outage
+  - Bulk load, then continuous replication, then a final catch-up and brief freeze
+  - Copy it to a USB drive
+  - Stop all writes for a week
+  correct_answer: 1
+  explanation: Continuous replication keeps the target nearly current, so the final cutover freeze is short.
+- question: How do you verify migrated data?
+  options:
+  - Trust the copy tool
+  - Row counts, checksums and spot checks of business-critical records
+  - Check the file size
+  - Ask the users if it looks right
+  correct_answer: 1
+  explanation: Silent data loss is worse than a loud failure; counts and checksums prove the copy is complete.
+- question: When is the old system decommissioned?
+  options:
+  - Immediately after cutover
+  - When the new system has run in production long enough to trust, with backups retained as required
+  - When the hardware lease ends
+  - Never
+  correct_answer: 1
+  explanation: The old estate stays read-only until the new one is proven, then decommissioning covers licences, retention and wiping.
+xp_reward: 300
+prerequisites:
+- fundamentals
+- storage
+- databases

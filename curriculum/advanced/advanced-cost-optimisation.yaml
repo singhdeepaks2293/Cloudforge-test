@@ -1,0 +1,205 @@
+id: advanced-cost-optimisation
+title: Cost Optimisation in Production
+description: 'Find the money leaking out of a real cloud bill: measure first, right-size second,
+  commit third — and keep the savings with guardrails that stop the waste coming back.'
+difficulty: advanced
+estimated_hours: 6
+learning_objectives:
+- Read a cloud bill and attribute spend to teams, services and workloads
+- Right-size instances and storage from measured utilisation, not guesses
+- Choose reservations and savings plans where usage is genuinely steady
+- Delete what is idle, orphaned or forgotten
+- Put guardrails in place so costs cannot drift up silently
+modules:
+- id: adv-cost-measure
+  title: Measure Before You Cut
+  lessons:
+  - id: adv-cost-bill
+    title: Reading a Cloud Bill
+    theory: 'A cloud bill is a measurement instrument before it is an invoice. The first skill is
+      attribution: which team, which service and which workload does each line belong to? That needs
+      tags, applied consistently, because an untagged resource is an unowned cost and unowned costs
+      never get fixed. The second skill is separating the bill into its parts: steady-state compute
+      that runs all month, storage that grows quietly, data transfer that spikes, and the long tail of
+      small services that nobody remembers provisioning. The third is trend, not snapshot: a bill that
+      grows five percent a month doubles in fourteen months, and the growth is usually one workload,
+      not everything at once. The common trap is optimising the wrong line — arguing about a storage
+      class while one oversized database costs ten times more. Measure first, in the open, with the
+      teams who own the spend in the room, because a cost programme that feels like an audit gets
+      resisted, and one that feels like shared visibility gets helped.'
+    key_points:
+    - Attribute spend with consistent tags; untagged cost is unowned cost
+    - 'Split the bill: steady compute, growing storage, transfer spikes, long tail'
+    - 'Watch the trend: five percent monthly growth doubles the bill in fourteen months'
+    - Optimise the biggest line first, not the most visible one
+    - Cost work needs the owning teams in the room, not an audit
+    architecture_diagram_mermaid: "flowchart TD\n    Bill[Monthly bill] --> Tag[Tag + attribute]\\n    Tag --> Split[Split by service]\\n    Split --> Trend[Trend over months]\\n    Trend --> Top[Biggest line first]"
+  - id: adv-cost-rightsize
+    title: Right-Sizing from Evidence
+    theory: 'Right-sizing is the least glamorous and most reliable saving in cloud: matching the
+      instance to the measured load. It starts with evidence, not instinct — weeks of CPU, memory and
+      network utilisation, including the peaks, because sizing for the average and then falling over at
+      peak is worse than oversizing. The pattern to look for is the instance that never exceeds twenty
+      percent CPU: it is usually two sizes too big. The fix is to step down one size at a time and
+      watch, because the cost of a wrong step down is an outage and the cost of a wrong step up is
+      just money. Storage gets the same treatment: volumes attached to nothing, snapshots nobody can
+      account for, and data on expensive tiers that has not been read in a year. The discipline is
+      that every right-sizing decision records its evidence and its rollback: what the utilisation was,
+      what was changed, and how to put it back. In the lab you practise the habit on a small scale:
+      record the measured utilisation as a metric on the instance, then prove the fleet still runs
+      after the change.'
+    key_points:
+    - Size from weeks of measured utilisation, including peaks
+    - An instance that never exceeds twenty percent CPU is usually two sizes too big
+    - Step down one size at a time and watch
+    - Hunt orphaned volumes, forgotten snapshots and cold data on hot tiers
+    - Record the evidence and the rollback for every change
+    architecture_diagram_mermaid: "flowchart LR\n    Measure[Measure utilisation] --> Pick[Pick smaller size]\\n    Pick --> Change[Change one step]\\n    Change --> Watch[Watch peaks]\\n    Watch --> Keep[Keep or roll back]"
+- id: adv-cost-commit
+  title: Commitments and Guardrails
+  lessons:
+  - id: adv-cost-commitments
+    title: Reservations and Savings Plans
+    theory: 'Once usage is measured and stable, commitments buy a discount for a promise: reserve
+      capacity for one or three years, or commit to a level of spend, and the unit price drops
+      significantly. The key word is stable — committing to a workload that is about to be retired, or
+      to an instance family the team is about to leave, locks in waste instead of savings. So the
+      order matters: right-size first, then commit, because a reservation on an oversized instance is
+      a discount on waste. The commitment should cover the floor, not the peak: the usage that is
+      always there, every day, in every month. Peaks stay on demand, because paying on-demand for a
+      spike is cheaper than reserving for it all year. And commitments need an owner and a review date:
+      somebody checks every quarter whether the reserved capacity is still used, because the system
+      changes and the reservation does not. A reservation that nobody reviews becomes the next
+      generation of waste.'
+    key_points:
+    - Commitments discount a promise of steady usage
+    - 'Right-size first: a reservation on an oversized instance discounts waste'
+    - Cover the floor, not the peak; peaks stay on demand
+    - Commit only to usage that is genuinely stable
+    - Every commitment needs an owner and a quarterly review
+    architecture_diagram_mermaid: "flowchart LR\n    Floor[Steady floor usage] --> Reserve[Reserve / savings plan]\\n    Peak[Peaks + spikes] --> Demand[On-demand]\\n    Reserve --> Review[Quarterly review]"
+  - id: adv-cost-guardrails
+    title: Guardrails That Keep the Savings
+    theory: 'Savings that depend on willpower do not last. Guardrails are the automation that keeps
+      the waste from coming back: budgets with alerts at fifty, eighty and one hundred percent, so a
+      runaway workload is noticed in hours, not at the end of the month. Policies that prevent the
+      expensive mistakes — no instance type above an approved size without review, no storage without
+      a lifecycle rule, no untagged resource surviving the week. Scheduled shutdowns for development
+      and test environments that nobody uses at night or at weekends, which is often a third of the
+      bill for a small team. And a regular cost review, short and routine, where the team looks at the
+      trend and the top five lines and decides one action. The review is the guardrail that matters
+      most, because every automated control eventually meets a workload it was not designed for, and a
+      human looking at the numbers every month is what catches it.'
+    key_points:
+    - Savings that depend on willpower do not last
+    - Budgets with alerts at fifty, eighty and one hundred percent
+    - 'Policies block expensive mistakes: oversized types, untagged resources'
+    - Shut down dev and test environments at night and weekends
+    - A short monthly cost review catches what automation misses
+    architecture_diagram_mermaid: "flowchart LR\n    Budget[Budget alerts] --> Policy[Policies]\\n    Policy --> Sched[Scheduled shutdowns]\\n    Sched --> Review[Monthly review]"
+guided_lab:
+  lab_definition_id: adv-cost
+  title: Audit a Wasteful Lab and Cut Its Cost
+  tasks:
+  - Launch the audit instance and record its measured utilisation as a metric on the instance resource
+  - Prove the instance is running and reachable after the audit
+  - 'Harden access: the audit instance must not allow SSH from the internet'
+  - Keep at least two subnets so the right-sized fleet can still spread across zones
+  - Run the lab validator and fix every failing check before finishing
+  validation_rules:
+  - rule: vpc_exists
+    description: A VPC exists in the lab
+  - rule: subnet_count
+    description: At least two subnets exist
+    params:
+      operator: '>='
+      value: 2
+  - rule: instance_running
+    description: At least one instance is running
+    params:
+      operator: '>='
+      count: 1
+  - rule: instance_reachable
+    description: The audited instance is running with a recorded address
+    params:
+      protocol: http
+      port: 80
+  - rule: security_group_denies
+    description: SSH is denied from the internet on the audited instance
+    params:
+      port: 22
+      source: 0.0.0.0/0
+challenge:
+  title: The bill doubled overnight
+  task: 'Spend doubled overnight. Find the waste: prove the fleet is still running and reachable, prove
+    SSH is not open to the internet, and record the offending metric — CPU utilisation or error rate —
+    on the instance resource so the validator can confirm it is below the threshold you set.'
+  validation_rules:
+  - rule: instance_running
+    description: At least one instance is running
+    params:
+      operator: '>='
+      count: 1
+  - rule: security_group_denies
+    description: SSH is denied from the internet
+    params:
+      port: 22
+      source: 0.0.0.0/0
+  - rule: metric_below
+    description: Recorded CPU utilisation is below 70%
+    params:
+      metric: cpu_utilization
+      threshold: 70
+assessment:
+- question: What is the first step of any cost optimisation?
+  options:
+  - Buy reservations
+  - Delete everything idle
+  - Measure and attribute the bill with tags
+  - Shut down dev environments
+  correct_answer: 2
+  explanation: Attribution first — untagged, unmeasured spend cannot be fixed, and the biggest line is rarely the most visible one.
+- question: Why right-size before buying reservations?
+  options:
+  - Reservations require right-sizing
+  - A reservation on an oversized instance is a discount on waste
+  - Right-sizing is faster
+  - Reservations cannot be changed
+  correct_answer: 1
+  explanation: Committing first locks in the oversizing; sizing first means the commitment covers only what is genuinely needed.
+- question: What should a commitment cover?
+  options:
+  - The peak usage
+  - The steady floor usage that is always there
+  - Everything, to maximise the discount
+  - Only storage
+  correct_answer: 1
+  explanation: Cover the floor and pay on-demand for peaks; reserving for a spike costs more than the spike itself.
+- question: An instance never exceeds 20% CPU. What do you do?
+  options:
+  - Leave it; headroom is good
+  - Step down one size at a time and watch the peaks
+  - Delete it immediately
+  - Move it to a bigger instance
+  correct_answer: 1
+  explanation: It is usually two sizes too big, but step down gradually — the cost of a wrong step down is an outage.
+- question: Which guardrail notices a runaway workload fastest?
+  options:
+  - A monthly cost review
+  - Budgets with alerts at 50, 80 and 100 percent
+  - A tagging policy
+  - A savings plan
+  correct_answer: 1
+  explanation: Budget alerts fire within hours; a monthly review finds the runaway weeks after the money is spent.
+- question: A bill grows 5% a month. What does that mean?
+  options:
+  - Nothing; it is within noise
+  - It doubles in about fourteen months, usually driven by one workload
+  - The cloud provider raised prices
+  - Reservations are expiring
+  correct_answer: 1
+  explanation: Compounding growth doubles the bill in fourteen months, and the growth is usually one workload, not everything at once.
+xp_reward: 250
+prerequisites:
+- ec2
+- monitoring

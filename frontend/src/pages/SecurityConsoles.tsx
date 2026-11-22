@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -59,7 +59,7 @@ function FindingsTable({ rows, onStatus }: { rows: Rec[]; onStatus?: (id: string
  * the platform's own audit log. A scan with no evidence creates
  * zero findings.
  */
-export function GuardDutyConsole() {
+export function GuardDutyConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [detName, setDetName] = useState('')
   const [notice, setNotice] = useState('')
@@ -87,13 +87,46 @@ export function GuardDutyConsole() {
     onError: (e: Error) => setNotice(`Status update failed: ${e.message}`),
   })
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'GuardDuty' }]}
-        title="GuardDuty — Threat detection"
-        description="Findings are generated only from real evidence in the platform's own audit log (failed logins, last 24 h). Never invented."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="real audit-log evidence only" />}
-      />
+    <ConsoleWithHome
+      icon="shield"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'GuardDuty' }]}
+      title="GuardDuty — Threat detection"
+      description="Findings are generated only from real evidence in the platform's own audit log (failed logins, last 24 h). Never invented."
+      fidelity="PARTIAL"
+      fidelityFootnote="real audit-log evidence only"
+      homeLabel="GuardDuty dashboard"
+      listLabel="Findings"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="GuardDuty"
+            banner="Findings are generated only from real evidence in the platform's own audit log (failed logins, last 24 h). A scan with no matching evidence creates nothing. Survey note: in the 2026-11-22 reference account this console was RESTRICTED (paid plan / not supported) — no layout was captured beyond the restriction dialog, so this console's layout follows public console documentation, not an observed layout. The restriction is not the design."
+            actions={[
+              { label: 'Run scan', primary: true, onClick: goToList },
+            { label: 'Open Security Hub', to: '/services/securityhub' },
+            ]}
+            cards={[
+              { label: 'Detectors', count: detRows.length, onSelect: goToList },
+            { label: 'Findings', count: findingRows.length, onSelect: goToList, note: 'Brute force and credential-stuffing patterns only' },
+            { label: 'Suppression rules', count: 0, disabledReason: 'Not modelled.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={findings.isFetching}
+            health={[
+              findings.isError ? 'Findings could not be loaded.' : `${findingRows.length} finding(s) listed.`,
+            "No threat-intelligence feeds and no invented threats.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — monitoring track', to: '/learn' },
+            { label: 'Macie (unsupported — exam concept)', to: '/services/macie' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {detectors.isPending && <Loading label="Loading detectors" />}
       {detectors.isError && <ErrorBox message={`Detectors could not be loaded (${detectors.error.message}).`} />}
@@ -122,7 +155,7 @@ export function GuardDutyConsole() {
       <AwsCard title={`Findings (${findingRows.length})`}>
         <FindingsTable rows={findingRows} onStatus={(id, status) => setStatus.mutate({ id, status })} />
       </AwsCard>
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -131,7 +164,7 @@ export function GuardDutyConsole() {
  * findings screens. It aggregates the real findings in the shared
  * findings table; it creates none of its own.
  */
-export function SecurityHubConsole() {
+export function SecurityHubConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [notice, setNotice] = useState('')
   const summary = useQuery({ queryKey: ['sechub-summary'], queryFn: () => request<Rec>('/api/v1/aws/securityhub/summary'), retry: 1 })
@@ -145,13 +178,46 @@ export function SecurityHubConsole() {
   const bySeverity = (summary.data?.by_severity ?? {}) as Record<string, number>
   const bySource = (summary.data?.by_source ?? {}) as Record<string, number>
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'Security Hub' }]}
-        title="Security Hub — Findings"
-        description="Central aggregation of findings from GuardDuty, Inspector, Config and Trusted Advisor."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="aggregation only — no findings of its own" />}
-      />
+    <ConsoleWithHome
+      icon="shield"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'Security Hub' }]}
+      title="Security Hub — Findings"
+      description="Central aggregation of findings from GuardDuty, Inspector, Config and Trusted Advisor."
+      fidelity="PARTIAL"
+      fidelityFootnote="aggregation only — no findings of its own"
+      homeLabel="Security Hub dashboard"
+      listLabel="Findings"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Security Hub"
+            banner="Central aggregation of the real findings in the shared findings table — nothing is counted that was not created by GuardDuty, Inspector, Config or Trusted Advisor. Survey note: in the 2026-11-22 reference account this console was RESTRICTED (paid plan / not supported) — no layout was captured beyond the restriction dialog, so this console's layout follows public console documentation, not an observed layout. The restriction is not the design."
+            actions={[
+              { label: 'View findings', primary: true, onClick: goToList },
+            { label: 'Open GuardDuty', to: '/services/guardduty' },
+            ]}
+            cards={[
+              { label: 'Findings', count: findingRows.length, onSelect: goToList },
+            { label: 'Open findings', count: typeof summary.data?.open === 'number' ? summary.data.open : '—', onSelect: goToList },
+            { label: 'Standards', count: 0, disabledReason: 'No AWS standards packs in CloudForge.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={findings.isFetching}
+            health={[
+              findings.isError ? 'Findings could not be loaded.' : `${findingRows.length} finding(s) listed.`,
+            "No AWS Security Hub integration.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — monitoring track', to: '/learn' },
+            { label: 'Config (findings source)', to: '/services/config' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {summary.isPending && <Loading label="Loading summary" />}
       {summary.isError && <ErrorBox message={`Summary could not be loaded (${summary.error.message}).`} />}
@@ -163,7 +229,7 @@ export function SecurityHubConsole() {
       <AwsCard title={`Findings (${findingRows.length})`}>
         <FindingsTable rows={findingRows} onStatus={(id, status) => setStatus.mutate({ id, status })} />
       </AwsCard>
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -173,7 +239,7 @@ export function SecurityHubConsole() {
  * open security groups, public S3 bucket policies, unencrypted
  * lab instances.
  */
-export function InspectorConsole() {
+export function InspectorConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [labId, setLabId] = useState('')
@@ -201,13 +267,46 @@ export function InspectorConsole() {
   const detailFindings = Array.isArray(detail.data?.findings) ? (detail.data?.findings as Record<string, unknown>[]) : []
   const sel = assessRows.find((a) => a.id === selected)
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'Inspector' }]}
-        title="Inspector — Assessments"
-        description="Assessments against real lab resources: open security groups, public buckets, unencrypted instances."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="resource checks only · no CVE scanning" />}
-      />
+    <ConsoleWithHome
+      icon="shield"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'Inspector' }]}
+      title="Inspector — Assessments"
+      description="Assessments against real lab resources: open security groups, public buckets, unencrypted instances."
+      fidelity="PARTIAL"
+      fidelityFootnote="resource checks only · no CVE scanning"
+      homeLabel="Inspector dashboard"
+      listLabel="Assessment runs"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Inspector"
+            banner="Real checks against real resources: open security groups, public S3 bucket policies, unencrypted lab instances. No agent-based CVE scanning."
+            actions={[
+              { label: 'Start assessment', primary: true, onClick: goToList },
+            { label: 'Open Security Hub', to: '/services/securityhub' },
+            ]}
+            cards={[
+              { label: 'Assessment runs', count: assessRows.length, onSelect: goToList },
+            { label: 'Findings', count: '—', onSelect: goToList, note: 'findings_count on each run' },
+            { label: 'Assessment templates', count: 0, disabledReason: 'Not modelled.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={assessments.isFetching}
+            health={[
+              "assessments.isError ? 'Assessments could not be loaded.' : `${assessRows.length} assessment run(s) listed.`",
+            "The S3 check is skipped and recorded when MinIO is down.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — monitoring track', to: '/learn' },
+            { label: 'Config (findings source)', to: '/services/config' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {assessments.isPending && <Loading label="Loading assessments" />}
       {assessments.isError && <ErrorBox message={`Assessments could not be loaded (${assessments.error.message}).`} />}
@@ -256,7 +355,7 @@ export function InspectorConsole() {
           {detail.data && str(detail.data, 'notes') !== '' && <p className="mt-2 text-xs text-aws-muted">{str(detail.data, 'notes')}</p>}
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -266,7 +365,7 @@ export function InspectorConsole() {
  * resources, a configuration-history snapshot, and per-resource
  * results.
  */
-export function ConfigConsole() {
+export function ConfigConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [ruleName, setRuleName] = useState('')
   const [ruleType, setRuleType] = useState('sg-no-open-ssh')
@@ -303,13 +402,46 @@ export function ConfigConsole() {
     onError: (e: Error) => setNotice(`Snapshot failed: ${e.message}`),
   })
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'Config' }]}
-        title="Config — Rules & configuration history"
-        description="Compliance rules evaluated against real resources, with non-compliant resources listed."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="3 rule types · real evaluation" />}
-      />
+    <ConsoleWithHome
+      icon="layers"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'Config' }]}
+      title="Config — Rules & configuration history"
+      description="Compliance rules evaluated against real resources, with non-compliant resources listed."
+      fidelity="PARTIAL"
+      fidelityFootnote="3 rule types · real evaluation"
+      homeLabel="Config dashboard"
+      listLabel="Rules"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Config"
+            banner="Three rules (S3 bucket versioning, no open SSH, no open ingress) evaluated against real resources; non-compliant resources are listed with reasons and recorded as Config findings."
+            actions={[
+              { label: 'Create rule', primary: true, onClick: goToList },
+            { label: 'Open Security Hub', to: '/services/securityhub' },
+            ]}
+            cards={[
+              { label: 'Rules', count: ruleRows.length, onSelect: goToList },
+            { label: 'Evaluation results', count: resultRows.length, onSelect: goToList },
+            { label: 'Configuration items', count: itemRows.length, onSelect: goToList, note: 'Snapshots of lab resources' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={rules.isFetching}
+            health={[
+              "rules.isError ? 'Rules could not be loaded.' : `${ruleRows.length} rule(s) listed.`",
+            "Configuration history is recorded snapshots of lab resources.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — monitoring track', to: '/learn' },
+            { label: 'CloudTrail (event history)', to: '/services/cloudtrail' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {rules.isPending && <Loading label="Loading rules" />}
       {rules.isError && <ErrorBox message={`Rules could not be loaded (${rules.error.message}).`} />}
@@ -374,7 +506,7 @@ export function ConfigConsole() {
           emptyMessage="No snapshots yet — record one above."
         />
       </AwsCard>
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -383,7 +515,7 @@ export function ConfigConsole() {
  * Rules are really evaluated against a sample request the user
  * supplies; the ACL does not block live API traffic (labelled).
  */
-export function WafConsole() {
+export function WafConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [ruleName, setRuleName] = useState('block-admin')
@@ -421,13 +553,47 @@ export function WafConsole() {
   const sel = aclRows.find((a) => a.id === selected)
   const rules = Array.isArray(sel?.rules) ? (sel?.rules as Record<string, unknown>[]) : []
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'WAF' }]}
-        title="WAF — Web ACLs"
-        description="Rules evaluated for real against sample requests you supply. This ACL does not block live API traffic."
-        actions={<FidelityBadge fidelity="SIMULATED" footnote="evaluation only · does not block live traffic" />}
-      />
+    <ConsoleWithHome
+      icon="shield"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'WAF' }]}
+      title="WAF — Web ACLs"
+      description="Rules evaluated for real against sample requests you supply. This ACL does not block live API traffic."
+      fidelity="SIMULATED"
+      fidelityFootnote="evaluation only · does not block live traffic"
+      homeLabel="WAF dashboard"
+      listLabel="Web ACLs"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="WAF"
+            banner="Rules are really evaluated (first match, path/header/query/body/IP matchers) but only by the /evaluate endpoint against a request you supply — they are NOT inline in the API request path, so nothing is live-blocked."
+            actions={[
+              { label: 'Create web ACL', primary: true, onClick: goToList },
+            { label: 'Open Network Firewall', to: '/services/networkfirewall' },
+            ]}
+            cards={[
+              { label: 'Web ACLs', count: aclRows.length, onSelect: goToList },
+            { label: 'Rules', count: '—', onSelect: goToList, note: 'Rules live on the ACL' },
+            { label: 'Rule groups', count: 0, disabledReason: 'Not modelled.' },
+            { label: 'Shield (DDoS)', count: 0, disabledReason: 'Shield is UNSUPPORTED — see the Shield console.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={acls.isFetching}
+            health={[
+              "acls.isError ? 'Web ACLs could not be loaded.' : `${aclRows.length} web ACL(s) listed.`",
+            "Evaluation only — the ACL does not block live API traffic.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — IAM track', to: '/learn' },
+            { label: 'Shield (unsupported — exam concept)', to: '/services/shield' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {acls.isPending && <Loading label="Loading web ACLs" />}
       {acls.isError && <ErrorBox message={`Web ACLs could not be loaded (${acls.error.message}).`} />}
@@ -492,7 +658,7 @@ export function WafConsole() {
           <p className="mt-2 text-xs text-aws-muted">First matching rule wins; no match → default allow.</p>
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -503,7 +669,7 @@ export function WafConsole() {
  * returned. Rotate keeps previous versions so old ciphertext still
  * decrypts.
  */
-export function KmsConsole() {
+export function KmsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
@@ -542,13 +708,46 @@ export function KmsConsole() {
   })
   const sel = keyRows.find((k) => k.id === selected)
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'KMS' }]}
-        title="KMS — Customer managed keys"
-        description="Real envelope encryption (AES-256-GCM) with keys stored in the platform store. Not AWS KMS or an HSM."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="durable local envelope encryption" />}
-      />
+    <ConsoleWithHome
+      icon="lock"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'KMS' }]}
+      title="KMS — Customer managed keys"
+      description="Real envelope encryption (AES-256-GCM) with keys stored in the platform store. Not AWS KMS or an HSM."
+      fidelity="PARTIAL"
+      fidelityFootnote="durable local envelope encryption"
+      homeLabel="KMS dashboard"
+      listLabel="Customer managed keys"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="KMS"
+            banner="Durable local keys: AES-256 key material stored wrapped under a master key; real AES-256-GCM encrypt/decrypt with rotation that keeps previous versions decryptable. NOT real AWS KMS, no HSM."
+            actions={[
+              { label: 'Create key', primary: true, onClick: goToList },
+            { label: 'Open Secrets Manager', to: '/services/secretsmanager' },
+            ]}
+            cards={[
+              { label: 'Customer managed keys', count: keyRows.length, onSelect: goToList },
+            { label: 'Aliases', count: '—', onSelect: goToList, note: 'Aliases on the key detail' },
+            { label: 'Grants', count: 0, disabledReason: 'Not modelled.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={keys.isFetching}
+            health={[
+              "keys.isError ? 'Keys could not be loaded.' : `${keyRows.length} key(s) listed.`",
+            "Wrapped keys never leave the server.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — IAM track', to: '/learn' },
+            { label: 'Secrets Manager (KMS consumer)', to: '/services/secretsmanager' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {keys.isPending && <Loading label="Loading keys" />}
       {keys.isError && <ErrorBox message={`Keys could not be loaded (${keys.error.message}).`} />}
@@ -600,7 +799,7 @@ export function KmsConsole() {
           </div>
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -610,7 +809,7 @@ export function KmsConsole() {
  * and stored encrypted at rest; list responses never include the
  * value.
  */
-export function SecretsConsole() {
+export function SecretsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
@@ -645,13 +844,46 @@ export function SecretsConsole() {
     onError: (e: Error) => setNotice(`Delete failed: ${e.message}`),
   })
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'Secrets Manager' }]}
-        title="Secrets Manager — Secrets"
-        description="Secrets are envelope-encrypted with a KMS key and stored encrypted at rest. No automatic rotation."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="encrypted at rest · no auto-rotation" />}
-      />
+    <ConsoleWithHome
+      icon="lock"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security', to: '/services' }, { label: 'Secrets Manager' }]}
+      title="Secrets Manager — Secrets"
+      description="Secrets are envelope-encrypted with a KMS key and stored encrypted at rest. No automatic rotation."
+      fidelity="PARTIAL"
+      fidelityFootnote="encrypted at rest · no auto-rotation"
+      homeLabel="Secrets Manager dashboard"
+      listLabel="Secrets"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Secrets Manager"
+            banner="Secrets are envelope-encrypted at rest (AES-256-GCM value, data key wrapped by a KMS key) and versioned; values are decrypted on read and never stored in plaintext. No automatic rotation schedule."
+            actions={[
+              { label: 'Create secret', primary: true, onClick: goToList },
+            { label: 'Open KMS', to: '/services/kms' },
+            ]}
+            cards={[
+              { label: 'Secrets', count: secretRows.length, onSelect: goToList },
+            { label: 'Versions', count: '—', onSelect: goToList, note: 'Versions increment on put' },
+            { label: 'Rotation schedules', count: 0, disabledReason: 'No automatic rotation schedule.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={secrets.isFetching}
+            health={[
+              "secrets.isError ? 'Secrets could not be loaded.' : `${secretRows.length} secret(s) listed.`",
+            "List responses never include the value or ciphertext.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — IAM track', to: '/learn' },
+            { label: 'KMS (wrapping keys)', to: '/services/kms' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {secrets.isPending && <Loading label="Loading secrets" />}
       {secrets.isError && <ErrorBox message={`Secrets could not be loaded (${secrets.error.message}).`} />}
@@ -702,6 +934,6 @@ export function SecretsConsole() {
           </div>
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }

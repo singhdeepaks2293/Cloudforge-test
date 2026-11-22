@@ -137,6 +137,10 @@ var P3Collections = map[string]string{
 	"advisor_results":       "p6_advisor_results",
 	"cost_budgets":          "p6_cost_budgets",
 	"org_units":             "p6_org_units",
+	// v3 exam services (SAA-C03 / SAP-C02) — one shared generic
+	// table (migration 014); the service discriminator is
+	// data->>'service'. See backend/internal/httpapi/exam.go.
+	"exam_services": "p7_exam_services",
 }
 
 // P3Table returns the Postgres table for a collection, or "".

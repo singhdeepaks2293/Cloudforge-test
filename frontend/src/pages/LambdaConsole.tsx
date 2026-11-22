@@ -4,6 +4,7 @@ import { AwsCard } from '../components/AwsCard.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { ConsoleTabs, ServiceConsole } from '../components/ServiceConsole.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import {
   AwsActionsMenu,
@@ -39,9 +40,9 @@ const CREATE_STEPS = ['Basic information', 'Runtime and code', 'Permissions', 'S
  * managed scaling, layers, or Docker invoker. The console shows the
  * sandbox that actually applied on every invocation.
  */
-export function LambdaConsole() {
+export function LambdaConsole({ initialSection }: { initialSection?: string }) {
   const queryClient = useQueryClient()
-  const [activeSub, setActiveSub] = useState('functions')
+  const [activeSub, setActiveSub] = useState(initialSection ?? 'functions')
   const [name, setName] = useState('')
   const [runtime, setRuntime] = useState('python3')
   const [code, setCode] = useState(DEFAULT_CODE)
@@ -126,6 +127,7 @@ export function LambdaConsole() {
       fidelity="PARTIAL"
       fidelityFootnote="subprocess sandbox · not containers · not AWS Lambda"
       subNav={[
+        { id: 'home', label: 'Lambda dashboard' },
         { id: 'functions', label: 'Functions' },
         { id: 'layers', label: 'Layers', disabledReason: 'Not modelled' },
         { id: 'event-sources', label: 'Event source mappings', disabledReason: 'Triggers are per-function via the API' },
@@ -147,6 +149,50 @@ export function LambdaConsole() {
       }
     >
       {notice !== '' && <AwsFlash tone={noticeTone}>{notice}</AwsFlash>}
+
+      {activeSub === 'home' && (
+        <ServiceHomeDashboard
+          serviceName="Lambda"
+          banner="Functions really execute here, in a sandboxed subprocess (python3/node) — not container isolation and not AWS Lambda. No VPC attachment, managed scaling, layers, or provisioned concurrency."
+          actions={[
+            {
+              label: 'Create function',
+              primary: true,
+              onClick: () => {
+                setWizardOpen(true)
+                setWizardStep(0)
+                setActiveSub('functions')
+              },
+            },
+            { label: 'View SQS queues (trigger source)', to: '/services/sqs' },
+          ]}
+          cards={[
+            { label: 'Functions', count: rows.length, onSelect: () => setActiveSub('functions') },
+            { label: 'Layers', count: 0, disabledReason: 'Not modelled.' },
+            { label: 'Event source mappings', count: '—', note: 'Triggers are per-function via the API' },
+            {
+              label: 'Invocations (selected function)',
+              count: selected !== '' ? listOf(invocations.data, 'invocations').length : '—',
+              onSelect: () => setActiveSub('functions'),
+              note: 'Real subprocess output, with the sandbox that applied',
+            },
+          ]}
+          onRefresh={refresh}
+          refreshing={functions.isFetching}
+          health={[
+            functions.isError ? 'Functions could not be loaded.' : `${rows.length} function(s) listed.`,
+            'Execution: sandboxed subprocess (timeout, output cap, prlimit memory cap when available, uid 65534 when the API runs as root).',
+          ]}
+          settings={[
+            { label: 'Resource Explorer', to: '/explorer' },
+            { label: 'All services', to: '/services' },
+          ]}
+          info={[
+            { label: 'Learning Center — serverless track', to: '/learn' },
+            { label: 'API Gateway (HTTP trigger)', to: '/services/apigateway' },
+          ]}
+        />
+      )}
 
       {activeSub === 'functions' && (
         <div className="space-y-4">
@@ -220,6 +266,10 @@ export function LambdaConsole() {
               )}
             </AwsWizard>
           )}
+          <p className="text-xs text-aws-muted">
+            Wizard steps inferred from the console&apos;s Create function action, not observed — the 2026-11-22
+            survey opened no create wizard, so no AWS wizard steps were recorded.
+          </p>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <AwsStat label="Functions" value={rows.length} />
@@ -285,10 +335,9 @@ export function LambdaConsole() {
                       </button>
                     ),
                   },
+                  { header: 'Description', render: () => <span title="CloudForge does not store a function description">Not available</span> },
                   { header: 'Runtime', render: (f) => String(f.runtime ?? '—') },
-                  { header: 'Version', render: (f) => String(f.version ?? '—') },
-                  { header: 'Timeout', render: (f) => `${String(f.timeout_seconds ?? '—')}s` },
-                  { header: 'Memory', render: (f) => `${String(f.memory_mb ?? '—')} MB` },
+                  { header: 'Last modified', render: (f) => (typeof f.updated_at === 'string' ? new Date(f.updated_at as string).toLocaleString() : '—') },
                   {
                     header: 'Actions',
                     render: (f) => (

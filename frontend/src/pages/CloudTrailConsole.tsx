@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { createAuditExportJob, downloadAuditExport, downloadAuditExportJob, fetchAudit, fetchAuditExportJobs } from '../services/api.ts'
 import type { AuditExportJob, AuditFilter } from '../services/api.ts'
@@ -17,7 +17,7 @@ import type { AuditEntry } from '../types/index.ts'
  * the event metadata. Export is CSV or JSON (admin only, max 1000
  * events). No fake events — an empty result means nothing happened.
  */
-export function CloudTrailConsole() {
+export function CloudTrailConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const [filter, setFilter] = useState<AuditFilter>({ limit: 50 })
   const [draft, setDraft] = useState({ actor_id: '', action: '', resource_type: '', resource_id: '', lab_id: '', q: '', from: '', to: '' })
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -86,13 +86,50 @@ export function CloudTrailConsole() {
   }
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Management', to: '/services' }, { label: 'CloudTrail' }]}
-        title="CloudTrail — Event history"
-        description="Real audit events from the backend audit store. Admin only. Filter by actor, action, resource or date; export as CSV or JSON."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="real audit store · export max 1000 events" />}
-      />
+    <ConsoleWithHome
+      icon="activity"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Management', to: '/services' }, { label: 'CloudTrail' }]}
+      title="CloudTrail — Event history"
+      description="Real audit events from the backend audit store. Admin only. Filter by actor, action, resource or date; export as CSV or JSON."
+      fidelity="PARTIAL"
+      fidelityFootnote="real audit store · export max 1000 events"
+      homeLabel="CloudTrail dashboard"
+      listLabel="Event history"
+      initialSection={initialSection}
+      home={(goToList) => (
+        <ServiceHomeDashboard
+          serviceName="CloudTrail"
+          banner="Audit is CloudForge's own log, not AWS CloudTrail; retention 90 days. An empty result means nothing happened, not a missing feed."
+          actions={[
+            { label: 'View event history', primary: true, onClick: goToList },
+            { label: 'Open Config (compliance rules)', to: '/services/config' },
+          ]}
+          cards={[
+            { label: 'Events (current filter)', count: audit.data?.total ?? '—', onSelect: goToList, note: 'Real audit events from the backend store' },
+            { label: 'Export jobs', count: exportJobs.data?.jobs.length ?? '—', onSelect: goToList, note: 'Archived exports, up to 10,000 events each' },
+            { label: 'Trails', count: 0, disabledReason: 'Trails are not modelled — this is CloudForge\u2019s own audit log.' },
+            { label: 'Insights', count: 0, disabledReason: 'Not modelled.' },
+          ]}
+          onRefresh={() => void audit.refetch()}
+          refreshing={audit.isFetching}
+          health={[
+            audit.isError
+              ? 'Audit events are admin-only and could not be loaded.'
+              : `${audit.data?.total ?? 0} event(s) match the current filter.`,
+            'Export is CSV or JSON (admin only, max 1000 events); export jobs hold up to 10,000 and survive the session.',
+            'Audit rows older than 90 days are archived to a file by the worker before deletion.',
+          ]}
+          settings={[
+            { label: 'Resource Explorer', to: '/explorer' },
+            { label: 'All services', to: '/services' },
+          ]}
+          info={[
+            { label: 'Learning Center — monitoring track', to: '/learn' },
+            { label: 'Audit Manager (unsupported — exam concept)', to: '/services/auditmanager' },
+          ]}
+        />
+      )}
+    >
       {notice !== '' && (
         <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>
       )}
@@ -184,7 +221,7 @@ export function CloudTrailConsole() {
           {selected && <EventDetail entry={selected} onClose={() => setSelectedId(null)} />}
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }
 

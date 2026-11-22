@@ -6,13 +6,14 @@ description: >-
   Gateway connectivity, large migrations and disaster recovery that has to be
   proven, not assumed.
 difficulty: advanced
-estimated_hours: 20
+estimated_hours: 22
 learning_objectives:
 - Design a multi-account landing zone with organization-wide guardrails
 - Plan hybrid connectivity and DNS that survives a Region or link failure
 - Choose a migration strategy and a cutover plan with a tested rollback
 - Select a disaster recovery pattern from business RTO and RPO
 - Defend enterprise trade-offs across security, operations and cost
+- 'Operate the SAP exam services hands-on in lite mode: Control Tower, IAM Identity Center, RAM, Direct Connect, Global Accelerator, VPN, Storage Gateway, Snowball, Lake Formation, MGN, Audit Manager and Artifact'
 modules:
 - id: sap-governance
   title: Multi-Account Governance
@@ -245,6 +246,133 @@ modules:
     - Centralize shared networking, logging and security to avoid duplication
     - Watch cross-AZ, cross-Region and NAT processing costs
     - 'Example: consolidating two landing zones removed duplicate appliances'
+- id: sap-exam-services
+  title: Exam Services in Practice — Landing Zones, Hybrid Links and Migration
+  lessons:
+  - id: sap-landing-zone-services
+    title: Landing Zones, Federation and Audit Evidence
+    theory: |
+      At enterprise scale the landing zone is a product, not a project.
+      Control Tower provisions accounts from a template and applies
+      guardrails: preventive guardrails are service control policies
+      that deny an action outright, detective guardrails are Config
+      rules that report drift. Create a landing zone with POST
+      /api/v1/aws/controltower/landing-zones and enable a guardrail
+      with POST /api/v1/aws/controltower/landing-zones/{id}/guardrails;
+      in CloudForge the guardrail is a recorded setting, not an
+      enforced SCP — enforcement is what the Organizations lessons
+      model. Workforce access belongs in IAM Identity Center: create a
+      permission set with POST /api/v1/aws/identitycenter/permission-sets
+      and assign it to a group in an account; the assignment is
+      recorded, it creates no login anywhere. Share the central
+      networking resources with RAM: POST /api/v1/aws/ram/resource-shares
+      with resource_type transit-gateway or subnet, then add principals.
+      No second account exists here, so sharing changes no access — the
+      lesson is the sharing model, including that shared subnets let a
+      spoke account launch instances in the central VPC without owning
+      the network. Close the loop with evidence: create an Audit Manager
+      assessment with POST /api/v1/aws/auditmanager/assessments and
+      collect evidence, which counts real entries from this deployment's
+      audit log, and check the Artifact catalogue with GET
+      /api/v1/aws/artifact/reports for the compliance reports an auditor
+      would ask for. Launch the sap-exam-services lab first so the
+      exercises have a live lab behind them.
+    key_points:
+    - Preventive guardrails deny; detective guardrails report
+    - Permission sets are the reusable unit of workforce access
+    - RAM shares subnets and transit gateways so spokes need not own the network
+    - Audit Manager evidence here is a count of real audit-log entries
+    - Artifact is a catalogue; CloudForge does not redistribute AWS compliance documents
+    - 'Example: guardrail, permission set, RAM share and evidence collection in one pass'
+    architecture_diagram_mermaid: |
+      flowchart LR
+        CT[Control Tower] --> OU[OUs + guardrails]
+        IDC[Identity Center] --> PS[Permission sets]
+        PS --> ACCT[Accounts]
+        RAM[RAM share] --> TGW[Transit Gateway]
+        AM[Audit Manager] --> LOG[Audit log]
+  - id: sap-hybrid-connectivity-services
+    title: Hybrid Connectivity — Direct Connect, VPN and Global Accelerator
+    theory: |
+      Hybrid connectivity is chosen by bandwidth, predictability and
+      setup time. Direct Connect is a dedicated private circuit with
+      predictable bandwidth: create a connection with POST
+      /api/v1/aws/directconnect/connections giving a bandwidth such as
+      1Gbps, then confirm it — in CloudForge confirmation is a teaching
+      state change, because no carrier, LOA-CFA or BGP session exists.
+      Use at least two connections at different locations, or a VPN as
+      a backup path, because a single circuit is a single point of
+      failure. A site-to-site VPN is faster to establish and encrypts
+      traffic over the internet: create a customer gateway and a VPN
+      gateway, then a connection, and activate the tunnel. The tunnel
+      state is a teaching field; no IPsec tunnel exists here. Global
+      Accelerator gives two static anycast IPs that steer TCP and UDP
+      traffic to the nearest healthy endpoint group and fail over in
+      seconds: create an accelerator with POST
+      /api/v1/aws/globalaccelerator/accelerators with endpoint groups in
+      two regions, then fail over with POST
+      /api/v1/aws/globalaccelerator/accelerators/{id}/failover. The
+      static IPs are teaching addresses in 192.0.2.0/24 and no traffic
+      is routed; the failover history records the decision. Compare
+      with Route 53 failover routing, which depends on DNS TTLs and
+      client caching and is slower. The exam asks you to pick between
+      these from the stated constraints, not from a preference.
+    key_points:
+    - Direct Connect for predictable private bandwidth; VPN for speed and backup
+    - Two Direct Connect locations, or a VPN backup, remove the single-circuit risk
+    - Global Accelerator fails over in seconds; Route 53 failover waits on DNS TTLs
+    - Anycast IPs here are teaching addresses; failover history records the decision
+    - 'Example: confirm a Direct Connect circuit, then fail a Global Accelerator over'
+    architecture_diagram_mermaid: |
+      flowchart LR
+        ONPREM[On-premises] --> DX[Direct Connect]
+        ONPREM --> VPN[Site-to-site VPN]
+        DX --> TGW[Transit Gateway]
+        VPN --> TGW
+        USER[Users] --> GA[Global Accelerator]
+        GA --> R1[Region 1 endpoints]
+        GA --> R2[Region 2 endpoints]
+  - id: sap-data-migration-services
+    title: Data Migration at Scale — Gateways, Snowball, Lake Formation and MGN
+    theory: |
+      Large migrations move data in the order the business can afford:
+      online replication first, bulk transfer second, and a tested
+      cutover last. Storage Gateway keeps an on-premises cache in front
+      of S3: create a gateway with POST /api/v1/aws/storagegateway/gateways
+      with gateway_type FILE_S3, activate it, and add a file share. In
+      CloudForge no appliance is deployed and no data is cached; the
+      activation is a teaching state change. Snowball moves petabytes
+      offline when the network cannot: create a job with POST
+      /api/v1/aws/snowball/jobs and advance it along created, preparing,
+      shipped, delivered, completed — a teaching lifecycle, since no
+      device ships. Lake Formation governs a data lake with
+      fine-grained permissions: grant SELECT on a table to a principal
+      with POST /api/v1/aws/lakeformation/permissions. Grants are
+      recorded, not enforced, because no data lake exists here. MGN
+      replicates servers continuously for lift-and-shift: create a
+      source server, start replication, run a test launch, then cut
+      over — each step is POST /api/v1/aws/mgn/source-servers/{id}/... and
+      each moves the teaching state machine one step, with the wrong
+      order refused. The cutover lesson is the point: freeze writes,
+      verify zero lag, validate data, switch, and keep a tested
+      rollback. Launch the sap-exam-services lab and walk one source
+      server all the way to CUTOVER before the exam.
+    key_points:
+    - Storage Gateway caches on-premises in front of S3; activation here is a teaching state
+    - Snowball is for petabyte offline transfer when the network cannot carry it
+    - Lake Formation grants are recorded, not enforced, in CloudForge
+    - 'MGN lifecycle: replicate, test launch, cutover — wrong order is refused'
+    - Cutover needs frozen writes, zero lag, validation and a tested rollback
+    - 'Example: walk one MGN source server from replication to cutover'
+    architecture_diagram_mermaid: |
+      flowchart LR
+        ONPREM[On-premises data] --> SGW[Storage Gateway]
+        SGW --> S3[S3]
+        ONPREM --> SNOW[Snowball job]
+        SNOW --> S3
+        SRV[Source server] --> MGN[MGN replication]
+        MGN --> TEST[Test launch]
+        TEST --> CUT[Cutover]
 guided_lab:
   lab_definition_id: sap-hybrid-network
   title: Build a segmented hybrid network with resilient egress
@@ -352,7 +480,31 @@ assessment:
   - A single Region with larger instances
   correct_answer: 1
   explanation: Warm standby meets a short RTO and RPO with continuous replication at lower cost than active-active.
-xp_reward: 350
+- question: A company needs predictable private bandwidth to AWS and cannot tolerate a single circuit failure. Which design fits?
+  options:
+  - One Direct Connect connection at a single location
+  - Two Direct Connect connections at different locations, or Direct Connect with a VPN backup
+  - A single site-to-site VPN with no redundancy
+  - Public internet routing with larger instances
+  correct_answer: 1
+  explanation: Redundant circuits at different locations, or a VPN backup path, remove the single-circuit failure; one connection is a single point of failure.
+- question: A migration team has replicated a server with MGN and is ready to switch production traffic. What must happen before cutover?
+  options:
+  - Cut over immediately; replication alone is sufficient
+  - Run a test launch, verify zero replication lag and validation checks, and have a tested rollback
+  - Delete the source server first, then cut over
+  - Increase the replication bandwidth and cut over during peak traffic
+  correct_answer: 1
+  explanation: Cutover requires a test launch, zero lag, data validation and a tested rollback; replication alone does not prove the cutover works.
+- question: An auditor asks for evidence that a preventive guardrail blocks disabling CloudTrail. Where does that control belong?
+  options:
+  - A detective Config rule that reports after the fact
+  - A Control Tower preventive guardrail, implemented as a service control policy
+  - An IAM group policy in one account
+  - A bucket policy on the log bucket alone
+  correct_answer: 1
+  explanation: A preventive guardrail is an SCP that denies the action for every principal in the account, including administrators; detective controls only report it.
+xp_reward: 400
 prerequisites:
 - aws-saa
 - architecture

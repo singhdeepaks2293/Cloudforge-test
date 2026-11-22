@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudforge/cloudforge/backend/internal/advanced"
 	"github.com/cloudforge/cloudforge/backend/internal/auth"
 	"github.com/cloudforge/cloudforge/backend/internal/cache"
 	"github.com/cloudforge/cloudforge/backend/internal/hostagent"
@@ -97,6 +98,9 @@ type Deps struct {
 	// Curriculum gets an in-memory default in NewServerWithDeps.
 	Curriculum    store.CurriculumStore
 	CurriculumDir string
+	// v3 Advanced section service (nil = constructed in
+	// NewServerWithDeps from CurriculumDir + Curriculum).
+	Advanced *advanced.Service
 	// Milestone 9: live Postgres health probe for /readyz. Nil when
 	// the API runs on the in-memory fallback (no Postgres); /readyz
 	// then reports postgres as "disabled" instead of failing.
@@ -184,6 +188,7 @@ type Server struct {
 	WorkdirRoot      string
 	Curriculum       store.CurriculumStore
 	CurriculumDir    string
+	Advanced         *advanced.Service
 	DBHealth         func(ctx context.Context) error
 	AuthLimiter      *ratelimit.Limiter
 	APILimiter       *ratelimit.Limiter
@@ -295,6 +300,9 @@ func NewServerWithDeps(d Deps) *Server {
 	if d.Quotas == nil {
 		d.Quotas = store.NewMemoryQuotaStore()
 	}
+	if d.Advanced == nil {
+		d.Advanced = advanced.NewService(d.CurriculumDir, d.Curriculum)
+	}
 	if d.IAM == nil {
 		d.IAM = store.NewMemoryIAMStore()
 	}
@@ -326,6 +334,7 @@ func NewServerWithDeps(d Deps) *Server {
 		EmulatorEndpoint: d.EmulatorEndpoint, MinIOEndpoint: d.MinIOEndpoint,
 		WorkdirRoot: d.WorkdirRoot,
 		Curriculum:  d.Curriculum, CurriculumDir: d.CurriculumDir,
+		Advanced:    d.Advanced,
 		DBHealth:    d.DBHealth,
 		AuthLimiter: d.AuthLimiter, APILimiter: d.APILimiter,
 		UserAPILimiter: d.UserAPILimiter, MetricsToken: d.MetricsToken,
@@ -1311,6 +1320,49 @@ func (s *Server) Routes() http.Handler {
 		r.Post("/admin/seed-curriculum", s.handleSeedCurriculum)
 		r.Post("/labs/{id}/break-fix/start", s.handleBreakFixStart)
 		r.Post("/labs/{id}/break-fix/solve", s.handleBreakFixSolve)
+		// Advanced section (v3 Workstream 3): catalogue, interviews,
+		// skills checklist, checklist state, portfolio artefacts.
+		r.Route("/advanced", func(r chi.Router) {
+			r.Get("/projects", func(w http.ResponseWriter, req *http.Request) {
+				if _, ok := s.requireAuth(w, req); !ok {
+					return
+				}
+				s.Advanced.HandleProjects(w, req)
+			})
+			r.Get("/interviews", func(w http.ResponseWriter, req *http.Request) {
+				if _, ok := s.requireAuth(w, req); !ok {
+					return
+				}
+				s.Advanced.HandleInterviews(w, req)
+			})
+			r.Get("/skills-checklist", func(w http.ResponseWriter, req *http.Request) {
+				if _, ok := s.requireAuth(w, req); !ok {
+					return
+				}
+				s.Advanced.HandleSkillsChecklist(w, req)
+			})
+			r.Get("/checklist-state", func(w http.ResponseWriter, req *http.Request) {
+				u, ok := s.requireAuth(w, req)
+				if !ok {
+					return
+				}
+				s.Advanced.HandleChecklistState(w, req, u.ID)
+			})
+			r.Put("/checklist-state", func(w http.ResponseWriter, req *http.Request) {
+				u, ok := s.requireAuth(w, req)
+				if !ok {
+					return
+				}
+				s.Advanced.HandleChecklistState(w, req, u.ID)
+			})
+			r.Post("/portfolio/{project}", func(w http.ResponseWriter, req *http.Request) {
+				u, ok := s.requireAuth(w, req)
+				if !ok {
+					return
+				}
+				s.Advanced.HandlePortfolio(w, req, u.ID)
+			})
+		})
 		r.Get("/providers/capabilities", s.handleCapabilities)
 		// Phase 1: backend-driven service registry + resource explorer.
 		r.Get("/services", s.handleListServices)
@@ -1381,6 +1433,8 @@ func (s *Server) Routes() http.Handler {
 		s.registerTFlearnRoutes(r)
 		// Phase 6: advanced services.
 		s.registerPhase6Routes(r)
+		// v3: exam services (SAA-C03 / SAP-C02) in lite mode.
+		s.registerExamRoutes(r)
 		r.Get("/admin/quotas", s.handleGetQuotas)
 		r.Put("/admin/quotas", s.handleUpdateQuotas)
 		r.Post("/admin/cleanup-reconcile", s.handleCleanupReconcile)

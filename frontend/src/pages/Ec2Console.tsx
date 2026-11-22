@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { AwsCard } from '../components/AwsCard.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { StateBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { ServiceConsole } from '../components/ServiceConsole.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ElbListContent } from './ElbConsole.tsx'
 import {
   AwsActionsMenu,
   AwsFlash,
@@ -73,12 +75,13 @@ async function loadInstances(): Promise<InstanceRow[]> {
 
 const WIZARD_STEPS = ['Name and tags', 'Application and OS Images', 'Instance type', 'Network settings', 'Summary']
 
-export function Ec2Console() {
+export function Ec2Console({ initialSection }: { initialSection?: string }) {
   const queryClient = useQueryClient()
   const instances = useQuery({ queryKey: ['ec2-instances'], queryFn: loadInstances, retry: 1 })
   const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, retry: 1 })
   const definitions = useQuery({ queryKey: ['lab-definitions'], queryFn: fetchLabDefinitions, retry: 1 })
-  const [activeSub, setActiveSub] = useState('instances')
+  const [searchParams] = useSearchParams()
+  const [activeSub, setActiveSub] = useState(searchParams.get('section') ?? initialSection ?? 'instances')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [checkedIds, setCheckedIds] = useState<string[]>([])
   const [tab, setTab] = useState<string>('details')
@@ -187,19 +190,71 @@ export function Ec2Console() {
       fidelity="PARTIAL"
       fidelityFootnote="labs SIMULATED · no real AWS hardware"
       subNav={[
+        { id: 'home', label: 'EC2 dashboard' },
         { id: 'instances', label: 'Instances' },
-        { id: 'amis', label: 'AMIs' },
         { id: 'instance-types', label: 'Instance types' },
-        { id: 'volumes', label: 'Volumes', disabledReason: 'EBS unsupported — no volume API' },
-        { id: 'security-groups', label: 'Security groups' },
-        { id: 'elastic-ips', label: 'Elastic IPs', disabledReason: 'No Elastic IP operation' },
         { id: 'launch-templates', label: 'Launch templates', disabledReason: 'Not modelled' },
+        { id: 'amis', label: 'AMIs' },
+        { id: 'volumes', label: 'Volumes', group: 'Elastic Block Store' },
+        { id: 'snapshots', label: 'Snapshots', group: 'Elastic Block Store', disabledReason: 'EBS unsupported — no snapshot API' },
+        { id: 'lifecycle', label: 'Lifecycle Manager', group: 'Elastic Block Store', disabledReason: 'EBS unsupported — no lifecycle API' },
+        { id: 'security-groups', label: 'Security groups', group: 'Network & Security' },
+        { id: 'elastic-ips', label: 'Elastic IPs', group: 'Network & Security', disabledReason: 'No Elastic IP operation' },
+        { id: 'load-balancers', label: 'Load Balancers', group: 'Load Balancing' },
+        { id: 'target-groups', label: 'Target Groups', group: 'Load Balancing' },
+        { id: 'trust-stores', label: 'Trust Stores', group: 'Load Balancing', disabledReason: 'Not modelled' },
+        { id: 'autoscaling', label: 'Auto Scaling Groups', group: 'Auto Scaling' },
       ]}
       activeSub={activeSub}
       onSubChange={setActiveSub}
       actions={launchButton}
     >
       {notice !== '' && <AwsFlash tone={noticeTone}>{notice}</AwsFlash>}
+
+      {activeSub === 'home' && (
+        <ServiceHomeDashboard
+          serviceName="EC2"
+          banner="Lab sessions as instances, in the local region. Launching creates a lab; the worker provisions it and the state only becomes READY when provisioning actually succeeded."
+          actions={[
+            {
+              label: 'Launch instance',
+              primary: true,
+              onClick: () => {
+                setWizardOpen(true)
+                setWizardStep(0)
+                setActiveSub('instances')
+              },
+            },
+            { label: 'Open VPC console', to: '/services/vpc' },
+          ]}
+          cards={[
+            { label: 'Instances', count: instances.data?.length ?? '—', onSelect: () => setActiveSub('instances'), note: 'Lab sessions as instances' },
+            { label: 'AMIs', count: definitions.data?.length ?? '—', onSelect: () => setActiveSub('amis'), note: 'CloudForge lab definitions, not real AWS AMIs' },
+            { label: 'Volumes', count: 0, onSelect: () => setActiveSub('volumes'), note: 'EBS is UNSUPPORTED — no volume API; see the Volumes section.' },
+            { label: 'Load Balancers', count: '—', onSelect: () => setActiveSub('load-balancers'), note: 'SIMULATED round-robin with real health probes' },
+            { label: 'Auto Scaling Groups', count: 0, onSelect: () => setActiveSub('autoscaling'), note: 'Auto Scaling is UNSUPPORTED — no scaling API.' },
+            { label: 'Elastic IPs', count: 0, disabledReason: 'No Elastic IP operation.' },
+            { label: 'Security Groups', count: '—', to: '/services/vpc', note: 'Managed on the VPC console' },
+            { label: 'Launch Templates', count: 0, disabledReason: 'Not modelled.' },
+          ]}
+          onRefresh={refresh}
+          refreshing={instances.isFetching}
+          health={[
+            health.data !== undefined
+              ? `Control plane: ${health.data.ok ? 'healthy' : 'degraded'}; network engine ${health.data.network_engine_reachable ? 'reachable' : 'unreachable'}.`
+              : 'Control-plane health loading…',
+            instances.isError ? 'Instances could not be loaded.' : `${instances.data?.length ?? 0} instance(s) listed.`,
+          ]}
+          settings={[
+            { label: 'Resource Explorer', to: '/explorer' },
+            { label: 'All services', to: '/services' },
+          ]}
+          info={[
+            { label: 'Learning Center — EC2 track', to: '/learn' },
+            { label: 'Auto Scaling (unsupported — exam concept)', to: '/services/ec2?section=autoscaling' },
+          ]}
+        />
+      )}
 
       {activeSub === 'instances' && (
         <div className="space-y-4">
@@ -314,6 +369,12 @@ export function Ec2Console() {
                 </div>
               )}
             </AwsWizard>
+          )}
+          {wizardOpen && (
+            <p className="text-xs text-aws-muted">
+              Wizard steps inferred from the console&apos;s Launch instance action, not observed — the 2026-11-22
+              survey opened no create wizard, so no AWS wizard steps were recorded.
+            </p>
           )}
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -490,7 +551,7 @@ export function Ec2Console() {
                 <p className="text-sm text-aws-muted">
                   No EBS volumes: EBS is <strong>UNSUPPORTED</strong> in CloudForge — there is no volume API and no
                   attach/detach operation. Lab instances carry their own disks; see the volume note on the{' '}
-                  <Link to="/services/ebs" className="text-aws-link hover:underline">EBS service page</Link>.
+                  <Link to="/services/ec2?section=volumes" className="text-aws-link hover:underline">Volumes section</Link>.
                 </p>
               )}
               {tab === 'monitoring' && <InstanceMonitoring labId={selected.id} status={selected.status} />}
@@ -558,6 +619,104 @@ export function Ec2Console() {
               />
             </AwsCard>
           )}
+        </div>
+      )}
+
+      {(activeSub === 'load-balancers' || activeSub === 'target-groups') && (
+        <div className="space-y-4">
+          <AwsFlash tone="info">
+            Elastic Load Balancing is the EC2 console&apos;s Load Balancing section — it has no standalone console
+            (2026-11-22 survey). The old /services/elb bookmark redirects here.
+          </AwsFlash>
+          <ElbListContent />
+        </div>
+      )}
+
+      {activeSub === 'autoscaling' && (
+        <div className="space-y-4">
+          <AwsCard title="Auto Scaling Groups">
+            <p className="text-sm text-aws-muted">
+              Auto Scaling is <strong>UNSUPPORTED</strong> in CloudForge — there is no scaling API and labs use a
+              fixed instance count. Scale by launching or stopping instances on the Instances page. The survey&apos;s
+              empty-state page is a marketing intro with a Create Auto Scaling group button; the button below is
+              disabled because there is nothing to create.
+            </p>
+            <div className="mt-3">
+              <AwsButton disabled title="Auto Scaling is UNSUPPORTED — no scaling API.">
+                Create Auto Scaling group
+              </AwsButton>
+            </div>
+          </AwsCard>
+          <AwsCard title="How it works">
+            <p className="text-sm text-aws-muted">
+              In AWS, an Auto Scaling group keeps a desired number of instances running, replacing unhealthy ones
+              and scaling on demand or schedule. In CloudForge, reason about desired capacity in the SAA lessons
+              instead — the fixed-count lab is the practice surface.
+            </p>
+          </AwsCard>
+          <AwsCard title="Related services">
+            <ul className="space-y-1 text-sm">
+              <li>
+                <Link to="/services/ec2" className="text-aws-link hover:underline">EC2 — Instances</Link>
+                <span className="text-aws-muted"> — launch or stop instances to change capacity.</span>
+              </li>
+              <li>
+                <Link to="/services/ec2?section=load-balancers" className="text-aws-link hover:underline">EC2 — Load Balancers</Link>
+                <span className="text-aws-muted"> — distribute traffic across the instances you launched.</span>
+              </li>
+              <li>
+                <Link to="/learn" className="text-aws-link hover:underline">Learning Center — SAA track</Link>
+                <span className="text-aws-muted"> — Auto Scaling lessons.</span>
+              </li>
+            </ul>
+          </AwsCard>
+        </div>
+      )}
+
+      {activeSub === 'volumes' && (
+        <div className="space-y-4">
+          <AwsFlash tone="info">
+            EBS is the EC2 console&apos;s Elastic Block Store section — it has no standalone console (2026-11-22
+            survey). The old /services/ebs bookmark redirects here.
+          </AwsFlash>
+          <AwsCard title="Volumes (0)">
+            <p className="mb-3 text-sm text-aws-muted">
+              EBS is <strong>UNSUPPORTED</strong> in CloudForge — there is no volume API and no attach/detach
+              operation. Lab instances carry their own disks. The table below uses the survey&apos;s exact Volumes
+              columns; every column is empty because no volume can exist.
+            </p>
+            <AwsTable<{ id: string }>
+              caption="EBS volumes"
+              emptyMessage="No volumes — EBS is UNSUPPORTED in CloudForge."
+              rows={[]}
+              totalCount={0}
+              columns={[
+                { header: 'Name', render: () => '—' },
+                { header: 'Volume ID', render: () => '—' },
+                { header: 'Type', render: () => '—' },
+                { header: 'Size', render: () => '—' },
+                { header: 'IOPS', render: () => '—' },
+                { header: 'Throughput', render: () => '—' },
+                { header: 'Owner ID', render: () => '—' },
+                { header: 'Snapshot ID', render: () => '—' },
+                { header: 'Source volume ID', render: () => '—' },
+                { header: 'Created', render: () => '—' },
+                { header: 'Availability Zone', render: () => '—' },
+                { header: 'Volume state', render: () => '—' },
+                { header: 'Alarm status', render: () => '—' },
+                { header: 'Attached resources', render: () => '—' },
+                { header: 'Status check', render: () => '—' },
+                { header: 'Initialization state', render: () => '—' },
+                { header: 'Encryption', render: () => '—' },
+                { header: 'KMS key ID', render: () => '—' },
+                { header: 'KMS key alias', render: () => '—' },
+                { header: 'Fast snapshot restored', render: () => '—' },
+                { header: 'Multi-Attach enabled', render: () => '—' },
+                { header: 'Managed', render: () => '—' },
+                { header: 'Operator', render: () => '—' },
+              ]}
+            />
+          </AwsCard>
         </div>
       )}
 

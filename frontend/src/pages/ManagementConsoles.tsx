@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { FidelityBadge } from '../components/AwsBadge.tsx'
@@ -125,7 +126,7 @@ export function SsmConsole() {
  * Advisor checks screens. Five checks run against real resource
  * state; every finding names the real resource it came from.
  */
-export function TrustedAdvisorConsole() {
+export function TrustedAdvisorConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [notice, setNotice] = useState('')
   const results = useQuery({ queryKey: ['advisor-results'], queryFn: () => request<Rec>('/api/v1/aws/trustedadvisor/results'), retry: 1 })
@@ -136,13 +137,46 @@ export function TrustedAdvisorConsole() {
     onError: (e: Error) => setNotice(`Run failed: ${e.message}`),
   })
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Management', to: '/services' }, { label: 'Trusted Advisor' }]}
-        title="Trusted Advisor — Checks"
-        description="Real checks against real resource state: idle labs, unattached security groups, open SGs, quota usage, unversioned buckets."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="5 checks · real state only" />}
-      />
+    <ConsoleWithHome
+      icon="shield"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Management', to: '/services' }, { label: 'Trusted Advisor' }]}
+      title="Trusted Advisor — Checks"
+      description="Real checks against real resource state: idle labs, unattached security groups, open SGs, quota usage, unversioned buckets."
+      fidelity="PARTIAL"
+      fidelityFootnote="5 checks · real state only"
+      homeLabel="Trusted Advisor dashboard"
+      listLabel="Checks"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Trusted Advisor"
+            banner="Five checks run against real state: idle labs, unattached/open security groups, quota usage, S3 buckets without versioning. A check with no matching resource creates no finding."
+            actions={[
+              { label: 'Run checks', primary: true, onClick: goToList },
+            { label: 'Open Cost Explorer', to: '/services/costexplorer' },
+            ]}
+            cards={[
+              { label: 'Check results', count: resultRows.length, onSelect: goToList },
+            { label: 'Check categories', count: '—', onSelect: goToList, note: 'Cost, security, fault tolerance, performance, service limits' },
+            { label: 'Compute Optimizer', count: 0, disabledReason: 'Compute Optimizer is UNSUPPORTED — see its console.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={results.isFetching}
+            health={[
+              "results.isError ? 'Check results could not be loaded.' : `${resultRows.length} result(s) listed.`",
+            "One finding per match, recorded in the shared findings table.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — monitoring track', to: '/learn' },
+            { label: 'Compute Optimizer (unsupported — exam concept)', to: '/services/computeoptimizer' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       <AwsCard title="Checks">
         <AwsButton variant="primary" onClick={() => run.mutate()}>Run all checks</AwsButton>
@@ -163,8 +197,22 @@ export function TrustedAdvisorConsole() {
           emptyMessage="No advisor results yet — run the checks."
         />
       </AwsCard>
-    </div>
+    </ConsoleWithHome>
   )
+}
+
+/**
+ * Group priced usage lines by service for the Cost Explorer breakdown
+ * table (survey columns: Service, Total cost, % of total cost).
+ * A line with no service label falls back to its line-item name.
+ */
+function costBreakdown(lines: Record<string, unknown>[]): (Record<string, unknown> & { id: string })[] {
+  const byService = new Map<string, number>()
+  for (const l of lines) {
+    const service = typeof l.service === 'string' && l.service !== '' ? l.service : typeof l.name === 'string' ? l.name : 'Other'
+    byService.set(service, (byService.get(service) ?? 0) + (typeof l.cost_usd === 'number' ? l.cost_usd : 0))
+  }
+  return [...byService.entries()].map(([service, cost_usd]) => ({ id: `service-${service}`, service, cost_usd }))
 }
 
 /**
@@ -173,7 +221,7 @@ export function TrustedAdvisorConsole() {
  * published teaching rates and are labelled educational estimates,
  * never an AWS bill.
  */
-export function CostExplorerConsole() {
+export function CostExplorerConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [budgetName, setBudgetName] = useState('')
   const [budgetLimit, setBudgetLimit] = useState(10)
@@ -198,13 +246,47 @@ export function CostExplorerConsole() {
     onError: (e: Error) => setNotice(`Delete failed: ${e.message}`),
   })
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Management', to: '/services' }, { label: 'Cost Explorer' }]}
-        title="Cost Explorer — Costs & budgets"
-        description="Educational cost estimates computed from real usage. This is not an AWS bill."
-        actions={<FidelityBadge fidelity="SIMULATED" footnote="educational estimates · not an AWS bill" />}
-      />
+    <ConsoleWithHome
+      icon="layers"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Management', to: '/services' }, { label: 'Cost Explorer' }]}
+      title="Cost Explorer — Costs & budgets"
+      description="Educational cost estimates computed from real usage. This is not an AWS bill."
+      fidelity="SIMULATED"
+      fidelityFootnote="educational estimates · not an AWS bill"
+      homeLabel="Cost Explorer dashboard"
+      listLabel="Costs & budgets"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Cost Explorer"
+            banner="Costs are computed from real usage (lab hours, S3 bytes, SQS messages, Lambda invocations, RDS/cache hours) at published teaching rates — educational estimates, never an AWS bill."
+            actions={[
+              { label: 'Create budget', primary: true, onClick: goToList },
+            { label: 'Open Trusted Advisor', to: '/services/trustedadvisor' },
+            ]}
+            cards={[
+              { label: 'Cost line items', count: lines.length, onSelect: goToList, note: 'USD (educational estimates)' },
+            { label: 'Budgets', count: budgetRows.length, onSelect: goToList, note: 'Evaluated against the real cost model on every read' },
+            { label: 'Savings Plans', count: 0, disabledReason: 'Savings Plans is UNSUPPORTED — see its console.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={costs.isFetching}
+            health={[
+              costs.isError ? 'Costs could not be loaded.' : `Total $${Number(costs.data?.total_usd ?? 0).toFixed(4)} (educational estimate).`,
+            "Budget alert / usage_percent is evaluated on every read; zero/negative limits are refused.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — monitoring track', to: '/learn' },
+            { label: 'Budgets (this console)', to: '/services/costexplorer' },
+            { label: 'Savings Plans (unsupported — exam concept)', to: '/services/savingsplans' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {costs.isPending && <Loading label="Loading costs" />}
       {costs.isError && <ErrorBox message={`Costs could not be loaded (${costs.error.message}).`} />}
@@ -212,14 +294,38 @@ export function CostExplorerConsole() {
         <AwsCard title={`Current costs — total $${Number(costs.data.total_usd ?? 0).toFixed(4)} ${str(costs.data, 'currency')}`}>
           <AwsTable
             columns={[
-              { header: 'Line item', render: (r) => str(r as Rec, 'name') },
-              { header: 'Usage', render: (r) => String(num(r as Rec, 'usage')) },
-              { header: 'Unit', render: (r) => str(r as Rec, 'unit') },
-              { header: 'Cost (USD)', render: (r) => `$${Number((r as Rec).cost_usd ?? 0).toFixed(4)}` },
+              { header: 'Service', render: (r) => str(r as Rec, 'service') },
+              { header: 'Total cost', render: (r) => `$${Number((r as Rec).cost_usd ?? 0).toFixed(4)}` },
+              {
+                header: '% of total cost',
+                render: (r) => {
+                  const total = Number(costs.data?.total_usd ?? 0)
+                  return total > 0 ? `${((Number((r as Rec).cost_usd ?? 0) / total) * 100).toFixed(1)}%` : '—'
+                },
+              },
             ]}
-            rows={lines.map((l, i) => ({ ...l, id: `line-${i}` }))}
+            rows={costBreakdown(lines)}
             emptyMessage="No billable usage yet."
           />
+          <p className="mt-2 text-xs text-aws-muted">
+            Cost and usage breakdown, grouped by service from the real priced usage lines below (survey columns:
+            Service, Total cost, % of total cost). Educational estimates at teaching rates — not an AWS bill.
+          </p>
+          <details className="mt-2 text-xs">
+            <summary className="cursor-pointer text-aws-link">Priced usage lines (what each cost is computed from)</summary>
+            <div className="mt-2">
+              <AwsTable
+                columns={[
+                  { header: 'Line item', render: (r) => str(r as Rec, 'name') },
+                  { header: 'Usage', render: (r) => String(num(r as Rec, 'usage')) },
+                  { header: 'Unit', render: (r) => str(r as Rec, 'unit') },
+                  { header: 'Cost (USD)', render: (r) => `$${Number((r as Rec).cost_usd ?? 0).toFixed(4)}` },
+                ]}
+                rows={lines.map((l, i) => ({ ...l, id: `line-${i}` }))}
+                emptyMessage="No billable usage yet."
+              />
+            </div>
+          </details>
           <p className="mt-2 text-xs text-aws-muted">{str(costs.data, 'note')}</p>
           {Object.keys(pricing).length > 0 && (
             <details className="mt-2 text-xs">
@@ -248,10 +354,12 @@ export function CostExplorerConsole() {
         <AwsTable
           columns={[
             { header: 'Name', render: (r) => str(r, 'name') },
-            { header: 'Limit (USD)', render: (r) => `$${Number(r.limit_usd ?? 0).toFixed(2)}` },
-            { header: 'Current cost (USD)', render: (r) => `$${Number(r.current_cost_usd ?? 0).toFixed(4)}` },
-            { header: 'Usage', render: (r) => `${Number(r.usage_percent ?? 0).toFixed(1)}%` },
-            { header: 'Alert', render: (r) => (r.alert === true ? 'ALERT — over budget' : 'within budget') },
+            { header: 'Thresholds', render: (r) => (r.alert === true ? 'ALERT — cost has reached 100% of budget' : 'Alert at 100% of budget') },
+            { header: 'Budget', render: (r) => `$${Number(r.limit_usd ?? 0).toFixed(2)}` },
+            { header: 'Amount used', render: (r) => `$${Number(r.current_cost_usd ?? 0).toFixed(4)}` },
+            { header: 'Forecasted amount', render: () => <span title="CloudForge does not forecast costs">Not available</span> },
+            { header: 'Current vs. budgeted', render: (r) => `${Number(r.usage_percent ?? 0).toFixed(1)}% of budget` },
+            { header: 'Forecasted vs. budgeted', render: () => <span title="CloudForge does not forecast costs">Not available</span> },
             {
               header: 'Actions',
               render: (r) => <AwsButton onClick={() => del.mutate(str(r, 'id'))}>Delete</AwsButton>,
@@ -262,7 +370,7 @@ export function CostExplorerConsole() {
         />
         <p className="mt-2 text-xs text-aws-muted">Alert state is evaluated on every read against the current real cost.</p>
       </AwsCard>
-    </div>
+    </ConsoleWithHome>
   )
 }
 
@@ -271,7 +379,7 @@ export function CostExplorerConsole() {
  * screens. Organizational units with real member users (resolved
  * to their emails); children block deletion.
  */
-export function OrganizationsConsole() {
+export function OrganizationsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [parentId, setParentId] = useState('')
@@ -302,13 +410,46 @@ export function OrganizationsConsole() {
   const members = Array.isArray(sel?.members) ? (sel?.members as string[]) : []
   const memberEmails = Array.isArray(sel?.member_emails) ? (sel?.member_emails as string[]) : []
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Management', to: '/services' }, { label: 'Organizations' }]}
-        title="Organizations — Organizational units"
-        description="Multi-account/workspace structure reusing the platform's real users and roles."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="real users · no AWS accounts" />}
-      />
+    <ConsoleWithHome
+      icon="layers"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Management', to: '/services' }, { label: 'Organizations' }]}
+      title="Organizations — Organizational units"
+      description="Multi-account/workspace structure reusing the platform's real users and roles."
+      fidelity="PARTIAL"
+      fidelityFootnote="real users · no AWS accounts"
+      homeLabel="Organizations dashboard"
+      listLabel="Organizational units"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Organizations"
+            banner="Units and members are real platform users (learner/instructor/admin), not AWS accounts; no service control policies are enforced. Survey note: in the 2026-11-22 reference account this console was RESTRICTED (paid plan / not supported) — no layout was captured beyond the restriction dialog, so this console's layout follows public console documentation, not an observed layout. The restriction is not the design."
+            actions={[
+              { label: 'Create unit', primary: true, onClick: goToList },
+            { label: 'Open Control Tower (unsupported)', to: '/services/controltower' },
+            ]}
+            cards={[
+              { label: 'Organizational units', count: unitRows.length, onSelect: goToList },
+            { label: 'Accounts (users)', count: userRows.length, onSelect: goToList, note: 'Real platform users' },
+            { label: 'Service control policies', count: 0, disabledReason: 'SCPs are not enforced in CloudForge.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={units.isFetching}
+            health={[
+              "units.isError ? 'Units could not be loaded.' : `${unitRows.length} unit(s) listed.`",
+            "Children block deletion of a unit.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — IAM track', to: '/learn' },
+            { label: 'Control Tower (unsupported — exam concept)', to: '/services/controltower' },
+            ]}
+          />
+        )}
+    >
       <Notice text={notice} />
       {units.isPending && <Loading label="Loading organizational units" />}
       {units.isError && <ErrorBox message={`Units could not be loaded (${units.error.message}).`} />}
@@ -371,6 +512,6 @@ export function OrganizationsConsole() {
           </ul>
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }

@@ -1,0 +1,40 @@
+id: adv-multi-az-route-blackhole
+title: 'Outage: One Availability Zone Goes Dark'
+symptom: >-
+  Half the fleet stops responding at once. Instances in one Availability Zone cannot reach anything —
+  not the internet, not the database, not each other — while the same services in the other zone are
+  fine. The instances themselves are running, the subnets exist, and nothing was deployed in the last
+  hour.
+injected_fault:
+  kind: route-blackhole
+  target: route_table
+  parameters:
+    route_table_id: rtb-az-b
+    destination: 0.0.0.0/0
+    affected_az: az-b
+diagnosis_hints:
+- 'The split is by zone, not by service: everything in one zone fails, everything in the other works — the fault is in the zone''s network path.'
+- Compare the route tables of the healthy zone and the failed zone, entry by entry.
+- 'A route table that exists but routes nowhere is worse than a missing one: it fails silently.'
+- Check for a recent route table change, even one made by automation.
+- Confirm the instances are running before blaming the network; the fault is in routing, not compute.
+fix_steps:
+- Identify the failed zone by comparing per-zone reachability.
+- Inspect the failed zone's route tables and find the blackholed or missing default route.
+- Restore the default route to the internet gateway or NAT gateway for that zone.
+- Re-test connectivity from an instance in the repaired zone.
+- Verify the load balancer still has healthy targets across zones.
+validation_rules:
+- rule: route_to_igw
+  description: Public subnets route 0.0.0.0/0 to the internet gateway
+- rule: subnet_count
+  description: At least four subnets exist across the zones
+  params:
+    operator: '>='
+    value: 4
+- rule: instance_reachable
+  description: A running instance has a recorded address and is reachable
+  params:
+    protocol: http
+    port: 80
+xp_reward: 250

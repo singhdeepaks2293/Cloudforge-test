@@ -71,6 +71,47 @@ append-only. These limits have **never been run** (no Docker in
 the sandbox) — they are sane on paper; watch `docker stats` on
 first real deployment.
 
+## Exam services in lite (v3, 2026-11-22)
+
+The SAA-C03 / SAP-C02 exam services are available in lite mode with
+no new containers, no compose changes and no new environment
+variables. The 24 services that were catalogued `UNSUPPORTED` —
+Auto Scaling, Global Accelerator, Direct Connect, Control Tower,
+IAM Identity Center, RAM, Storage Gateway, Snowball, Lake
+Formation, Macie, Compute Optimizer, Savings Plans, Audit Manager,
+Artifact, Aurora, Backup, MGN, FSx, Shield, EBS, EFS, CloudFront,
+VPN and NACLs — are now API-emulated (Backup runs are real
+`pg_dump`; see `docs/SERVICE_FIDELITY.md` §6) at
+`/api/v1/aws/<service>/...`, backed by one shared Postgres table
+`p7_exam_services` (migration `014_exam_services.sql`, applied
+automatically on startup by the embedded migrations — no operator
+step). The full-mode compose file is untouched.
+
+**Caps — what changed and why.** Exam-service records are tiny
+Postgres rows (no container, VM or engine capacity), so the lite
+cap is generous for study but bounds table growth on a classroom
+laptop:
+
+| Cap | Old value | New value |
+|---|---|---|
+| Exam-service records per user, per service (all kinds) | No exam services, no cap | Lite: learner 10, instructor 25, admin 50; full mode: uncapped |
+| Labs (count / profile / duration) | 1 lab / Micro only / 30 min | Unchanged |
+| Compose resource limits (lite, 1,280 MiB total) | As above | Unchanged |
+
+A create over the cap returns 429 `quota_exceeded`. Two new
+30-minute labs exercise the services in lite:
+`saa-exam-services` (aws-saa) and `sap-exam-services` (aws-sap);
+the SAA/SAP tracks each gained a 3-lesson "Exam Services in
+Practice" module and 3 assessment questions (12 lessons / 8
+questions each).
+
+**Unchanged lite limits.** MinIO is still not in the lite compose
+file, so S3 object operations still return an honest 503 in lite.
+Backup runs need `pg_dump` on the API host and a configured
+platform database (same dependency as RDS snapshots); without
+them the job is recorded FAILED with the reason, never a fake
+success. Ports are unchanged (frontend `:8080`, API `:8081`).
+
 ## Environment variables (Phase 7 additions)
 
 `CLOUDFORGE_DEV=1` (explicit dev opt-in), `CLOUDFORGE_ENGINE_TOKEN`,

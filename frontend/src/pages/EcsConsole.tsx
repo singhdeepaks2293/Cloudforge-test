@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -26,7 +26,7 @@ const num = (r: Rec, k: string): number => (typeof r[k] === 'number' ? (r[k] as 
  * No Docker, no VPC networking, no service discovery, no load
  * balancer integration.
  */
-export function EcsConsole() {
+export function EcsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [clusterName, setClusterName] = useState('')
   const [family, setFamily] = useState('')
@@ -171,13 +171,48 @@ export function EcsConsole() {
   })
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Containers', to: '/services' }, { label: 'ECS' }]}
-        title="ECS — Clusters, Task Definitions, Services, Tasks"
-        description="Container orchestration on a real sandboxed subprocess runtime: no Docker here, so no container is started and no image is pulled — the task command runs with resource limits and its status comes from the real process."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="subprocess runtime · no Docker · no VPC networking" />}
-      />
+    <ConsoleWithHome
+      icon="layers"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Containers', to: '/services' }, { label: 'ECS' }]}
+      title="ECS — Clusters, Task Definitions, Services, Tasks"
+      description="Container orchestration on a real sandboxed subprocess runtime: no Docker here, so no container is started and no image is pulled — the task command runs with resource limits and its status comes from the real process."
+      fidelity="PARTIAL"
+      fidelityFootnote="subprocess runtime · no Docker · no VPC networking"
+      homeLabel="ECS dashboard"
+      listLabel="Clusters"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="ECS"
+            banner="Clusters, task definitions, services and tasks are real records; the runtime is SIMULATED — a task command runs as a sandboxed subprocess on the API host, no Docker container is started and no image is pulled."
+            actions={[
+              { label: 'Create cluster', primary: true, onClick: goToList },
+            { label: 'Open Fargate (serverless runs)', to: '/services/fargate' },
+            ]}
+            cards={[
+              { label: 'Clusters', count: clusterRows.length, onSelect: goToList },
+            { label: 'Task definitions', count: taskdefRows.length, onSelect: goToList },
+            { label: 'Services', count: serviceRows.length, onSelect: goToList },
+            { label: 'Tasks', count: taskRows.length, onSelect: goToList, note: 'Status comes from the real process' },
+            { label: 'Fargate', count: '—', to: '/services/fargate', note: 'Same runtime, launch type FARGATE, no cluster to manage' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={clusters.isFetching}
+            health={[
+              "clusters.isError ? 'Clusters could not be loaded.' : `${clusterRows.length} cluster(s), ${serviceRows.length} service(s), ${taskRows.length} task(s).`",
+            "Desired count is reconciled on every read and when a task stops; logs are real process output.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — containers track', to: '/learn' },
+            { label: 'EKS (unsupported — Kubernetes concepts)', to: '/services/eks' },
+            ]}
+          />
+        )}
+    >
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
 
       <AwsCard title={`Clusters (${clusterRows.length})`}>
@@ -431,6 +466,6 @@ export function EcsConsole() {
           Runtime: subprocess sandbox — timeout + output cap + temp workdir + prlimit memory cap + uid 65534 (nobody). Fargate runs use the same runtime with no cluster to manage.
         </p>
       </AwsCard>
-    </div>
+    </ConsoleWithHome>
   )
 }

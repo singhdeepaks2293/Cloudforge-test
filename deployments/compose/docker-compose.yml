@@ -42,6 +42,14 @@ services:
       # Both are fail-closed: compose refuses to start without
       # them unless CLOUDFORGE_DEV=1 is set in .env.
       CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
+      # Phase 7 fail-closed: the API/worker refuse to start while
+      # MINIO_ACCESS_KEY/SECRET_KEY are still the minioadmin defaults.
+      # Compose never passed them before, so .env's MINIO_ROOT_* values
+      # never reached the API — wire them through here. In lite mode
+      # MinIO does not run, but the check still runs, so the values
+      # must be non-default regardless.
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-cloudforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
       CLOUDFORGE_METRICS_TOKEN: ${CLOUDFORGE_METRICS_TOKEN:?set CLOUDFORGE_METRICS_TOKEN in .env}
       CLOUDFORGE_DEV: ${CLOUDFORGE_DEV:-0}
       # The API still listens on 8080 INSIDE its container (the host
@@ -118,6 +126,14 @@ services:
       NETWORK_ENGINE_ADDR: network-engine:50051
       CLOUDFORGE_JWT_SECRET: ${CLOUDFORGE_JWT_SECRET:?set CLOUDFORGE_JWT_SECRET in .env}
       CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
+      # Phase 7 fail-closed: the API/worker refuse to start while
+      # MINIO_ACCESS_KEY/SECRET_KEY are still the minioadmin defaults.
+      # Compose never passed them before, so .env's MINIO_ROOT_* values
+      # never reached the API — wire them through here. In lite mode
+      # MinIO does not run, but the check still runs, so the values
+      # must be non-default regardless.
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-cloudforge}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
       CLOUDFORGE_DEV: ${CLOUDFORGE_DEV:-0}
       # Worker listens on :8083 internally (see the port table in
       # docs/IMPLEMENTATION_STATUS.md §1).

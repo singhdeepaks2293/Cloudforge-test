@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -22,7 +22,7 @@ const listOf = (v: unknown, key: string): Rec[] => {
  * an honest 503 — the button is offered so the failure is visible,
  * never faked.
  */
-export function ElastiCacheConsole() {
+export function ElastiCacheConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [mode, setMode] = useState('lite')
@@ -90,13 +90,46 @@ export function ElastiCacheConsole() {
   const sel = rows.find((r) => String(r.id) === selected)
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Databases', to: '/services' }, { label: 'ElastiCache' }]}
-        title="ElastiCache — Clusters"
-        description="In-memory caches. Lite mode is a real namespaced Redis database on the platform Redis. Engine redis only."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="real Redis, namespaced by key prefix" />}
-      />
+    <ConsoleWithHome
+      icon="database"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Databases', to: '/services' }, { label: 'ElastiCache' }]}
+      title="ElastiCache — Clusters"
+      description="In-memory caches. Lite mode is a real namespaced Redis database on the platform Redis. Engine redis only."
+      fidelity="PARTIAL"
+      fidelityFootnote="real Redis, namespaced by key prefix"
+      homeLabel="ElastiCache dashboard"
+      listLabel="Clusters"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="ElastiCache"
+            banner="Lite mode is a real namespaced Redis database on the platform Redis. A dedicated Redis container (full mode) is NOT built — full-mode creates return an honest 503."
+            actions={[
+              { label: 'Create cluster', primary: true, onClick: goToList },
+            { label: 'Learning Center — databases track', to: '/learn' },
+            ]}
+            cards={[
+              { label: 'Clusters', count: rows.length, onSelect: goToList },
+            { label: 'Keys (selected cluster)', count: selected !== '' ? listOf(keys.data, 'keys').length : '—', onSelect: goToList, note: 'Keys browser with TTL' },
+            { label: 'Replication groups', count: 0, disabledReason: 'Not modelled.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={clusters.isFetching}
+            health={[
+              "clusters.isError ? 'Clusters could not be loaded.' : `${rows.length} cluster(s) listed.`",
+            "Memory/hit-rate metrics are platform-Redis-wide; keys-in-cluster is prefix-only.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — databases track', to: '/learn' },
+            { label: 'CloudFront (unsupported — exam concept)', to: '/services/cloudfront' },
+            ]}
+          />
+        )}
+    >
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {clusters.isPending && <Loading label="Loading clusters" />}
       {clusters.isError && <ErrorBox message={`Clusters could not be loaded (${clusters.error.message}).`} />}
@@ -209,6 +242,6 @@ export function ElastiCacheConsole() {
           </AwsCard>
         </>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }

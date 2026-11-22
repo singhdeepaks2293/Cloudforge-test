@@ -29,6 +29,17 @@ artifacts:
 `
 
 /**
+ * Latest build status for a project: the most recent build by
+ * created_at (survey column). '—' when the project has never built.
+ */
+function latestBuildStatus(builds: Rec[], projectName: string): string {
+  const mine = builds.filter((b) => str(b, 'project_name') === projectName)
+  if (mine.length === 0) return '—'
+  mine.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
+  return str(mine[0], 'status') || '—'
+}
+
+/**
  * CodeBuild console (Phase 4) — mirrors the AWS CodeBuild console's
  * Build projects and Build history with real logs. A build checks out
  * a LOCAL git repo or copies a local directory (sources must be
@@ -134,9 +145,12 @@ export function CodeBuildConsole() {
             emptyMessage="No build projects yet. Create one above."
             rows={projectRows}
             columns={[
-              { header: 'Project name', render: (r) => <span className="font-mono">{str(r, 'name')}</span> },
-              { header: 'Source', render: (r) => <span className="font-mono text-xs">{str(r, 'source_path')}</span> },
-              { header: 'Created', render: (r) => <span className="text-aws-muted">{str(r, 'created_at').slice(0, 19).replace('T', ' ') || '—'}</span> },
+              { header: 'Name', render: (r) => <span className="font-mono">{str(r, 'name')}</span> },
+              { header: 'Source provider', render: () => <span title="Sources are local paths, not a hosted provider">Local path — no source provider</span> },
+              { header: 'Repository', render: (r) => <span className="font-mono text-xs">{str(r, 'source_path')}</span> },
+              { header: 'Latest build status', render: (r) => latestBuildStatus(buildRows, str(r, 'name')) },
+              { header: 'Description', render: () => <span title="CloudForge does not store a project description">Not available</span> },
+              { header: 'Last Modified', render: (r) => <span className="text-aws-muted">{str(r, 'updated_at').slice(0, 19).replace('T', ' ') || 'Not available'}</span> },
               {
                 header: 'Actions',
                 render: (r) => (

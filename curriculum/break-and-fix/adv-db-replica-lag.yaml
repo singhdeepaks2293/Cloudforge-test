@@ -1,0 +1,42 @@
+id: adv-db-replica-lag
+title: 'Incident: Reads Return Yesterday''s Data'
+symptom: >-
+  Users report seeing stale data: an order placed minutes ago does not appear, then appears later.
+  The primary database is healthy, writes succeed, and the application logs are clean — but reads
+  served from the replica lag further and further behind, and the lag grows under load.
+injected_fault:
+  kind: latency
+  target: database
+  parameters:
+    database_id: db-replica-1
+    latency_ms: 8000
+    affected: replication
+diagnosis_hints:
+- 'Writes succeed and reads are stale: the fault is between the primary and the replica, not in the application.'
+- Compare the replica lag metric with the primary''s write rate; lag that grows under load is a replication bottleneck.
+- Check whether the replica is undersized for the write volume it must apply.
+- Look for long-running queries on the replica blocking replication apply.
+- Confirm the application is actually reading from the replica — a misconfigured reader endpoint hides the real problem.
+fix_steps:
+- Measure the replication lag and confirm it grows with write load.
+- 'Identify the bottleneck: replica size, blocking queries, or network path.'
+- Remove blocking queries or scale the replica so it can keep up with apply.
+- Record the replication lag as a metric on the database resource so the fix can be verified.
+- Verify reads return fresh data and the lag stays below five seconds under load.
+validation_rules:
+- rule: instance_running
+  description: At least one instance is running
+  params:
+    operator: '>='
+    count: 1
+- rule: instance_reachable
+  description: A running instance has a recorded address and is reachable
+  params:
+    protocol: http
+    port: 80
+- rule: metric_below
+  description: Replication lag is below 5 seconds after the fix
+  params:
+    metric: replication_lag_seconds
+    threshold: 5
+xp_reward: 240

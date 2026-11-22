@@ -50,7 +50,7 @@ achievements:
   trigger:
     type: break_fix_solved
     operator: '>='
-    value: 10
+    value: 16
   xp: 300
 - id: challenge-accepted
   title: Challenge Accepted
@@ -133,7 +133,7 @@ achievements:
   xp: 400
 - id: incident-commander
   title: Incident Commander
-  description: Solve every industry break-and-fix incident.
+  description: Solve ten break-and-fix incidents, including industry scenarios.
   trigger:
     type: break_fix_solved
     operator: '>='
@@ -147,3 +147,88 @@ achievements:
     operator: '>='
     value: 3
   xp: 250
+
+# --- Advanced section (Workstream 3) -------------------------------------
+- id: advanced-multitier
+  title: Production Builder
+  description: Complete the Multi-Tier Production Deployment advanced project.
+  trigger:
+    type: track_completed
+    track: advanced-multi-tier
+  xp: 300
+- id: advanced-ha-dr
+  title: Unbreakable
+  description: Complete the High Availability & Disaster Recovery advanced project.
+  trigger:
+    type: track_completed
+    track: advanced-ha-dr
+  xp: 300
+- id: advanced-migration
+  title: Migration Lead
+  description: Complete the On-Prem to Cloud Migration advanced project.
+  trigger:
+    type: track_completed
+    track: advanced-migration
+  xp: 300
+- id: advanced-cost
+  title: Cost Cutter
+  description: Complete the Cost Optimisation in Production advanced project.
+  trigger:
+    type: track_completed
+    track: advanced-cost-optimisation
+  xp: 250
+- id: advanced-responder
+  title: Incident Responder
+  description: Complete the Security Incident Response advanced project.
+  trigger:
+    type: track_completed
+    track: advanced-incident-response
+  xp: 300
+- id: advanced-deployer
+  title: Release Engineer
+  description: Complete the End-to-End CI/CD advanced project.
+  trigger:
+    type: track_completed
+    track: advanced-cicd-pipeline
+  xp: 350
+- id: advanced-rollout
+  title: Canary Pilot
+  description: Complete the Production Rollout advanced project.
+  trigger:
+    type: track_completed
+    track: advanced-production-rollout
+  xp: 350
+- id: advanced-challenger
+  title: Advanced Challenger
+  description: Complete seven challenges without guided steps, including the Advanced projects.
+  trigger:
+    type: challenges_completed
+    operator: '>='
+    value: 7
+  xp: 350
+- id: advanced-specialist
+  title: Advanced Specialist
+  description: Complete three Advanced tracks.
+  trigger:
+    type: tracks_completed
+    difficulty: advanced
+    operator: '>='
+    value: 3
+  xp: 300
+- id: advanced-master
+  title: Advanced Master
+  description: Complete all seven Advanced tracks.
+  trigger:
+    type: tracks_completed
+    difficulty: advanced
+    operator: '>='
+    value: 7
+  xp: 500
+- id: job-ready
+  title: Job Ready
+  description: Complete ten challenges without guided steps, including Advanced projects.
+  trigger:
+    type: challenges_completed
+    operator: '>='
+    value: 10
+  xp: 400

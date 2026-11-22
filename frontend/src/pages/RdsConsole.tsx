@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge, StateBadge } from '../components/AwsBadge.tsx'
+import { StateBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -25,7 +26,7 @@ const listOf = (v: unknown, key: string): Rec[] => {
  * Snapshots are real pg_dump -Fc files; restore creates a new
  * instance from a snapshot.
  */
-export function RdsConsole() {
+export function RdsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [version, setVersion] = useState('16')
@@ -84,13 +85,48 @@ export function RdsConsole() {
   const sel = rows.find((r) => String(r.id) === selected) ?? detail.data
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Databases', to: '/services' }, { label: 'RDS' }]}
-        title="RDS — Databases"
-        description="Relational databases. Each instance is a real Postgres database + role on the platform Postgres — PostgreSQL-compatible, not Aurora. Engine postgres only."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="real Postgres database + role · not Aurora" />}
-      />
+    <ConsoleWithHome
+      icon="database"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Databases', to: '/services' }, { label: 'RDS' }]}
+      title="RDS — Databases"
+      description="Relational databases. Each instance is a real Postgres database + role on the platform Postgres — PostgreSQL-compatible, not Aurora. Engine postgres only."
+      fidelity="PARTIAL"
+      fidelityFootnote="real Postgres database + role · not Aurora"
+      homeLabel="RDS dashboard"
+      listLabel="Databases"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="RDS"
+            banner="Each instance is a real Postgres database + role on the platform Postgres — PostgreSQL-compatible, not Aurora. Engine postgres only."
+            actions={[
+              { label: 'Create database', primary: true, onClick: goToList },
+            { label: 'Open Backup console', to: '/services/backup' },
+            ]}
+            cards={[
+              { label: 'DB instances', count: rows.length, onSelect: goToList, note: 'Real Postgres databases + roles' },
+            { label: 'Snapshots', count: selected !== '' ? listOf(snapshots.data, 'snapshots').length : '—', onSelect: goToList, note: 'Real pg_dump -Fc files' },
+            { label: 'Parameter groups', count: 0, disabledReason: 'Not modelled.' },
+            { label: 'Aurora clusters', count: 0, disabledReason: 'Aurora is UNSUPPORTED — see the Aurora console.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={instances.isFetching}
+            health={[
+              "instances.isError ? 'Databases could not be loaded.' : `${rows.length} DB instance(s) listed.`",
+            "Start/Stop is UNSUPPORTED — a shared platform database cannot be stopped per instance.",
+            "No Multi-AZ; no containerised per-instance Postgres.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — databases track', to: '/learn' },
+            { label: 'Aurora (unsupported — exam concept)', to: '/services/aurora' },
+            ]}
+          />
+        )}
+    >
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {created && typeof created.password === 'string' && (
         <AwsCard title="Master password — shown once">
@@ -209,6 +245,6 @@ export function RdsConsole() {
           </AwsCard>
         </>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }

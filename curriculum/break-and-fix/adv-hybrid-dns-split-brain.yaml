@@ -1,0 +1,40 @@
+id: adv-hybrid-dns-split-brain
+title: 'Incident: Hybrid DNS Answers Differently on Each Side'
+symptom: >-
+  After the hybrid link went live, the same hostname resolves to the cloud address from the office
+  and the on-prem address from the VPC — and sometimes the reverse. Services that call each other
+  across the hybrid link fail half the time, and each side''s logs insist the other side is wrong.
+injected_fault:
+  kind: dns
+  target: route53_resolver
+  parameters:
+    vpc_id: vpc-main
+    failure_mode: split_brain
+    affected: hybrid
+diagnosis_hints:
+- 'The same name resolving differently on each side of a hybrid link is split-brain DNS, not a routing fault.'
+- Resolve the name from the office side and from the VPC side and compare the answers.
+- 'Check the resolver forwarding rules: which queries go to the on-prem DNS and which to the cloud resolver.'
+- 'Look for overlapping zones: the same zone existing in both places with different records.'
+- Confirm the hybrid link itself is up before blaming DNS; a down link and a DNS fault look similar from one side.
+fix_steps:
+- Resolve the affected name from both sides and record the differing answers.
+- Identify the overlapping zone and the forwarding rule that sends queries to the wrong resolver.
+- Make one side authoritative for the shared zone and forward the rest consistently.
+- Verify the name resolves to the same answer from the office and from the VPC.
+- Re-test the cross-link service calls that were failing.
+validation_rules:
+- rule: dns_resolves
+  description: VPC DNS resolves internal names
+  params:
+    name: example.internal
+- rule: dns_resolves
+  description: VPC DNS resolves external names
+  params:
+    name: archive.ubuntu.com
+- rule: instance_reachable
+  description: An instance can reach a host by name
+  params:
+    protocol: http
+    port: 80
+xp_reward: 250

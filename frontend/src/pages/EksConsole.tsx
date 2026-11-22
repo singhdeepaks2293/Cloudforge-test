@@ -52,6 +52,29 @@ export function EksConsole() {
               </AwsButton>
             </div>
           </AwsCard>
+          <AwsCard title="Clusters (0)">
+            <p className="mb-3 text-sm text-aws-muted">
+              No clusters — EKS is <strong>UNSUPPORTED</strong> in CloudForge and no cluster exists. The table below
+              uses the survey&apos;s exact Clusters columns; every column is empty because there is nothing to list.
+            </p>
+            <AwsTable<{ id: string }>
+              caption="EKS clusters"
+              emptyMessage="No clusters — EKS is UNSUPPORTED in CloudForge."
+              rows={[]}
+              totalCount={0}
+              columns={[
+                { header: 'Cluster name', render: () => '—' },
+                { header: 'Status', render: () => '—' },
+                { header: 'Kubernetes version', render: () => '—' },
+                { header: 'Support period', render: () => '—' },
+                { header: 'Upgrade policy', render: () => '—' },
+                { header: 'Created', render: () => '—' },
+                { header: 'Certificate authority', render: () => '—' },
+                { header: 'Provider', render: () => '—' },
+                { header: 'Actions', render: () => '—' },
+              ]}
+            />
+          </AwsCard>
           <AwsCard title="Kubernetes concepts — learn them on the ECS runtime">
             <p className="mb-3 text-sm text-aws-muted">
               Each Kubernetes concept below has a real CloudForge equivalent you can run today. Follow the route, then try it.

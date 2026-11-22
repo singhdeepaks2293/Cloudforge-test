@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -22,7 +22,7 @@ const listOf = (v: unknown, key: string): Rec[] => {
  * moves to the DLQ instead of being returned. Redrive moves DLQ
  * messages back. FIFO queues are not built.
  */
-export function SqsConsole() {
+export function SqsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [vt, setVt] = useState(30)
@@ -79,13 +79,47 @@ export function SqsConsole() {
   const dlqName = rows.find((q) => String(q.id) === selDlqId)?.name
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Application Integration', to: '/services' }, { label: 'SQS' }]}
-        title="SQS — Queues"
-        description="Durable message queues (Postgres-persisted). Receive hides messages until the visibility timeout; at max receives they move to the dead-letter queue."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="durable Postgres queues · no FIFO" />}
-      />
+    <ConsoleWithHome
+      icon="layers"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Application Integration', to: '/services' }, { label: 'SQS' }]}
+      title="SQS — Queues"
+      description="Durable message queues (Postgres-persisted). Receive hides messages until the visibility timeout; at max receives they move to the dead-letter queue."
+      fidelity="PARTIAL"
+      fidelityFootnote="durable Postgres queues · no FIFO"
+      homeLabel="SQS dashboard"
+      listLabel="Queues"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="SQS"
+            banner="Durable Postgres queues: visibility timeout, retention, DLQ redrive after max receives are real. No FIFO queues, no long polling."
+            actions={[
+              { label: 'Create queue', primary: true, onClick: goToList },
+            { label: 'View SNS topics (publisher)', to: '/services/sns' },
+            ]}
+            cards={[
+              { label: 'Queues', count: rows.length, onSelect: goToList },
+            { label: 'Messages (selected queue)', count: selected !== '' ? listOf(messages.data, 'messages').length : '—', onSelect: goToList },
+            { label: 'Dead-letter queues', count: '—', onSelect: goToList, note: 'DLQ view on the queue detail' },
+            { label: 'FIFO queues', count: 0, disabledReason: 'No FIFO queues in CloudForge.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={queues.isFetching}
+            health={[
+              "queues.isError ? 'Queues could not be loaded.' : `${rows.length} queue(s) listed.`",
+            "Durable Postgres queues — the old in-memory simulator is replaced.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — messaging track', to: '/learn' },
+            { label: 'EventBridge (event rules)', to: '/services/eventbridge' },
+            ]}
+          />
+        )}
+    >
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {queues.isPending && <Loading label="Loading queues" />}
       {queues.isError && <ErrorBox message={`Queues could not be loaded (${queues.error.message}).`} />}
@@ -224,6 +258,6 @@ export function SqsConsole() {
           )}
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }

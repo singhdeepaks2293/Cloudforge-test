@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -22,7 +22,7 @@ const listOf = (v: unknown, key: string): Rec[] => {
  * topics and Lambda functions (validated at rule creation). AWS
  * service events are NOT generated; events arrive through PutEvents.
  */
-export function EventBridgeConsole() {
+export function EventBridgeConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [source, setSource] = useState('my.app')
@@ -57,13 +57,46 @@ export function EventBridgeConsole() {
   })
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Application Integration', to: '/services' }, { label: 'EventBridge' }]}
-        title="EventBridge — Rules"
-        description="Durable event rules with pattern matching to SQS, SNS and Lambda targets. Events arrive through PutEvents — AWS service events are not generated."
-        actions={<FidelityBadge fidelity="PARTIAL" footnote="durable Postgres rules · subset pattern language" />}
-      />
+    <ConsoleWithHome
+      icon="layers"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Application Integration', to: '/services' }, { label: 'EventBridge' }]}
+      title="EventBridge — Rules"
+      description="Durable event rules with pattern matching to SQS, SNS and Lambda targets. Events arrive through PutEvents — AWS service events are not generated."
+      fidelity="PARTIAL"
+      fidelityFootnote="durable Postgres rules · subset pattern language"
+      homeLabel="EventBridge dashboard"
+      listLabel="Rules"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="EventBridge"
+            banner="Durable Postgres rules; pattern matching to SQS, SNS and Lambda targets. AWS service events are not generated — events arrive through PutEvents."
+            actions={[
+              { label: 'Create rule', primary: true, onClick: goToList },
+            { label: 'View SQS queues (target)', to: '/services/sqs' },
+            ]}
+            cards={[
+              { label: 'Rules', count: rows.length, onSelect: goToList },
+            { label: 'Event buses', count: '—', onSelect: goToList, note: 'Default bus only' },
+            { label: 'Archives', count: 0, disabledReason: 'Not modelled.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={rules.isFetching}
+            health={[
+              "rules.isError ? 'Rules could not be loaded.' : `${rows.length} rule(s) listed.`",
+            "Pattern = source / detail-type arrays + nested detail subset matching (not the full AWS event-pattern language).",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — messaging track', to: '/learn' },
+            { label: 'Lambda (target)', to: '/services/lambda' },
+            ]}
+          />
+        )}
+    >
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {putResult !== '' && <p className="border border-aws-border bg-white px-4 py-2 font-mono text-sm" role="status">{putResult}</p>}
       {rules.isPending && <Loading label="Loading rules" />}
@@ -168,6 +201,6 @@ export function EventBridgeConsole() {
           <AwsButton type="submit">Put event</AwsButton>
         </form>
       </AwsCard>
-    </div>
+    </ConsoleWithHome>
   )
 }

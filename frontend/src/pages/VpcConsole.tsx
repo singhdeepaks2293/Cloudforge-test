@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { AwsCard } from '../components/AwsCard.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ServiceConsole } from '../components/ServiceConsole.tsx'
+import { TransitGatewayListContent } from './NetworkingConsoles.tsx'
 import {
   AwsActionsMenu,
   AwsFlash,
@@ -47,9 +49,9 @@ import type { LabResource } from '../types/index.ts'
  * the engine (real netlink where it supports it, SIMULATED in lite).
  * NACLs are UNSUPPORTED — the engine has no NACL RPC — and say so.
  */
-type Section = 'vpcs' | 'subnets' | 'routetables' | 'gateways' | 'nat' | 'securitygroups' | 'nacls'
+type Section = 'dashboard' | 'vpcs' | 'subnets' | 'routetables' | 'gateways' | 'nat' | 'securitygroups' | 'nacls' | 'vpn' | 'tgw'
 
-const SECTION_KIND: Record<Exclude<Section, 'gateways' | 'nat' | 'nacls'>, string> = {
+const SECTION_KIND: Record<Exclude<Section, 'gateways' | 'nat' | 'nacls' | 'dashboard' | 'vpn' | 'tgw'>, string> = {
   vpcs: 'vpc',
   subnets: 'subnet',
   routetables: 'route-table',
@@ -73,7 +75,11 @@ function cfgStr(config: Record<string, unknown> | undefined, key: string): strin
 
 export function VpcConsole() {
   const queryClient = useQueryClient()
-  const [section, setSection] = useState<Section>('vpcs')
+  const [searchParams] = useSearchParams()
+  const [section, setSection] = useState<Section>(() => {
+    const fromUrl = searchParams.get('section')
+    return fromUrl === 'vpn' || fromUrl === 'tgw' ? (fromUrl as Section) : 'dashboard'
+  })
   const [labId, setLabId] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
@@ -96,6 +102,12 @@ export function VpcConsole() {
       case 'nat':
         return all.filter((r) => r.kind === 'gateway' && cfgStr(r.config, 'gateway_type') === 'nat')
       case 'nacls':
+        return []
+      case 'vpn':
+      case 'tgw':
+        // Rendered by their own sections below, not the generic table.
+        return []
+      case 'dashboard':
         return []
       default:
         return all.filter((r) => r.kind === SECTION_KIND[section])
@@ -124,13 +136,33 @@ export function VpcConsole() {
       fidelity="PARTIAL"
       fidelityFootnote="lab VPCs · engine default SIMULATED · NACLs UNSUPPORTED"
       subNav={[
-        { id: 'vpcs', label: 'Your VPCs' },
-        { id: 'subnets', label: 'Subnets' },
-        { id: 'routetables', label: 'Route Tables' },
-        { id: 'gateways', label: 'Internet Gateways' },
-        { id: 'nat', label: 'NAT Gateways' },
-        { id: 'securitygroups', label: 'Security Groups' },
-        { id: 'nacls', label: 'Network ACLs' },
+        { id: 'dashboard', label: 'VPC dashboard' },
+        // Grouped left nav, mirroring the real VPC console's panel:
+        // "Filter by VPC" is the lab picker above the content (VPCs
+        // live inside labs); groups below match the reference order.
+        { id: 'vpcs', label: 'Your VPCs', group: 'Virtual private cloud' },
+        { id: 'subnets', label: 'Subnets', group: 'Virtual private cloud' },
+        { id: 'routetables', label: 'Route Tables', group: 'Virtual private cloud' },
+        { id: 'gateways', label: 'Internet Gateways', group: 'Virtual private cloud' },
+        { id: 'egress-igw', label: 'Egress-only Internet Gateways', group: 'Virtual private cloud', disabledReason: 'No egress-only gateway API in CloudForge.' },
+        { id: 'dhcp', label: 'DHCP Option Sets', group: 'Virtual private cloud', disabledReason: 'No DHCP option-set API in CloudForge.' },
+        { id: 'eips', label: 'Elastic IPs', group: 'Virtual private cloud', disabledReason: 'No Elastic IP operation in CloudForge.' },
+        { id: 'prefix-lists', label: 'Managed Prefix Lists', group: 'Virtual private cloud', disabledReason: 'No prefix-list API in CloudForge.' },
+        { id: 'nat', label: 'NAT Gateways', group: 'Virtual private cloud' },
+        { id: 'peering', label: 'Peering Connections', group: 'Virtual private cloud', to: '/services/vpcpeering' },
+        { id: 'route-servers', label: 'Route Servers', group: 'Virtual private cloud', disabledReason: 'No route-server API in CloudForge.' },
+        { id: 'nacls', label: 'Network ACLs', group: 'Security' },
+        { id: 'securitygroups', label: 'Security Groups', group: 'Security' },
+        { id: 'endpoints', label: 'Endpoints', group: 'PrivateLink and Lattice', to: '/services/vpcendpoints' },
+        { id: 'endpoint-services', label: 'Endpoint Services', group: 'PrivateLink and Lattice', disabledReason: 'No endpoint-service API in CloudForge.' },
+        { id: 'firewalls', label: 'Firewalls', group: 'Network Firewall', to: '/services/networkfirewall' },
+        { id: 'vpn', label: 'Site-to-Site VPN Connections', group: 'Virtual private network (VPN)' },
+        { id: 'tgw', label: 'Transit Gateways', group: 'Transit Gateways' },
+        { id: 'mirroring', label: 'Mirror Sessions', group: 'Traffic Mirroring', disabledReason: 'No traffic-mirroring API in CloudForge.' },
+        { id: 'network-manager', label: 'Network Manager', to: '/explorer' },
+        { id: 'ipam', label: 'VPC IP Address Manager', disabledReason: 'No IPAM API in CloudForge.' },
+        { id: 'firewall-manager', label: 'Firewall Manager', disabledReason: 'No Firewall Manager console in CloudForge.' },
+        { id: 'settings', label: 'Settings', disabledReason: 'No VPC console settings are stored in CloudForge.' },
       ]}
       activeSub={section}
       onSubChange={(id) => {
@@ -176,7 +208,107 @@ export function VpcConsole() {
           </p>
         </AwsCard>
       )}
-      {section !== 'nacls' && activeLabId !== '' && (
+      {section === 'dashboard' && (
+        <ServiceHomeDashboard
+          serviceName="VPC"
+          banner="VPCs live inside labs — pick a lab above (the Filter by VPC equivalent), then create and manage its networking. CIDRs are local (10.x); there are no AWS availability zones."
+          actions={[
+            { label: 'Create VPC', primary: true, onClick: () => setSection('vpcs') },
+            { label: 'Launch EC2 Instances', to: '/services/ec2' },
+          ]}
+          cards={[
+            { label: 'Your VPCs', count: vpcs.length, onSelect: () => setSection('vpcs'), note: 'Lab VPCs on the Rust network engine' },
+            { label: 'Subnets', count: all.filter((r) => r.kind === 'subnet').length, onSelect: () => setSection('subnets') },
+            { label: 'Route Tables', count: all.filter((r) => r.kind === 'route-table').length, onSelect: () => setSection('routetables') },
+            { label: 'Internet Gateways', count: all.filter((r) => r.kind === 'gateway' && cfgStr(r.config, 'gateway_type') !== 'nat').length, onSelect: () => setSection('gateways'), note: 'SIMULATED attach/detach — no engine IGW RPC' },
+            { label: 'NAT Gateways', count: all.filter((r) => r.kind === 'gateway' && cfgStr(r.config, 'gateway_type') === 'nat').length, onSelect: () => setSection('nat'), note: 'Engine-backed; SIMULATED in lite mode' },
+            { label: 'Security Groups', count: all.filter((r) => r.kind === 'security-group').length, onSelect: () => setSection('securitygroups') },
+            { label: 'Network ACLs', count: 0, onSelect: () => setSection('nacls'), disabledReason: 'UNSUPPORTED — the engine has no NACL RPC.' },
+            { label: 'Elastic IPs', count: 0, disabledReason: 'No Elastic IP operation in CloudForge.' },
+            { label: 'VPC Endpoints', count: '—', to: '/services/vpcendpoints', note: 'PrivateLink-style endpoints (SIMULATED)' },
+            { label: 'Transit Gateways', count: '—', onSelect: () => setSection('tgw'), note: 'Attachments are real route-table entries (SIMULATED)' },
+            { label: 'Site-to-Site VPN Connections', count: 0, onSelect: () => setSection('vpn'), note: 'VPN is UNSUPPORTED — no VPN API; see the VPN section.' },
+          ]}
+          onRefresh={refresh}
+          refreshing={resources.isFetching}
+          health={[
+            labs.isError
+              ? 'Labs could not be loaded — VPC counts may be stale.'
+              : `${labs.data?.length ?? 0} lab(s) in this account.`,
+            resources.isError
+              ? 'VPC resources could not be loaded.'
+              : 'VPC resources loaded from the lab store.',
+            'Network engine: SIMULATED backend by default; the real netlink backend is unverified in this sandbox.',
+          ]}
+          settings={[
+            { label: 'VPC console settings', to: '/services/vpc' },
+            { label: 'Resource Explorer', to: '/explorer' },
+          ]}
+          info={[
+            { label: 'Learning Center — networking track', to: '/learn' },
+            { label: 'All services', to: '/services' },
+            { label: 'Lab topology', to: activeLabId !== '' ? `/labs/${activeLabId}/topology` : '/labs' },
+          ]}
+        />
+      )}
+      {section === 'vpn' && (
+        <div className="space-y-4">
+          <AwsFlash tone="info">
+            VPN is the VPC console&apos;s Virtual private network section — it has no standalone console (2026-11-22
+            survey). The old /services/vpn bookmark redirects here.
+          </AwsFlash>
+          <AwsCard title="VPN connections (0)">
+            <p className="mb-3 text-sm text-aws-muted">
+              VPN connections are <strong>UNSUPPORTED</strong> in CloudForge — there is no VPN API. Transit Gateway
+              attachments are the available hybrid-networking practice. The table below uses the survey&apos;s exact
+              VPN Connections columns; every column is empty because no connection can exist.
+            </p>
+            <AwsTable<{ id: string }>
+              caption="VPN connections"
+              emptyMessage="No VPN connections — VPN is UNSUPPORTED in CloudForge."
+              rows={[]}
+              totalCount={0}
+              columns={[
+                { header: 'Name', render: () => '—' },
+                { header: 'VPN ID', render: () => '—' },
+                { header: 'State', render: () => '—' },
+                { header: 'Virtual private gateway', render: () => '—' },
+                { header: 'Transit gateway', render: () => '—' },
+                { header: 'VPN Concentrator ID', render: () => '—' },
+                { header: 'Customer gateway', render: () => '—' },
+                { header: 'Customer gateway address', render: () => '—' },
+                { header: 'Inside IP version', render: () => '—' },
+                { header: 'Type', render: () => '—' },
+                { header: 'Category', render: () => '—' },
+                { header: 'VPC', render: () => '—' },
+                { header: 'Routing', render: () => '—' },
+                { header: 'Acceleration enabled', render: () => '—' },
+                { header: 'Authentication', render: () => '—' },
+                { header: 'Local/ Remote IPv4/IPv6 network CIDR', render: () => '—' },
+                { header: 'Core network ARN', render: () => '—' },
+                { header: 'Gateway association state', render: () => '—' },
+                { header: 'Outside IP address type', render: () => '—' },
+              ]}
+            />
+            <p className="mt-2 text-xs text-aws-muted">
+              Create VPN connection is disabled: there is no VPN API in CloudForge, so the survey&apos;s entry button
+              has no working target here.
+            </p>
+          </AwsCard>
+        </div>
+      )}
+
+      {section === 'tgw' && (
+        <div className="space-y-4">
+          <AwsFlash tone="info">
+            Transit Gateway is the VPC console&apos;s Transit Gateways section — it has no standalone console
+            (2026-11-22 survey). The old /services/transitgateway bookmark redirects here.
+          </AwsFlash>
+          <TransitGatewayListContent />
+        </div>
+      )}
+
+      {section !== 'nacls' && section !== 'dashboard' && section !== 'vpn' && section !== 'tgw' && activeLabId !== '' && (
         <>
           {resources.data && (
             <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -255,6 +387,7 @@ export function VpcConsole() {
 
 function sectionLabel(section: Section): string {
   switch (section) {
+    case 'dashboard': return 'VPC dashboard'
     case 'vpcs': return 'Your VPCs'
     case 'subnets': return 'Subnets'
     case 'routetables': return 'Route Tables'
@@ -262,6 +395,8 @@ function sectionLabel(section: Section): string {
     case 'nat': return 'NAT Gateways'
     case 'securitygroups': return 'Security Groups'
     case 'nacls': return 'Network ACLs'
+    case 'vpn': return 'Site-to-Site VPN Connections'
+    case 'tgw': return 'Transit Gateways'
   }
 }
 
@@ -293,6 +428,12 @@ function CreateForm({ section, labId, vpcs, gateways, onCreated, onNotice }: {
           return createLabResource(labId, { kind: 'security-group', name: name.trim() })
         case 'nacls':
           throw new Error('Network ACLs are UNSUPPORTED.')
+        case 'vpn':
+          throw new Error('VPN connections are UNSUPPORTED.')
+        case 'tgw':
+          throw new Error('Transit gateways are created on the Transit Gateways section, not this form.')
+        case 'dashboard':
+          throw new Error('The dashboard has no create form.')
       }
     },
     onSuccess: (r) => {

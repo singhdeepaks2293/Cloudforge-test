@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
+import { AwsCard } from '../components/AwsCard.tsx'
+import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -21,7 +21,7 @@ const listOf = (v: unknown, key: string): Rec[] => {
  * against the stored records via the resolve endpoint. A, CNAME and
  * TXT only; other types are rejected by the API, not faked.
  */
-export function Route53Console() {
+export function Route53Console({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [zoneName, setZoneName] = useState('')
   const [selected, setSelected] = useState('')
@@ -70,13 +70,47 @@ export function Route53Console() {
   const selZone = zoneRows.find((z) => String(z.id) === selected)
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Route 53' }]}
-        title="Route 53 — Hosted Zones"
-        description="DNS zones and records. Durable, resolvable through the resolve endpoint — no DNS server serves these records to the lab network."
-        actions={<FidelityBadge fidelity="SIMULATED" footnote="stored records · resolve endpoint only" />}
-      />
+    <ConsoleWithHome
+      icon="network"
+      breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Route 53' }]}
+      title="Route 53 — Hosted Zones"
+      description="DNS zones and records. Durable, resolvable through the resolve endpoint — no DNS server serves these records to the lab network."
+      fidelity="SIMULATED"
+      fidelityFootnote="stored records · resolve endpoint only"
+      homeLabel="Route 53 dashboard"
+      listLabel="Hosted zones"
+      initialSection={initialSection}
+      home={(goToList) => (
+          <ServiceHomeDashboard
+            serviceName="Route 53"
+            banner="Hosted zones and DNS records — durable, resolvable via the resolve endpoint. No DNS server serves these records to the lab network."
+            actions={[
+              { label: 'Create hosted zone', primary: true, onClick: goToList },
+            { label: 'Learning Center — networking track', to: '/learn' },
+            ]}
+            cards={[
+              { label: 'Hosted zones', count: zoneRows.length, onSelect: goToList },
+            { label: 'Records', count: selected !== '' ? listOf(records.data, 'records').length : '—', onSelect: goToList, note: 'A, CNAME and TXT only' },
+            { label: 'Health checks', count: 0, disabledReason: 'Not modelled.' },
+            { label: 'Route 53 Resolver', count: 0, disabledReason: 'Not built — private zones are taught in the SAP track.' },
+            ]}
+            onRefresh={() => void queryClient.invalidateQueries()}
+            refreshing={zones.isFetching}
+            health={[
+              "zones.isError ? 'Hosted zones could not be loaded.' : `${zoneRows.length} hosted zone(s) listed.`",
+            "Resolution is against the stored records via the resolve endpoint.",
+            ]}
+            settings={[
+              { label: 'Resource Explorer', to: '/explorer' },
+              { label: 'All services', to: '/services' },
+            ]}
+            info={[
+              { label: 'Learning Center — networking track', to: '/learn' },
+            { label: 'Global Accelerator (unsupported — exam concept)', to: '/services/globalaccelerator' },
+            ]}
+          />
+        )}
+    >
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {resolveResult !== '' && <p className="border border-aws-border bg-white px-4 py-2 font-mono text-sm" role="status">{resolveResult}</p>}
       {zones.isPending && <Loading label="Loading hosted zones" />}
@@ -197,6 +231,6 @@ export function Route53Console() {
           </div>
         </AwsCard>
       )}
-    </div>
+    </ConsoleWithHome>
   )
 }

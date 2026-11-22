@@ -307,6 +307,9 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
             <Link to="/learn" onClick={() => setOpenMenu(null)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
               Learning Center — tracks &amp; lessons
             </Link>
+            <Link to="/advanced" onClick={() => setOpenMenu(null)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
+              Advanced — job-ready, industry &amp; end-to-end
+            </Link>
             <Link to="/courses" onClick={() => setOpenMenu(null)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
               Courses
             </Link>

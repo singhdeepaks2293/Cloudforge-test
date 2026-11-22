@@ -2990,3 +2990,45 @@ curriculum and deployment files untouched. The pre-existing modified
   validation state.
 - The new lab definitions are content-complete but were not launched
   against a live lite stack in this change.
+
+## CloudForge v3 — exact AWS-reference UIs, exam services in lite, Advanced section — 2026-11-22
+
+Coordinator build, five workstreams + integration. Local-only; no AWS account, no AWS logos/trademarks, CloudForge branding only (dark navy header, orange primary buttons).
+
+### Sync first (GitHub remote 213c33c "more examples", 2026-11-22 12:28 UTC)
+- Cloned https://github.com/singhdeepaks2293/Cloudforge-test to /tmp, diffed against the local v2 tree (41 differing entries), merged selectively. In: SAA/SAP tracks (curriculum/aws-saa, aws-sap), 4 break-and-fix scenarios (10 total), docs/certifications/AWS_CERTIFICATION_MAP.md, 14 exam services in the registry, 2 new 30-min labs, frontend fidelity pass (new AwsShell.tsx), updated counts/tests. Preserved: local MinIO fix in the full compose file (remote had dropped it), v2 ports (frontend :8080 / API :8081 — remote's re-added port 80 rejected). Merged from remote into the light compose: worker CLOUDFORGE_METRICS_TOKEN, explicit subnets 172.28.10/11/12 (LAN-overlap fix). Post-sync validator: 16 tracks, 88 lessons, 94 questions, 10 scenarios, 19 achievements.
+- Registry is 109 services, not 100 (grew with the SAA/SAP services). Lite set is 61 services, all present in the registry.
+
+### Workstream 1 — exact AWS-reference UI per service (lite set)
+- Every lite service got a Home dashboard (VPC pattern: banner, action links, Resources-by-Region resource cards, Service Health, Settings, Additional Information; no table on Home) + list pages with tables + detail tabs, via new ServiceHome.tsx / LiteServiceConsole.tsx / liteServices.ts. Home added to 14 dedicated consoles; 18 grouped consoles wrapped with Home + list tabs; 20 backend-less services use the generic console (Compute Optimizer and Savings Plans caught missing in a final count check and added). Wired to real backend endpoints where they exist; SIMULATED/PARTIAL/UNSUPPORTED actions labelled and disabled, never fake.
+
+### Workstream 1b — AWS console survey reconciliation
+- Survey at docs/reference/aws-console-survey-2026-11-22.md (read-only, 45/46 services, 29 lite + 16 backup; DataSync unchecked — browser unavailable). Tables aligned to the exact survey columns (S3, IAM Roles, Lambda, Load Balancers 11 columns, Cost Explorer, Budgets, Transit Gateway attachments, VPN, CloudFront, EKS, CloudFormation, CodeBuild, CodePipeline). Grouping mirrored: ELB/Auto Scaling/EBS are EC2 console sections; Transit Gateway/VPN are VPC console sections (old routes redirect, e.g. /services/elb -> /services/ec2?section=load-balancers). Restricted services (GuardDuty, Security Hub, Organizations, Redshift, Kinesis, DMS) labelled as following public docs, not the restriction dialog; DataSync marked UNVERIFIED; wizard steps marked inferred, not observed. Fixed 4 pre-existing quoted-literal "health" lines.
+
+### Workstream 2 — exam services in lite (SAA-C03 + SAP-C02)
+- All 61 lite services present and working in lite. The 24 previously UNSUPPORTED services now have a real API-emulated backend: one shared collection (migration 014_exam_services.sql, table p7_exam_services), 41 routes under /api/v1/aws/<service>/..., 92 registry operations, durable Postgres/memory state, per-owner isolation. Backup runs are real pg_dump (size + SHA-256). New labs saa-exam-services / sap-exam-services (30 min) + 6 lessons + 6 assessment questions. Only cap change: per-user exam-service records, lite learner 10 / instructor 25 / admin 50 (429 over cap), full uncapped. Lab count/profile/duration and compose limits unchanged; full compose untouched.
+- Fixed stale test counts (tree already had 23 tracks from Workstream 3; the brief's 16/88/94 matched the remote, not the tree), two bugs its tests caught (Global Accelerator validator, NACL duplicate-rule int/float), and a YAML scalar bug.
+
+### Workstream 3 — Advanced section (job-ready, industry, end-to-end)
+- New top-level Advanced section: 7 tracks (multi-tier, HA+DR, migration, cost optimisation, incident response, CI/CD, production rollout), 6 tough multi-fault troubleshooting scenarios (adv-*), 8 interview walkthroughs, skills checklist (Cloud / DevOps / Solutions Architect), portfolio artefacts (not a certificate, no AWS-certification claim), 11 new achievements. Grading uses only rules the validation engine implements; pipeline/canary/rollback/alerting are graded through observable outcomes. Wired by the coordinator: routes /advanced, /advanced/projects, /advanced/troubleshooting, /advanced/job-ready + AwsNav/AwsHeader entries, and /api/v1/advanced (projects, interviews, skills-checklist, checklist-state GET/PUT, portfolio/{project}) behind requireAuth.
+
+### Workstream 4 — backup of the other services
+- docs/reference/aws-console-backup/: 48 files (one per non-lite registry service) + BACKUP_INDEX.md. Each: purpose, real console layout, CloudForge fidelity today (27 UNSUPPORTED, 17 PARTIAL, 3 SIMULATED, 1 REAL), what would be needed to build it later, scope (11 small, 29 medium, 8 large). Reference notes only.
+
+### Integration fixes (coordinator)
+- E2E regression found and fixed: Advanced guided labs reused M1 lab ids (vpc-fundamentals, ec2-basics x4, three-tier-app, iam-security). Curriculum lab definitions are keyed by id, so seeding upserted the Advanced rules under the M1 ids — a vpc-fundamentals lab then validated against the 7 HA-DR rules instead of its 5 DefaultRules, failing E2E. Fix: Advanced guided labs got their own ids (adv-multi-tier, adv-ha-dr, adv-migration, adv-cost, adv-incident, adv-cicd, adv-rollout), added as 7 definitions in backend/internal/labs/labs.go, catalogue + frontend AdvancedData.ts + docs updated. The test that had baked the bug in (TestCurriculumLabValidationRulesField asserting 7 rules on vpc-fundamentals) was corrected to assert no attached rules on vpc-fundamentals and 7 on adv-ha-dr.
+- incident-commander achievement description clarified to "Solve ten break-and-fix incidents, including industry scenarios" (was "every industry incident" at a threshold of 10 while 16 scenarios exist).
+- Rate-limit tests need Redis at localhost:6379 (fail-closed 503 without it, pre-existing); a local redis-server was started for verification.
+
+### Verification (2026-11-22, sandbox)
+- `make verify` exit 0 (Go 1.26.0, local redis-server running for the rate-limit tests).
+- `go test ./...`: 24 packages pass, 0 fail. `cargo test --workspace`: 75 passed, 0 failed (19 test binaries). Frontend: 161/161 tests (14 files), build pass, oxlint 0 warnings / 0 errors (88 files), tsc clean, clippy clean, gofmt clean.
+- Curriculum validator: OK — 23 tracks, 122 lessons, 142 assessment questions, 16 break-and-fix scenarios, 30 achievements, 17 warnings (pre-existing "no mermaid diagram" on older lessons).
+- E2E acceptance test: PASS, run twice (~15s and ~6s).
+- Registry: 109 services. Lite set: 61. Backup: 48 files + index. Survey: 45/46 services (DataSync unchecked).
+
+### Honest limits (unverified in this sandbox)
+- No Docker, KVM, or nginx here: compose up, real KVM VMs, real netlink, Terraform containers, nginx image, TLS override, and pg_dump-backed Backup runs on a real host are unverified. Migration 014 verified only via the memory store (Postgres integration tests skip — no Postgres here). DataSync console layout unverified (survey never reached it). /api/v1/advanced routes are registered and the advanced package has 5 unit tests, but there is no httpapi-level test hitting them yet. Skills checklist state is in-memory per process (documented); durable persistence needs a store migration. No in-console break-fix start button yet (pre-existing gap; scenarios start via POST /api/v1/labs/{id}/break-fix/start). Region scoping display-only; pre-v2 tokens (no jti) cannot be individually revoked.
+
+### Fedora upgrade (host steps, not run here)
+- No compose or .env changes in v3. Unzip the v3 zip over /home/deepak/Cloudforge-test (do not delete the folder — .env is not in the zip), then `make down-lite` + `make up-lite`. Migration 014 applies automatically on startup. MinIO fix and :8080/:8081 ports are already in the host's files; the two v2 tokens (CLOUDFORGE_ENGINE_TOKEN, CLOUDFORGE_METRICS_TOKEN) were already verified present in the host .env.

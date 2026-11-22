@@ -1,0 +1,208 @@
+id: advanced-ha-dr
+title: High Availability & Disaster Recovery
+description: 'Build systems that survive failure: multi-AZ design, failover that actually happens,
+  backups that restore, and a disaster recovery plan you have rehearsed — not just written.'
+difficulty: advanced
+estimated_hours: 8
+learning_objectives:
+- 'Design for failure: eliminate single points of failure across zones'
+- Compare backup/restore, pilot light, warm standby and multi-site DR
+- Define RTO and RPO as numbers and design to meet them
+- Build failover that is tested, not assumed
+- Rehearse a disaster recovery runbook and measure the result
+modules:
+- id: adv-hadr-design
+  title: Designing for Failure
+  lessons:
+  - id: adv-hadr-spof
+    title: Finding Single Points of Failure
+    theory: 'High availability starts with an honest inventory of everything whose failure takes the
+      system down. A single NAT gateway, a single Availability Zone, a single database primary with no
+      replica, a single person who knows the restore procedure — each is a single point of failure, and
+      each needs either redundancy or an accepted, written-down risk. The usual suspects hide in plain
+      sight: the NAT gateway that the whole private estate routes through, the load balancer with
+      targets in only one zone, the stateful instance that cannot be replaced, the DNS record that
+      points at one IP. The fix is almost always the same shape: run it in two places, health-check it,
+      and make the switch automatic, because a failover that needs a human to notice and act is a
+      failover that happens at 3 a.m. slowly. Every redundant component also needs its own failure
+      mode understood — two NAT gateways in the same zone are not redundancy. In the lab you prove the
+      pattern: a NAT gateway in each zone, healthy targets in more than one zone, and no single route
+      whose loss isolates the application.'
+    key_points:
+    - List every single point of failure before designing around them
+    - 'Usual suspects: one NAT gateway, one zone, one database, one expert'
+    - Failover must be automatic; human-triggered failover is slow failover
+    - Redundancy in the same zone is not redundancy
+    - Every redundant component needs its own failure mode understood
+    architecture_diagram_mermaid: "flowchart LR\n    User[Users] --> LB[Load balancer]\\n    LB --> A[AZ a: web + app]\\n    LB --> B[AZ b: web + app]\\n    A --> DB[(Primary DB)]\\n    B --> DBR[(Standby DB)]"
+  - id: adv-hadr-rto-rpo
+    title: RTO and RPO Are Numbers
+    theory: 'Recovery time objective and recovery point objective are the two numbers a disaster
+      recovery plan is judged by, and they must be numbers, not adjectives. RTO is how long the
+      business can be down: four hours means the system must be back in four hours, measured from the
+      moment of failure, including the time it takes a human to decide to fail over. RPO is how much
+      data the business can afford to lose: fifteen minutes means no more than fifteen minutes of
+      transactions may vanish, which dictates how often data is replicated. The two numbers pull in
+      opposite directions on cost: a near-zero RTO and RPO means a hot standby running all the time,
+      which is the most expensive option. A backup-and-restore plan is cheap but slow and lossy. Pilot
+      light keeps the data replicated and the smallest possible footprint running, ready to scale up.
+      Warm standby keeps a scaled-down copy running. The honest conversation is with the business:
+      what does an hour of downtime cost, what does a standby cost, and where do those curves cross?
+      The answer is different for every system, and it changes as the system grows.'
+    key_points:
+    - RTO is the maximum acceptable downtime, measured from failure
+    - RPO is the maximum acceptable data loss, which dictates replication frequency
+    - Near-zero RTO and RPO means a hot standby — the most expensive option
+    - Backup/restore is cheap but slow; pilot light and warm standby sit between
+    - The tradeoff is a business conversation about the cost of downtime
+    architecture_diagram_mermaid: "flowchart TD\n    Backup[Backup + restore] --> Pilot[Pilot light]\\n    Pilot --> Warm[Warm standby]\\n    Warm --> Hot[Multi-site active]"
+- id: adv-hadr-prove
+  title: Proving Recovery Works
+  lessons:
+  - id: adv-hadr-failover
+    title: Failover That Actually Happens
+    theory: 'Failover that has never been tested is a theory, and theories fail at the worst moment.
+      A database failover, a zone evacuation, a region switch — each has a sequence of steps, each step
+      has a person or an automation responsible for it, and each step can fail in its own way. The only
+      way to know is to run it: a game day where the team deliberately fails a zone and watches what
+      happens, with the runbook open and a stopwatch running. The first game day always finds
+      something: a health check that never fires, a DNS TTL that makes the switch take an hour, a
+      replica that stopped replicating weeks ago and nobody noticed, a runbook step that references a
+      console page that no longer exists. That is the point — finding those things on a Tuesday
+      afternoon, not during a real outage. Failover testing is also where automation earns its keep:
+      the steps a human does under stress are the steps that get skipped, so the more of the sequence
+      is automated and verified, the faster and calmer the real event is.'
+    key_points:
+    - Untested failover is a theory, and theories fail at the worst moment
+    - 'Run game days: deliberately fail a zone with the runbook open'
+    - The first game day always finds something broken — that is the point
+    - Watch for stale replicas, long DNS TTLs and dead runbook steps
+    - Automate the failover sequence; humans under stress skip steps
+    architecture_diagram_mermaid: "flowchart LR\n    Plan[Runbook] --> Game[Game day]\\n    Game --> Find[Findings]\\n    Find --> Fix[Fix + automate]\\n    Fix --> Plan"
+  - id: adv-hadr-runbook
+    title: The Disaster Recovery Runbook
+    theory: 'A disaster recovery runbook is a document written for a tired person at 3 a.m. during an
+      incident, which means it is short, specific and tested. It starts with how to declare a disaster:
+      who can make the call, and what criteria trigger it — not a feeling, a threshold. It lists the
+      recovery sequence in order, with the exact commands or console steps, the expected result of each
+      step, and what to do when a step does not produce it. It names the people: incident commander,
+      communications lead, the engineer who owns each system, and their backups. It says how users are
+      told, and how often, because silence during an outage is its own incident. It ends with the
+      return to normal: how to fail back, how to verify the system is healthy, and the post-incident
+      review that turns the outage into fixes. The runbook is rehearsed on a schedule, and every
+      rehearsal updates it — a runbook that has not changed in a year is a runbook nobody has used. In
+      the CloudForge lab you build the habit at small scale: a written sequence, a rehearsed zone
+      failure, and validation that the system is healthy afterwards.'
+    key_points:
+    - 'Written for a tired person at 3 a.m.: short, specific, tested'
+    - Declaring a disaster needs named people and thresholds, not feelings
+    - Every step has an expected result and a fallback
+    - Communications are part of the runbook, not an afterthought
+    - Rehearse on a schedule; every rehearsal updates the runbook
+    architecture_diagram_mermaid: "flowchart TD\n    Declare[Declare disaster] --> Seq[Recovery sequence]\\n    Seq --> Verify[Verify health]\\n    Verify --> Comms[Communicate]\\n    Comms --> Failback[Fail back + review]"
+guided_lab:
+  lab_definition_id: adv-ha-dr
+  title: Build a Multi-AZ Network That Survives a Zone Failure
+  tasks:
+  - Build a VPC with public and private subnets in two Availability Zones
+  - Put a NAT gateway in each zone so private subnets survive losing one gateway
+  - Route public subnets to the internet gateway and private subnets to their own zone's NAT gateway
+  - Launch instances in both zones and put at least two healthy targets behind a load balancer
+  - Run the lab validator and fix every failing check before finishing
+  validation_rules:
+  - rule: vpc_exists
+    description: A VPC exists in the lab
+  - rule: subnet_count
+    description: At least four subnets exist across two zones
+    params:
+      operator: '>='
+      value: 4
+  - rule: route_to_igw
+    description: Public subnets route 0.0.0.0/0 to the internet gateway
+  - rule: route_to_nat
+    description: Private subnets route 0.0.0.0/0 to a NAT gateway
+  - rule: nat_gateway_exists
+    description: At least two NAT gateways exist, one per zone
+    params:
+      min_count: 2
+  - rule: instance_running
+    description: At least two instances are running
+    params:
+      operator: '>='
+      count: 2
+  - rule: load_balancer_healthy_targets
+    description: At least two targets are healthy behind the load balancer
+    params:
+      min_count: 2
+challenge:
+  title: One Availability Zone is gone
+  task: 'An Availability Zone has failed. Prove the system still serves traffic: the load balancer must
+    still have at least two healthy targets, at least two instances must be running, and a NAT gateway
+    must still be available for private egress. Rebalance into the surviving zone if needed.'
+  validation_rules:
+  - rule: load_balancer_healthy_targets
+    description: At least two targets are healthy behind the load balancer
+    params:
+      min_count: 2
+  - rule: instance_running
+    description: At least two instances are running
+    params:
+      operator: '>='
+      count: 2
+  - rule: nat_gateway_exists
+    description: At least one NAT gateway is still available
+    params:
+      min_count: 1
+assessment:
+- question: What is the most common hidden single point of failure in a VPC?
+  options:
+  - A single internet gateway
+  - A single NAT gateway carrying all private egress
+  - A single security group
+  - A single load balancer
+  correct_answer: 1
+  explanation: One NAT gateway routes every private subnet's egress; losing it isolates the whole private estate.
+- question: What does RPO measure?
+  options:
+  - How long recovery takes
+  - How much data loss is acceptable, which dictates replication frequency
+  - How many users are affected
+  - How much the standby costs
+  correct_answer: 1
+  explanation: RPO is the maximum acceptable data loss; it decides how often data must be replicated.
+- question: Which DR strategy keeps data replicated and a minimal footprint running, ready to scale up?
+  options:
+  - Backup and restore
+  - Pilot light
+  - Multi-site active-active
+  - Cold standby with no replication
+  correct_answer: 1
+  explanation: Pilot light replicates the data and runs the smallest possible footprint, scaling up on failover.
+- question: Why run game days that deliberately fail a zone?
+  options:
+  - To prove the system never fails
+  - To find the broken health checks, stale replicas and dead runbook steps before a real outage does
+  - To train new hires
+  - To reduce cloud costs
+  correct_answer: 1
+  explanation: The first game day always finds something; finding it on a rehearsal afternoon beats finding it in a real outage.
+- question: Who should be able to declare a disaster, and how?
+  options:
+  - Anyone, at any time
+  - Named people, against written thresholds — not a feeling
+  - Only the most senior engineer on call
+  - Only after the outage has lasted an hour
+  correct_answer: 1
+  explanation: The runbook names who can declare a disaster and the thresholds that trigger it, so the decision is fast and unambiguous.
+- question: Why is a failover that needs a human to notice and act considered slow?
+  options:
+  - Humans are slower than automation at 3 a.m. under stress
+  - Humans cannot run commands
+  - Automation is always correct
+  - Humans need approval for everything
+  correct_answer: 0
+  explanation: Detection, decision and action all take longer by hand, especially at night under stress — so failover should be automatic.
+xp_reward: 300
+prerequisites:
+- networking
+- architecture

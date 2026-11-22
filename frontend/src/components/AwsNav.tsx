@@ -68,6 +68,7 @@ export function AwsNav({
       { to: '/explorer', label: 'Resource Explorer', icon: 'search' },
       ...groups.flatMap((g) => g.services.map((s) => ({ to: s.route, label: s.name, icon: s.icon }))),
       { to: '/learn', label: 'Learning Center', icon: 'book' },
+      { to: '/advanced', label: 'Advanced', icon: 'book' },
       { to: '/account', label: 'Account Settings', icon: 'key' },
       { to: '/admin', label: 'Administration', icon: 'shield' },
     ]
@@ -181,6 +182,10 @@ export function AwsNav({
       <NavLink to="/services/terraform-learning" onClick={onNavigate} className={linkCls}>
         <ServiceIcon icon="layers" />
         Terraform Learning
+      </NavLink>
+      <NavLink to="/advanced" onClick={onNavigate} className={linkCls}>
+        <ServiceIcon icon="book" />
+        Advanced
       </NavLink>
       <NavLink to="/account" onClick={onNavigate} className={linkCls}>
         <ServiceIcon icon="key" />
