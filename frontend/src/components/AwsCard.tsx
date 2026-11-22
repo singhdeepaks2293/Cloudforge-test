@@ -52,19 +52,27 @@ export function PageHeader({
   title,
   description,
   actions,
+  icon,
+  eyebrow,
 }: {
   breadcrumb: { label: string; to?: string }[]
   title: string
   description?: string
   actions?: ReactNode
+  icon?: ReactNode
+  eyebrow?: string
 }) {
   return (
     <header className="mb-4">
       <Breadcrumb items={breadcrumb} />
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">{title}</h1>
-          {description && <p className="mt-1 text-sm text-aws-muted">{description}</p>}
+        <div className="flex min-w-0 items-start gap-3">
+          {icon}
+          <div className="min-w-0">
+            {eyebrow && <p className="text-xs font-medium tracking-wide text-aws-muted uppercase">{eyebrow}</p>}
+            <h1 className="text-xl font-semibold">{title}</h1>
+            {description && <p className="mt-1 max-w-4xl text-sm text-aws-muted">{description}</p>}
+          </div>
         </div>
         {actions}
       </div>

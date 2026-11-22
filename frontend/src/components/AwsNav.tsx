@@ -1,5 +1,6 @@
-import { Server, Star } from 'lucide-react'
-import { NavLink } from 'react-router-dom'
+import { useState } from 'react'
+import { ChevronRight, Server, Star } from 'lucide-react'
+import { NavLink, useLocation } from 'react-router-dom'
 import { SERVICE_ICONS, getFavoriteServiceIds, getRecentServiceIds } from '../services/catalog.ts'
 import { groupServicesByCategory } from '../services/registry.ts'
 import type { RegistryService } from '../types/index.ts'
@@ -30,7 +31,24 @@ export function AwsNav({
   services?: RegistryService[]
   registryError?: boolean
 }) {
-  const groups = groupServicesByCategory(services)
+  const location = useLocation()
+  const groups = groupServicesByCategory(services).filter(
+    (g) => g.category !== 'Learning Center' && g.category !== 'Terraform Learning',
+  )
+  const activeCategory = services.find((s) => s.route === location.pathname)?.category
+  const currentServiceId = services.find((s) => s.route === location.pathname)?.id
+  const [openCategories, setOpenCategories] = useState<string[]>(() => (activeCategory ? [activeCategory] : []))
+  const [seenCategory, setSeenCategory] = useState<string | undefined>(activeCategory)
+  // Adjust state during render (no effect): the registry arrives after
+  // mount, so open the active service's category when it becomes known.
+  if (activeCategory !== seenCategory) {
+    setSeenCategory(activeCategory)
+    if (activeCategory !== undefined && !openCategories.includes(activeCategory)) {
+      setOpenCategories([...openCategories, activeCategory])
+    }
+  }
+  const toggleCategory = (category: string) =>
+    setOpenCategories((prev) => (prev.includes(category) ? prev.filter((c) => c !== category) : [...prev, category]))
   const byId = new Map(services.map((s) => [s.id, s]))
   const recent = getRecentServiceIds().map((id) => byId.get(id)).filter((s): s is RegistryService => s !== undefined)
   const favorites = getFavoriteServiceIds().map((id) => byId.get(id)).filter((s): s is RegistryService => s !== undefined)
@@ -41,6 +59,7 @@ export function AwsNav({
         ? 'border-aws-orange bg-aws-orange-light font-medium text-aws-orange-dark'
         : 'border-transparent text-aws-text hover:bg-[#f2f3f3]'
     }`
+  const serviceCls = (id: string) => linkCls({ isActive: id === currentServiceId })
 
   if (collapsed) {
     const flat: { to: string; label: string; icon: string }[] = [
@@ -81,7 +100,7 @@ export function AwsNav({
         <ServiceIcon icon="home" />
         Console Home
       </NavLink>
-      <NavLink to="/services" onClick={onNavigate} className={linkCls}>
+      <NavLink to="/services" end onClick={onNavigate} className={linkCls}>
         <ServiceIcon icon="layers" />
         All Services
       </NavLink>
@@ -92,7 +111,7 @@ export function AwsNav({
           <ul className="space-y-0.5">
             {recent.map((s) => (
               <li key={s.id}>
-                <NavLink to={s.route} onClick={onNavigate} className={linkCls}>
+                <NavLink to={s.route} onClick={onNavigate} className={() => serviceCls(s.id)}>
                   <ServiceIcon icon={s.icon} />
                   {s.name}
                 </NavLink>
@@ -108,7 +127,7 @@ export function AwsNav({
           <ul className="space-y-0.5">
             {favorites.map((s) => (
               <li key={s.id}>
-                <NavLink to={s.route} onClick={onNavigate} className={linkCls}>
+                <NavLink to={s.route} onClick={onNavigate} className={() => serviceCls(s.id)}>
                   <Star className="h-4 w-4 text-aws-orange" aria-hidden="true" />
                   {s.name}
                 </NavLink>
@@ -126,21 +145,34 @@ export function AwsNav({
       {registryError && services.length === 0 && (
         <p className="px-3 text-xs text-aws-error">Service registry could not be loaded — showing static navigation only.</p>
       )}
-      {groups.map((g) => (
-        <div key={g.category}>
-          <p className="px-3 pb-1 text-[11px] font-semibold tracking-wide text-aws-muted uppercase">{g.category}</p>
-          <ul className="space-y-0.5">
-            {g.services.map((s) => (
-              <li key={s.id}>
-                <NavLink to={s.route} onClick={onNavigate} className={linkCls}>
-                  <ServiceIcon icon={s.icon} />
-                  {s.name}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+      {groups.map((g) => {
+        const open = openCategories.includes(g.category)
+        return (
+          <div key={g.category}>
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={() => toggleCategory(g.category)}
+              className="flex w-full items-center justify-between gap-2 px-3 py-1 text-left text-[11px] font-semibold tracking-wide text-aws-muted uppercase hover:bg-[#f2f3f3] hover:text-aws-text"
+            >
+              <span>{g.category}</span>
+              <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
+            </button>
+            {open && (
+              <ul className="space-y-0.5 pt-0.5">
+                {g.services.map((s) => (
+                  <li key={s.id}>
+                    <NavLink to={s.route} onClick={onNavigate} className={() => serviceCls(s.id)}>
+                      <ServiceIcon icon={s.icon} />
+                      {s.name}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )
+      })}
 
       <NavLink to="/learn" onClick={onNavigate} className={linkCls}>
         <ServiceIcon icon="book" />

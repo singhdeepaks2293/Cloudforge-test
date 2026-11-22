@@ -2858,3 +2858,91 @@ New API routes: `POST /api/v1/auth/logout`, `POST
 - Frontend on `:8080` was verified with Vite preview of the
   production build, not the Docker nginx image (no Docker here).
 - Region scoping is display-only (all resources are `cf-local-1`).
+
+## Frontend fidelity pass — AWS console interaction patterns — 2026-11-22
+
+Second pass over the M9 Part 2 redesign, still **AWS-console-style in
+CloudForge branding**: no AWS marks, logos, service icons or Amazon
+Ember font. Frontend-only plus this log; backend, engine, proto,
+curriculum and deployment files untouched. The pre-existing modified
+`deployments/compose/docker-compose.light.yml` was left alone.
+
+### What changed
+
+- `components/AwsShell.tsx` (new): reusable AWS patterns — `AwsToolbar`,
+  `AwsActionsMenu` / `AwsActionItem`, `AwsRefreshButton`,
+  `AwsPreferencesButton`, `AwsFlash`, `AwsCopy`, `AwsWizard`,
+  `AwsEmptyState`, `AwsStat`, `AwsKeyValue`, `AwsBackLink`. The wizard
+  footer now matches AWS: Cancel on the left; Previous (link) plus
+  Next (primary) or the submit label on the right.
+- `AwsHeader`: one `openMenu` state instead of six booleans; opening
+  any menu or starting a search closes the others; outside-click on
+  `[data-aws-menu]` and Escape close; three-column Services mega-menu
+  with "View all services"; AWS-style wide search placeholder.
+- `AwsNav`: registry categories are collapsible groups (chevron,
+  auto-open the active service's category, including when the registry
+  arrives after mount — state adjusted during render, no effect);
+  `All Services` uses `end`; only the canonical service for a shared
+  route is highlighted (VPC aliases no longer light up several rows);
+  duplicate `Learning Center` / `Terraform Learning` registry
+  categories are filtered because static links already exist.
+- `AwsTable`: optional AWS checkbox selection (select all, per-row,
+  selected-row tint) while staying backward compatible.
+- `ServiceConsole`: optional service icon tile, fidelity strip
+  (`FidelityBadge` + "local learning cloud — not AWS"), sticky left
+  sub-nav, `ConsoleTabs` export.
+- `Dashboard`: Console Home layout — welcome hero, recently visited,
+  service health, honest cost/usage, labs/courses/favorites rail,
+  "Build a solution"; the Services stat shows "Registry unavailable"
+  when the registry request fails instead of inventing a count.
+- `Ec2Console`: instance table with real lab-backed rows, five-step
+  launch wizard, stats, Instance state / Actions / Refresh /
+  Preferences toolbar, filter + state filter, selectable table and
+  nine detail tabs.
+- `S3Console`: buckets sub-nav, five-step create wizard, honest
+  MinIO-unavailable error, summary tiles, actions toolbar, selectable
+  buckets, objects/properties/permissions/management/metrics tabs.
+- `IamConsole`: Dashboard section is the default landing view with
+  counts, security recommendations, Access Analyzer entry point and
+  quick links.
+- `VpcConsole`: lab selector, flash notices, resource-count stats,
+  Actions ("Delete selected") / Refresh / Preferences toolbar.
+- `LambdaConsole`: rewritten as "Lambda — Functions" with a four-step
+  create wizard, selectable function table, and Code / Test /
+  Configuration / Permissions / Monitoring / Triggers tabs; keeps the
+  honest "subprocess sandbox · not containers · not AWS Lambda" note.
+- `Services`: All Services index — search box, "X of Y services",
+  category sections and a bordered tile grid (icon tile, fidelity
+  badge, description, availability/operation count, favorite star);
+  fidelity footnotes are suppressed in the dense grid so the pill is
+  not duplicated by its default explanatory text.
+- `index.css`: removed the Amazon Ember font reference (Helvetica/
+  system stack), added orange `:focus-visible` outlines, `::selection`
+  and shared `.aws-panel` / `.aws-table-head` / `.aws-subnav-active`
+  utilities.
+
+### Verification
+
+- `./node_modules/.bin/tsc -b` — clean.
+- `./node_modules/.bin/vitest run` — **12 files, 138 tests passed**.
+- `npm run lint` (oxlint) — **0 warnings, 0 errors**.
+- `npm run build` — passes (`✓ 2266 modules transformed`, `✓ built in
+  1.41s`); the existing large-chunk warning remains.
+- Visual check with headless Chrome at 1440×1000 against the Vite dev
+  server on `:5199`: `/`, `/services`, `/services/ec2`,
+  `/services/s3`, `/services/iam`, `/services/vpc` and
+  `/services/lambda` all render the AWS-style shell, nav, tables,
+  wizards and empty/error states. Screenshots are in `/tmp/cfshots/`.
+
+### Known limitations
+
+- `make verify` was not re-run; the Go/Rust suites were unchanged.
+- The wizards were reviewed by render + code, not by clicking through
+  every step in a live browser.
+- Backend/MinIO availability was intermittent during the visual pass,
+  so some screenshots show the intended error/empty states rather than
+  populated tables.
+- Consoles outside the five in scope (RDS, DynamoDB, SQS, etc.) keep
+  their earlier layouts.
+- The likeness is structural (spacing, colour, tables, toolbars); no
+  AWS brand assets or fonts are used.

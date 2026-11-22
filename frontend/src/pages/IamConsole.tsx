@@ -5,6 +5,7 @@ import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { FidelityBadge, StateBadge } from '../components/AwsBadge.tsx'
 import { ServiceConsole } from '../components/ServiceConsole.tsx'
+import { AwsStat } from '../components/AwsShell.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import {
   addIamGroupMember,
@@ -82,18 +83,20 @@ const SAMPLE_TRUST = `{
   ]
 }`
 
-type Section = 'users' | 'groups' | 'roles' | 'policies' | 'analyzer' | 'simulator'
+type Section = 'dashboard' | 'users' | 'groups' | 'roles' | 'policies' | 'analyzer' | 'simulator'
 
 export function IamConsole() {
-  const [section, setSection] = useState<Section>('users')
+  const [section, setSection] = useState<Section>('dashboard')
   return (
     <ServiceConsole
+      icon="key"
       breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Security and Identity', to: '/services' }, { label: 'IAM' }]}
       title="IAM"
       description="Teaching IAM identities (users, groups, roles, policies) stored in CloudForge — not AWS IAM, and not the platform's learner/instructor/admin roles. Policy documents are validated and probe-evaluated before storage; evaluation is a real subset: Allow/Deny, wildcards, explicit-deny-wins, StringEquals on aws:username — no ARNs, principals, policy variables, or other condition operators."
       fidelity="PARTIAL"
       fidelityFootnote="teaching IAM · API_EMULATED · analyzer UNSUPPORTED"
       subNav={[
+        { id: 'dashboard', label: 'Dashboard' },
         { id: 'users', label: 'Users' },
         { id: 'groups', label: 'Groups' },
         { id: 'roles', label: 'Roles' },
@@ -103,7 +106,13 @@ export function IamConsole() {
       ]}
       activeSub={section}
       onSubChange={(id) => setSection(id as Section)}
+      actions={
+        <AwsButton variant="primary" onClick={() => setSection('users')}>
+          Add users
+        </AwsButton>
+      }
     >
+      {section === 'dashboard' && <DashboardSection onNavigate={setSection} />}
       {section === 'users' && <UsersSection />}
       {section === 'groups' && <GroupsSection />}
       {section === 'roles' && <RolesSection />}
@@ -139,6 +148,58 @@ function AdminOnly({ error }: { error: Error | null }) {
   if (!error) return null
   return (
     <ErrorBox message={`IAM management is admin-only (${error.message}). Sign in as an admin; other roles see this page as unavailable, not as an empty list.`} />
+  )
+}
+
+function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) {
+  const { users, groups, roles, policies } = useIamData()
+  const error = users.error ?? groups.error ?? roles.error ?? policies.error ?? null
+  const count = (q: { data?: unknown[] }) => (q.data === undefined ? '—' : q.data.length)
+  return (
+    <div className="space-y-4">
+      {error && <AdminOnly error={error} />}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <AwsStat label="Users" value={count(users)} hint="Teaching IAM identities" />
+        <AwsStat label="Groups" value={count(groups)} hint="Policy bundles" />
+        <AwsStat label="Roles" value={count(roles)} hint="Assumable locally" />
+        <AwsStat label="Policies" value={count(policies)} hint="Validated documents" />
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <AwsCard title="Security recommendations">
+          <p className="mb-2 text-sm text-aws-muted">
+            These are static notes for this teaching store, not an AWS security score. CloudForge never reports a
+            fabricated "secure" status.
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm">
+            <li>Access Analyzer is <strong>UNSUPPORTED</strong> — no analyzer findings exist.</li>
+            <li>Access keys show their secret once; only a SHA-256 hash is stored.</li>
+            <li>Assume Role sessions are short-lived and expire with a real 410 from the backend.</li>
+            <li>Policy evaluation is a documented subset: wildcards, explicit-deny-wins and StringEquals on aws:username only.</li>
+          </ul>
+        </AwsCard>
+        <AwsCard title="Access Analyzer">
+          <p className="text-sm text-aws-muted">
+            Access Analyzer is not built. It is shown as unavailable rather than as a working feature. Use the Policy
+            Simulator to evaluate what a stored identity can do.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <AwsButton onClick={() => onNavigate('simulator')}>Open Policy Simulator</AwsButton>
+            <AwsButton onClick={() => onNavigate('analyzer')}>Open Access Analyzer</AwsButton>
+          </div>
+        </AwsCard>
+      </div>
+      <AwsCard title="IAM resources">
+        <div className="flex flex-wrap gap-2">
+          <AwsButton onClick={() => onNavigate('users')}>Users</AwsButton>
+          <AwsButton onClick={() => onNavigate('groups')}>User groups</AwsButton>
+          <AwsButton onClick={() => onNavigate('roles')}>Roles</AwsButton>
+          <AwsButton onClick={() => onNavigate('policies')}>Policies</AwsButton>
+        </div>
+        <p className="mt-3 text-sm text-aws-muted">
+          CloudForge teaching IAM identities are not AWS IAM and not the platform's learner/instructor/admin roles.
+        </p>
+      </AwsCard>
+    </div>
   )
 }
 

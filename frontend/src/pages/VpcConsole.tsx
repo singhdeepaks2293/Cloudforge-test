@@ -6,6 +6,14 @@ import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { FidelityBadge } from '../components/AwsBadge.tsx'
 import { ServiceConsole } from '../components/ServiceConsole.tsx'
+import {
+  AwsActionsMenu,
+  AwsFlash,
+  AwsPreferencesButton,
+  AwsRefreshButton,
+  AwsStat,
+  AwsToolbar,
+} from '../components/AwsShell.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import {
   addSecurityGroupRule,
@@ -109,6 +117,7 @@ export function VpcConsole() {
 
   return (
     <ServiceConsole
+      icon="network"
       breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'VPC' }]}
       title="VPC"
       description="Virtual private clouds from your labs — real lab resources on the Rust network engine (SIMULATED backend by default). CIDRs are local (10.x); there are no AWS availability zones. Pick a lab, then create and manage its networking."
@@ -138,7 +147,7 @@ export function VpcConsole() {
             setLabId(e.target.value)
             setSelectedId(null)
           }}
-          className="rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm"
+          className="min-w-[20rem] max-w-full rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm"
         >
           {(labs.data ?? []).map((l) => (
             <option key={l.id} value={l.id}>{l.name} ({l.id}) — {l.status}</option>
@@ -151,7 +160,7 @@ export function VpcConsole() {
         )}
       </div>
       {notice !== '' && (
-        <p className="mb-3 border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>
+        <AwsFlash tone={notice.toLowerCase().includes('failed') ? 'error' : 'success'}>{notice}</AwsFlash>
       )}
       {labs.isPending && <Loading label="Loading labs" />}
       {labs.data && labs.data.length === 0 && (
@@ -169,6 +178,14 @@ export function VpcConsole() {
       )}
       {section !== 'nacls' && activeLabId !== '' && (
         <>
+          {resources.data && (
+            <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <AwsStat label="VPCs" value={vpcs.length} hint="This lab" />
+              <AwsStat label="Subnets" value={all.filter((r) => r.kind === 'subnet').length} />
+              <AwsStat label="Route tables" value={all.filter((r) => r.kind === 'route-table').length} />
+              <AwsStat label="Security groups" value={all.filter((r) => r.kind === 'security-group').length} />
+            </div>
+          )}
           <CreateForm
             section={section}
             labId={activeLabId}
@@ -178,6 +195,33 @@ export function VpcConsole() {
             onNotice={setNotice}
           />
           <AwsCard title={`${sectionLabel(section)} (${rows.length}) — region ${region}`}>
+            <AwsToolbar
+              right={
+                <>
+                  <AwsRefreshButton onClick={refresh} busy={resources.isFetching} />
+                  <AwsPreferencesButton disabledReason="Table preferences are not persisted in CloudForge." />
+                </>
+              }
+            >
+              <AwsActionsMenu
+                label="Actions"
+                items={[
+                  {
+                    label: 'Delete selected',
+                    danger: true,
+                    onClick: () => selected && del.mutate(selected),
+                    disabledReason: selected === null ? 'Select a resource first' : undefined,
+                  },
+                  {
+                    label: 'View lab topology',
+                    onClick: () => {
+                      if (activeLabId !== '') window.location.assign(`/labs/${activeLabId}/topology`)
+                    },
+                    disabledReason: activeLabId === '' ? 'No lab selected' : undefined,
+                  },
+                ]}
+              />
+            </AwsToolbar>
             <AwsTable<LabResource & { id: string }>
               caption={sectionLabel(section)}
               emptyMessage={`No ${sectionLabel(section).toLowerCase()} recorded in this lab yet — create one above.`}

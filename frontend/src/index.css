@@ -30,7 +30,8 @@
   --color-aws-error: #d13239;
   --color-aws-error-bg: #fdecea;
 
-  --font-sans: "Amazon Ember", "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
+  /* No Amazon Ember / AWS brand font: a neutral Helvetica-style stack. */
+  --font-sans: "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer base {
@@ -45,5 +46,44 @@
   }
   a:hover {
     @apply text-aws-link-hover underline;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-aws-orange-dark);
+    outline-offset: 1px;
+  }
+  ::selection {
+    background: var(--color-aws-orange-light);
+    color: var(--color-aws-navy);
+  }
+}
+
+@layer components {
+  /* AWS-style panel: square corners, 1px border, white surface. */
+  .aws-panel {
+    @apply border border-aws-border bg-white;
+  }
+  .aws-panel-header {
+    @apply flex items-center justify-between gap-2 border-b border-aws-border px-4 py-3;
+  }
+  .aws-section-title {
+    @apply text-base font-semibold text-aws-text;
+  }
+  .aws-label {
+    @apply text-[11px] font-semibold tracking-wide text-aws-muted uppercase;
+  }
+  /* AWS-style table header strip and row hover. */
+  .aws-table-head {
+    @apply bg-[#f2f3f3] text-aws-text;
+  }
+  .aws-table-row {
+    @apply border-b border-aws-border last:border-b-0 hover:bg-[#f9f9f9];
+  }
+  /* Orange left-active marker used by service sub-navigation. */
+  .aws-subnav-active {
+    @apply border-aws-orange bg-aws-orange-light font-medium text-aws-orange-dark;
+  }
+  /* Primary orange action button matching the console's main CTA. */
+  .aws-cta {
+    @apply inline-flex items-center gap-1.5 rounded-sm border border-[#d97706] bg-aws-orange px-3 py-1.5 text-sm font-medium text-aws-navy hover:bg-aws-orange-dark hover:text-white;
   }
 }

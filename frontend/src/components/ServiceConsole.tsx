@@ -8,6 +8,7 @@
 import type { ReactNode } from 'react'
 import { PageHeader } from './AwsCard.tsx'
 import { FidelityBadge } from './AwsBadge.tsx'
+import { ServiceIcon } from './AwsNav.tsx'
 
 export interface SubNavItem {
   id: string
@@ -26,6 +27,7 @@ export function ServiceConsole({
   activeSub,
   onSubChange,
   actions,
+  icon,
   children,
 }: {
   breadcrumb: { label: string; to?: string }[]
@@ -37,6 +39,8 @@ export function ServiceConsole({
   activeSub: string
   onSubChange: (id: string) => void
   actions?: ReactNode
+  /** Registry icon key (see SERVICE_ICONS); renders the service tile. */
+  icon?: string
   children: ReactNode
 }) {
   return (
@@ -46,13 +50,24 @@ export function ServiceConsole({
         title={title}
         description={description}
         actions={actions}
+        icon={
+          icon ? (
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center bg-aws-navy text-aws-orange">
+              <ServiceIcon icon={icon} className="h-5 w-5" />
+            </span>
+          ) : undefined
+        }
       />
-      <div>
+      <div className="flex items-center gap-3 border-y border-aws-border bg-white px-3 py-2">
         <FidelityBadge fidelity={fidelity} footnote={fidelityFootnote} />
+        <span className="ml-auto text-xs text-aws-muted">CloudForge · local learning cloud — not AWS</span>
       </div>
       <div className="flex gap-4">
-        <aside className="w-52 shrink-0">
-          <nav aria-label={`${title} navigation`} className="border border-aws-border bg-white">
+        <aside className="w-56 shrink-0">
+          <nav aria-label={`${title} navigation`} className="sticky top-16 border border-aws-border bg-white">
+            <p className="border-b border-aws-border px-3 py-2 text-[11px] font-semibold tracking-wide text-aws-muted uppercase">
+              {title}
+            </p>
             {subNav.map((item) => (
               <button
                 key={item.id}

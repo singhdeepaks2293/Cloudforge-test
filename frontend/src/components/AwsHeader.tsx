@@ -23,13 +23,20 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
   const authed = getToken() !== null
   const [query, setQuery] = useState('')
   const [showResults, setShowResults] = useState(false)
-  const [showServices, setShowServices] = useState(false)
-  const [showRegion, setShowRegion] = useState(false)
-  const [showAlerts, setShowAlerts] = useState(false)
-  const [showHelp, setShowHelp] = useState(false)
-  const [showUser, setShowUser] = useState(false)
+  const [openMenu, setOpenMenu] = useState<'services' | 'region' | 'alerts' | 'help' | 'user' | null>(null)
   const [region, setRegion] = useState<string>(() => getStoredRegion())
   const searchRef = useRef<HTMLDivElement | null>(null)
+  const headerRef = useRef<HTMLElement | null>(null)
+
+  const showServices = openMenu === 'services'
+  const showRegion = openMenu === 'region'
+  const showAlerts = openMenu === 'alerts'
+  const showHelp = openMenu === 'help'
+  const showUser = openMenu === 'user'
+  const toggleMenu = (key: 'services' | 'region' | 'alerts' | 'help' | 'user') => {
+    setShowResults(false)
+    setOpenMenu((current) => (current === key ? null : key))
+  }
 
   // Notifications are real control-plane health, not invented alerts.
   const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, retry: 1, staleTime: 30_000 })
@@ -39,18 +46,31 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
   const groups = groupServicesByCategory(services)
 
   useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setShowResults(false)
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Element | null
+      if (target !== null && typeof target.closest === 'function' && target.closest('[data-aws-menu]') !== null) return
+      setShowResults(false)
+      setOpenMenu(null)
     }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowResults(false)
+        setOpenMenu(null)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [])
 
   const goTo = (to: string, serviceId?: string) => {
     if (serviceId) recordRecentService(serviceId)
     setQuery('')
     setShowResults(false)
-    setShowServices(false)
+    setOpenMenu(null)
     navigate(to)
   }
 
@@ -66,7 +86,7 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
       : [{ label: 'Loading control-plane health…', ok: null }]
 
   return (
-    <header className="sticky top-0 z-40 flex h-12 items-center gap-3 bg-aws-navy px-3 text-white">
+    <header ref={headerRef} className="sticky top-0 z-40 flex h-12 items-center gap-3 bg-aws-navy px-3 text-white">
       <button
         type="button"
         onClick={onToggleNav}
@@ -77,13 +97,14 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
       </button>
       <Link to="/" className="flex shrink-0 items-baseline gap-2 text-white hover:no-underline">
         <span className="text-lg font-bold tracking-tight">CloudForge</span>
+        <span className="hidden text-[13px] font-medium text-[#d5dbdb] xl:inline">Console</span>
         <span className="hidden text-[11px] text-[#d5dbdb] lg:inline">Build Cloud Skills. Not Cloud Bills.</span>
       </Link>
 
-      <div className="relative">
+      <div className="relative" data-aws-menu>
         <button
           type="button"
-          onClick={() => setShowServices((v) => !v)}
+          onClick={() => toggleMenu('services')}
           aria-label="All services"
           aria-expanded={showServices}
           className="flex items-center gap-1.5 rounded-sm px-2 py-1.5 text-sm hover:bg-aws-navy-light"
@@ -92,35 +113,41 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
           <span className="hidden md:inline">Services</span>
         </button>
         {showServices && (
-          <div className="absolute top-11 left-0 max-h-[70vh] w-80 overflow-auto border border-aws-border bg-white text-aws-text shadow-lg">
-            <p className="border-b border-aws-border px-4 py-2 text-xs font-semibold tracking-wide text-aws-muted uppercase">
-              CloudForge services
-            </p>
+          <div className="absolute top-11 left-0 max-h-[75vh] w-[min(92vw,780px)] overflow-auto border border-aws-border bg-white text-aws-text shadow-xl">
+            <div className="flex items-center justify-between border-b border-aws-border px-4 py-2">
+              <p className="text-xs font-semibold tracking-wide text-aws-muted uppercase">
+                CloudForge services
+              </p>
+              <button type="button" onClick={() => goTo('/services')} className="text-xs text-aws-link hover:underline">
+                View all services
+              </button>
+            </div>
             {services.length === 0 ? (
               <p className="px-4 py-3 text-sm text-aws-muted">Service registry could not be loaded.</p>
             ) : query.trim() === '' ? (
-              groups.map((g) => (
-                <div key={g.category}>
-                  <p className="bg-[#f2f3f3] px-4 py-1.5 text-[11px] font-semibold tracking-wide text-aws-muted uppercase">
-                    {g.category}
-                  </p>
-                  <ul>
-                    {g.services.map((s) => (
-                      <li key={s.id}>
-                        <button
-                          type="button"
-                          onClick={() => goTo(s.route, s.id)}
-                          className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-[#f2f3f3]"
-                        >
-                          <ServiceIcon icon={s.icon} />
-                          <span className="font-medium">{s.name}</span>
-                          <span className="truncate text-xs text-aws-muted">{s.description}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))
+              <div className="grid grid-cols-1 sm:grid-cols-3">
+                {groups.map((g) => (
+                  <div key={g.category} className="border-b border-aws-border px-1 py-1 sm:border-r sm:last:border-r-0">
+                    <p className="px-3 py-1.5 text-[11px] font-semibold tracking-wide text-aws-muted uppercase">
+                      {g.category}
+                    </p>
+                    <ul>
+                      {g.services.map((s) => (
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            onClick={() => goTo(s.route, s.id)}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[#f2f3f3]"
+                          >
+                            <ServiceIcon icon={s.icon} />
+                            <span className="truncate font-medium">{s.name}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
             ) : (
               <ul>
                 {results.map((s) => (
@@ -142,7 +169,7 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
         )}
       </div>
 
-      <div ref={searchRef} className="relative min-w-0 flex-1">
+      <div ref={searchRef} className="relative min-w-0 flex-1" data-aws-menu>
         <div className="flex items-center overflow-hidden rounded-sm bg-white">
           <Search className="ml-2 h-4 w-4 shrink-0 text-aws-muted" aria-hidden="true" />
           <input
@@ -152,12 +179,15 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
               setQuery(e.target.value)
               setShowResults(true)
             }}
-            onFocus={() => setShowResults(true)}
+            onFocus={() => {
+              setShowResults(true)
+              setOpenMenu(null)
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && results.length > 0) goTo(results[0].route, results[0].id)
               if (e.key === 'Escape') setShowResults(false)
             }}
-            placeholder="Search services, resources, operations, docs, learning"
+            placeholder="Search for services, features, documentation, and more"
             aria-label="Search services"
             className="min-w-0 flex-1 px-2 py-1.5 text-sm text-aws-text focus:outline-none"
           />
@@ -192,10 +222,10 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
         )}
       </div>
 
-      <div className="relative hidden sm:block">
+      <div className="relative hidden sm:block" data-aws-menu>
         <button
           type="button"
-          onClick={() => setShowRegion((v) => !v)}
+          onClick={() => toggleMenu('region')}
           aria-expanded={showRegion}
           className="flex items-center gap-1 rounded-sm px-2 py-1.5 text-sm hover:bg-aws-navy-light"
         >
@@ -214,7 +244,7 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
                 onClick={() => {
                   setRegion(r.id)
                   setStoredRegion(r.id)
-                  setShowRegion(false)
+                  setOpenMenu(null)
                 }}
                 className={`block w-full px-4 py-2 text-left text-sm hover:bg-[#f2f3f3] ${r.id === region ? 'font-semibold text-aws-link' : ''}`}
               >
@@ -229,10 +259,10 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
         )}
       </div>
 
-      <div className="relative hidden sm:block">
+      <div className="relative hidden sm:block" data-aws-menu>
         <button
           type="button"
-          onClick={() => setShowAlerts((v) => !v)}
+          onClick={() => toggleMenu('alerts')}
           aria-label="Notifications"
           aria-expanded={showAlerts}
           title="Control-plane health"
@@ -259,10 +289,10 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
         )}
       </div>
 
-      <div className="relative hidden sm:block">
+      <div className="relative hidden sm:block" data-aws-menu>
         <button
           type="button"
-          onClick={() => setShowHelp((v) => !v)}
+          onClick={() => toggleMenu('help')}
           aria-label="Help and documentation"
           aria-expanded={showHelp}
           className="rounded-sm p-1.5 hover:bg-aws-navy-light"
@@ -274,16 +304,16 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
             <p className="border-b border-aws-border px-4 py-2 text-xs font-semibold tracking-wide text-aws-muted uppercase">
               Help &amp; documentation
             </p>
-            <Link to="/learn" onClick={() => setShowHelp(false)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
+            <Link to="/learn" onClick={() => setOpenMenu(null)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
               Learning Center — tracks &amp; lessons
             </Link>
-            <Link to="/courses" onClick={() => setShowHelp(false)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
+            <Link to="/courses" onClick={() => setOpenMenu(null)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
               Courses
             </Link>
-            <Link to="/services" onClick={() => setShowHelp(false)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
+            <Link to="/services" onClick={() => setOpenMenu(null)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
               All services
             </Link>
-            <Link to="/explorer" onClick={() => setShowHelp(false)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
+            <Link to="/explorer" onClick={() => setOpenMenu(null)} className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline">
               Resource Explorer
             </Link>
             <p className="border-t border-aws-border px-4 py-2 text-xs text-aws-muted">
@@ -293,10 +323,10 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
         )}
       </div>
 
-      <div className="relative">
+      <div className="relative" data-aws-menu>
         <button
           type="button"
-          onClick={() => setShowUser((v) => !v)}
+          onClick={() => toggleMenu('user')}
           aria-expanded={showUser}
           aria-label="Account menu"
           className="flex items-center gap-1 rounded-sm px-2 py-1.5 text-sm hover:bg-aws-navy-light"
@@ -317,7 +347,7 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
                 )}
                 <Link
                   to="/account"
-                  onClick={() => setShowUser(false)}
+                  onClick={() => setOpenMenu(null)}
                   className="block px-4 py-2 text-sm hover:bg-[#f2f3f3] hover:no-underline"
                 >
                   Account settings
@@ -326,7 +356,7 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
                   type="button"
                   onClick={() => {
                     void logout().finally(() => {
-                      setShowUser(false)
+                      setOpenMenu(null)
                       navigate('/login')
                     })
                   }}
@@ -339,14 +369,14 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
               <>
                 <Link
                   to="/login"
-                  onClick={() => setShowUser(false)}
+                  onClick={() => setOpenMenu(null)}
                   className="block px-4 py-2 text-sm text-aws-text hover:bg-[#f2f3f3] hover:no-underline"
                 >
                   Sign in
                 </Link>
                 <Link
                   to="/register"
-                  onClick={() => setShowUser(false)}
+                  onClick={() => setOpenMenu(null)}
                   className="block px-4 py-2 text-sm text-aws-text hover:bg-[#f2f3f3] hover:no-underline"
                 >
                   Create account
