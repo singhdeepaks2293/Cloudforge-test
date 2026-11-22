@@ -150,8 +150,8 @@ cp .env.example .env
 # services either way, so no .env edit is needed to go lite.
 make up-lite
 # or: docker compose -f deployments/compose/docker-compose.light.yml up -d --build
-open http://localhost          # frontend on :80
-curl http://localhost:8080/api/v1/health   # expect "lite":true
+open http://localhost:8080     # frontend on :8080
+curl http://localhost:8081/api/v1/health   # expect "lite":true
 make logs-lite   # follow logs
 make down-lite   # stop (volumes are kept)
 ```

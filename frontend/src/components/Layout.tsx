@@ -5,25 +5,29 @@ import { AwsNav } from './AwsNav.tsx'
 import { AwsBadge, type BadgeTone } from './AwsBadge.tsx'
 import { AwsCard } from './AwsCard.tsx'
 import { getToken } from '../services/api.ts'
+import { useServices } from '../services/registry.ts'
 
 /**
  * Console shell — AWS-console style: dark navy header on every page,
- * collapsible left service nav, light-grey (#eaeded) content area.
+ * collapsible left service nav (rendered from the backend service
+ * registry, see services/registry.ts), light-grey (#eaeded) content area.
  * Re-exports the legacy helpers (Card, ErrorBox, Loading, StatusBadge)
  * so existing pages keep compiling; new pages use the Aws* components.
  */
 export function Layout() {
   const [navCollapsed, setNavCollapsed] = useState(false)
+  const servicesQuery = useServices()
+  const services = servicesQuery.data ?? []
   return (
     <div className="flex min-h-screen flex-col bg-aws-bg text-aws-text">
-      <AwsHeader onToggleNav={() => setNavCollapsed((v) => !v)} />
+      <AwsHeader onToggleNav={() => setNavCollapsed((v) => !v)} services={services} />
       <div className="flex min-h-0 flex-1">
         <aside
           className={`shrink-0 overflow-y-auto border-r border-aws-border bg-white ${
             navCollapsed ? 'w-14' : 'w-60'
           }`}
         >
-          <AwsNav collapsed={navCollapsed} />
+          <AwsNav collapsed={navCollapsed} services={services} registryError={servicesQuery.isError} />
           {!navCollapsed && (
             <div className="border-t border-aws-border px-4 py-3">
               <p className="text-[11px] leading-snug text-aws-muted">

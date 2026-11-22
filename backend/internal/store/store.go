@@ -13,6 +13,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/cloudforge/cloudforge/backend/internal/auth"
@@ -38,6 +39,11 @@ type UserStore interface {
 	SetRole(id, role string) (*auth.User, error)
 	IssueToken(userID string) (string, time.Time)
 	ValidateToken(token string) (string, error)
+	// RevokeToken denies token until its expiry (Phase 7 logout).
+	// RevokeUser denies every session issued to userID and returns
+	// how many were revoked (Phase 7 admin session revocation).
+	RevokeToken(token string) bool
+	RevokeUser(userID string) int
 }
 
 // --- Courses -------------------------------------------------------------
@@ -147,6 +153,11 @@ type LabStore interface {
 	ListByOwner(ctx context.Context, ownerID string) ([]*labs.Lab, error)
 	Stop(ctx context.Context, id string) (*labs.Lab, error)
 	Destroy(ctx context.Context, id string) (*labs.Lab, error)
+	// Start re-provisions a STOPPED lab (STOPPED -> PROVISIONING ->
+	// READY/FAILED through the same provisioning path as Create, so
+	// READY is only reported when provisioning actually succeeded).
+	// Any other state is ErrInvalidTransition.
+	Start(ctx context.Context, id string) (*labs.Lab, error)
 	// Transition validates via labs.ValidateTransition and persists the
 	// new state (and error message) atomically.
 	Transition(ctx context.Context, id, to, errMsg string) (*labs.Lab, error)
@@ -201,10 +212,65 @@ type AuditEntry struct {
 	CreatedAt    time.Time      `json:"created_at"`
 }
 
+// AuditFilter narrows an audit listing. Empty fields match everything.
+// LabID matches entries whose resource is the lab itself or whose
+// metadata names the lab (lab_id), so a lab's event history is one query.
+type AuditFilter struct {
+	ActorID      string
+	Action       string
+	ResourceType string
+	ResourceID   string
+	LabID        string
+	Q            string // substring over action / resource type / resource id
+	From         time.Time
+	To           time.Time
+	Limit        int
+	Offset       int
+}
+
+// Matches reports whether e satisfies f (used by the memory store;
+// the Postgres store translates the same rules into SQL).
+func (f AuditFilter) Matches(e *AuditEntry) bool {
+	if f.ActorID != "" && e.ActorID != f.ActorID {
+		return false
+	}
+	if f.Action != "" && e.Action != f.Action {
+		return false
+	}
+	if f.ResourceType != "" && e.ResourceType != f.ResourceType {
+		return false
+	}
+	if f.ResourceID != "" && e.ResourceID != f.ResourceID {
+		return false
+	}
+	if f.LabID != "" {
+		lab, _ := e.Metadata["lab_id"].(string)
+		if e.ResourceID != f.LabID && lab != f.LabID {
+			return false
+		}
+	}
+	if f.Q != "" {
+		q := strings.ToLower(f.Q)
+		hay := strings.ToLower(e.Action + " " + e.ResourceType + " " + e.ResourceID + " " + e.ActorID)
+		if !strings.Contains(hay, q) {
+			return false
+		}
+	}
+	if !f.From.IsZero() && e.CreatedAt.Before(f.From) {
+		return false
+	}
+	if !f.To.IsZero() && e.CreatedAt.After(f.To) {
+		return false
+	}
+	return true
+}
+
 // AuditStore records and lists audit entries.
 type AuditStore interface {
 	Record(ctx context.Context, e AuditEntry) error
 	List(ctx context.Context, limit, offset int) ([]*AuditEntry, int, error)
+	// ListFiltered lists entries matching f (newest first).
+	ListFiltered(ctx context.Context, f AuditFilter) ([]*AuditEntry, int, error)
 	// CleanupOlderThan deletes entries older than days; returns rows removed.
 	CleanupOlderThan(ctx context.Context, days int) (int64, error)
 }
@@ -278,6 +344,10 @@ type LabResourceStore interface {
 	GetResource(ctx context.Context, labID, id string) (*LabResource, error)
 	// CreateResource inserts r (ID assigned when empty) and returns it.
 	CreateResource(ctx context.Context, r *LabResource) (*LabResource, error)
+	// UpdateResource persists r (matched by LabID+ID) and returns the
+	// stored row. It exists so tags, routes, firewall rules and
+	// attachments can be edited without deleting and recreating.
+	UpdateResource(ctx context.Context, r *LabResource) (*LabResource, error)
 	// DeleteResource removes the row; returning false means the row
 	// was already gone (delete is idempotent).
 	DeleteResource(ctx context.Context, labID, id string) (bool, error)

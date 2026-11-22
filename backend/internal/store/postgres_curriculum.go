@@ -191,11 +191,25 @@ func (p *PostgresCurriculumStore) UpsertScenario(ctx context.Context, s *curricu
 }
 
 func (p *PostgresCurriculumStore) ListTracks(ctx context.Context) ([]*curriculum.TrackSummary, error) {
+	// Phase 1 fix (14-vs-17): return curriculum tracks only. The
+	// courses table also holds the 3 legacy M1 courses
+	// (vpc-fundamentals, iam-security, ec2-basics), which are courses
+	// but not tracks; listing every course inflated the count to 17
+	// while the seed report (correctly) said 14. A track is a course
+	// with BOTH a guided and a challenge lab definition seeded for
+	// it — every seeded track upserts both, while the legacy courses
+	// only ever gained guided definitions (the 4 launchable lab
+	// definitions, course_id = the definition or its track). An
+	// EXISTS on either kind alone would still match the legacy
+	// courses, so both are required.
 	rows, err := p.db.Pool.Query(ctx, `SELECT c.id, c.title, c.description, COALESCE(c.difficulty,'beginner'),
 		COALESCE(c.estimated_hours,0), COALESCE(c.xp_reward,0),
 		(SELECT COUNT(*) FROM lessons l JOIN course_modules m ON m.id=l.module_id WHERE m.course_id=c.id),
 		(SELECT COUNT(*) FROM course_modules m WHERE m.course_id=c.id)
-		FROM courses c ORDER BY c.id`)
+		FROM courses c
+		WHERE EXISTS (SELECT 1 FROM lab_definitions ld WHERE ld.course_id=c.id AND ld.kind='guided')
+		  AND EXISTS (SELECT 1 FROM lab_definitions ld WHERE ld.course_id=c.id AND ld.kind='challenge')
+		ORDER BY c.id`)
 	if err != nil {
 		return nil, err
 	}

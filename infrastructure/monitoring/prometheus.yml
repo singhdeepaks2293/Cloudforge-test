@@ -21,13 +21,20 @@ global:
 
 scrape_configs:
   - job_name: cloudforge-api
+    # Phase 7 (R5): /metrics requires the scrape token. Prometheus
+    # substitutes $CLOUDFORGE_METRICS_TOKEN from its container
+    # environment (compose passes it through); the same token is
+    # configured on the API as CLOUDFORGE_METRICS_TOKEN.
+    authorization:
+      type: Bearer
+      credentials: ${CLOUDFORGE_METRICS_TOKEN}
     static_configs:
       # Docker service name on the compose frontend_net network.
       - targets: ["api:8080"]
         labels:
           component: api
-    # For a host run (no Docker), scrape localhost:8080 instead:
-    # - targets: ["localhost:8080"]
+    # For a host run (no Docker), scrape localhost:8081 instead:
+    # - targets: ["localhost:8081"]
 
   # - job_name: cloudforge-network-engine
   #   static_configs:

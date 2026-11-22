@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { fetchCourses } from '../services/api.ts'
+import { findLabDefinition } from '../types/index.ts'
 import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
+import { LaunchLabButton } from '../components/LabLauncher.tsx'
 
 /** Learn — the curriculum grouped by track, from the same live course list. */
 export function Learn() {
   const courses = useQuery({ queryKey: ['courses'], queryFn: fetchCourses, retry: 1 })
+  const navigate = useNavigate()
 
   const byTrack = new Map<string, { id: string; title: string; lessons: number; description: string }[]>()
   for (const c of courses.data ?? []) {
@@ -41,8 +44,16 @@ export function Learn() {
                   <span className="font-medium">{c.title}</span>
                   {c.description && <span className="block text-aws-muted">{c.description}</span>}
                 </span>
-                <span className="shrink-0 text-aws-muted">
-                  {c.lessons} lesson{c.lessons === 1 ? '' : 's'}
+                <span className="flex shrink-0 items-center gap-3 text-aws-muted">
+                  <span>
+                    {c.lessons} lesson{c.lessons === 1 ? '' : 's'}
+                  </span>
+                  {findLabDefinition(c.id) && (
+                    <LaunchLabButton
+                      definitionId={c.id}
+                      onLaunched={(lab) => navigate(`/labs?launched=${lab.id}`)}
+                    />
+                  )}
                 </span>
               </li>
             ))}

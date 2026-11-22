@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { BookOpen } from 'lucide-react'
 import { fetchCourses } from '../services/api.ts'
+import { findLabDefinition } from '../types/index.ts'
 import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
+import { LaunchLabButton } from '../components/LabLauncher.tsx'
 
 export function Courses() {
   const courses = useQuery({ queryKey: ['courses'], queryFn: fetchCourses, retry: 1 })
+  const navigate = useNavigate()
   const [filter, setFilter] = useState('')
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -55,7 +58,18 @@ export function Courses() {
               },
               {
                 header: 'Actions',
-                render: () => <Link to="/learn">View in Learn</Link>,
+                render: (r) =>
+                  findLabDefinition(r.id) ? (
+                    <span className="flex items-center gap-3">
+                      <LaunchLabButton
+                        definitionId={r.id}
+                        onLaunched={(lab) => navigate(`/labs?launched=${lab.id}`)}
+                      />
+                      <Link to="/learn">View in Learn</Link>
+                    </span>
+                  ) : (
+                    <Link to="/learn">View in Learn</Link>
+                  ),
               },
             ]}
             rows={rows}

@@ -8,7 +8,7 @@
 services:
   api:
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "${API_PORT:-8081}:8080"
     volumes:
       # Read-only source mount for inspection only. The image runs
       # the compiled /app/api binary — do NOT mount over /app, which

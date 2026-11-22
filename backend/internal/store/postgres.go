@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -253,18 +254,80 @@ func RecordTx(ctx context.Context, tx pgx.Tx, e AuditEntry) error {
 }
 
 func (p *PostgresAuditStore) List(ctx context.Context, limit, offset int) ([]*AuditEntry, int, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 50
+	return p.ListFiltered(ctx, AuditFilter{Limit: limit, Offset: offset})
+}
+
+// ListFiltered translates AuditFilter.Matches into SQL. The Q filter
+// is a case-insensitive substring over action / resource type /
+// resource id; LabID matches the lab resource itself or entries whose
+// JSON details name the lab.
+func (p *PostgresAuditStore) ListFiltered(ctx context.Context, f AuditFilter) ([]*AuditEntry, int, error) {
+	if f.Limit <= 0 || f.Limit > 1000 {
+		f.Limit = 50
 	}
-	if offset < 0 {
-		offset = 0
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	var conds []string
+	var args []any
+	ph := func() string {
+		args = append(args, nil) // placeholder slot; value set below
+		return "$" + strconv.Itoa(len(args))
+	}
+	if f.ActorID != "" {
+		n := ph()
+		conds = append(conds, "user_id::text="+n)
+		args[len(args)-1] = f.ActorID
+	}
+	if f.Action != "" {
+		n := ph()
+		conds = append(conds, "action="+n)
+		args[len(args)-1] = f.Action
+	}
+	if f.ResourceType != "" {
+		n := ph()
+		conds = append(conds, "resource_type="+n)
+		args[len(args)-1] = f.ResourceType
+	}
+	if f.ResourceID != "" {
+		n := ph()
+		conds = append(conds, "resource_id="+n)
+		args[len(args)-1] = f.ResourceID
+	}
+	if f.LabID != "" {
+		n1, n2 := ph(), ph()
+		conds = append(conds, "(resource_id="+n1+" OR details->>'lab_id'="+n2+")")
+		args[len(args)-2], args[len(args)-1] = f.LabID, f.LabID
+	}
+	if f.Q != "" {
+		n1, n2, n3 := ph(), ph(), ph()
+		conds = append(conds, "(action ILIKE "+n1+" OR resource_type ILIKE "+n2+" OR resource_id ILIKE "+n3+")")
+		pat := "%" + f.Q + "%"
+		args[len(args)-3], args[len(args)-2], args[len(args)-1] = pat, pat, pat
+	}
+	if !f.From.IsZero() {
+		n := ph()
+		conds = append(conds, "created_at >= "+n)
+		args[len(args)-1] = f.From
+	}
+	if !f.To.IsZero() {
+		n := ph()
+		conds = append(conds, "created_at <= "+n)
+		args[len(args)-1] = f.To
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
 	}
 	var total int
-	if err := p.db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&total); err != nil {
+	if err := p.db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs "+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
+	limitN := "$" + strconv.Itoa(len(args)+1)
+	offsetN := "$" + strconv.Itoa(len(args)+2)
+	args = append(args, f.Limit, f.Offset)
 	rows, err := p.db.Pool.Query(ctx, `SELECT id, COALESCE(user_id::text,''), action, resource_type, resource_id,
-		request_id, details, created_at FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+		request_id, details, created_at FROM audit_logs `+where+` ORDER BY created_at DESC LIMIT `+limitN+` OFFSET `+offsetN, args...)
 	if err != nil {
 		return nil, 0, err
 	}

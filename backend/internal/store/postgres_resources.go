@@ -104,6 +104,32 @@ func (p *PostgresResourceStore) CreateResource(ctx context.Context, r *LabResour
 	return p.GetResource(ctx, r.LabID, r.ID)
 }
 
+func (p *PostgresResourceStore) UpdateResource(ctx context.Context, r *LabResource) (*LabResource, error) {
+	cfg := r.Config
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	if len(r.Labels) > 0 {
+		cfg["labels"] = r.Labels
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := p.db.Pool.Exec(ctx, `UPDATE lab_resources SET provider=$1, resource_type=$2,
+		name=$3, state=$4, provider_resource_id=$5, parent_id=$6, private_ip=$7, public_ip=$8,
+		cidr=$9, configuration=$10 WHERE lab_id=$11 AND id=$12`,
+		r.Provider, r.Kind, r.Name, r.State, r.ProviderResourceID, r.ParentID,
+		r.PrivateIP, r.PublicIP, r.CIDR, raw, r.LabID, r.ID)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return p.GetResource(ctx, r.LabID, r.ID)
+}
+
 func (p *PostgresResourceStore) DeleteResource(ctx context.Context, labID, id string) (bool, error) {
 	tag, err := p.db.Pool.Exec(ctx, "DELETE FROM lab_resources WHERE lab_id=$1 AND id=$2", labID, id)
 	if err != nil {

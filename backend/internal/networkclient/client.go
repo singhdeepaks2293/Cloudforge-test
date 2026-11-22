@@ -77,10 +77,19 @@ func Meta(labID, tenantID, requestID, idempotencyKey string) *gen.RequestMeta {
 	}
 }
 
+// EngineTokenMetadata is the gRPC metadata key carrying the
+// shared-secret engine token (Phase 7, risk R1). The Rust engine
+// rejects every RPC without a matching token (Unauthenticated);
+// the old unauthenticated path no longer exists.
+const EngineTokenMetadata = "x-cloudforge-engine-token"
+
 // Client is a lazily-dialled gRPC client for the network engine.
 // It is safe for concurrent use. Close releases the connection.
 type Client struct {
 	Addr string
+	// Token is the shared-secret engine token sent on every RPC
+	// (empty = send none; the engine then refuses the call).
+	Token string
 
 	mu   sync.Mutex
 	conn *grpc.ClientConn
@@ -94,6 +103,14 @@ func New(addr string) *Client {
 		addr = DefaultAddr
 	}
 	return &Client{Addr: addr}
+}
+
+// NewWithToken returns a Client that authenticates every RPC with
+// token (Phase 7 engine auth).
+func NewWithToken(addr, token string) *Client {
+	c := New(addr)
+	c.Token = token
+	return c
 }
 
 // Close closes the underlying gRPC connection, if any.
@@ -123,9 +140,14 @@ func (c *Client) client() (gen.NetworkEngineClient, error) {
 	return c.stub, nil
 }
 
-// withMeta attaches the x-request-id header to ctx.
-func withMeta(ctx context.Context) context.Context {
-	return metadata.AppendToOutgoingContext(ctx, "x-request-id", requestIDFrom(ctx))
+// withMeta attaches the x-request-id header (and the engine
+// auth token, when configured) to ctx.
+func (c *Client) withMeta(ctx context.Context) context.Context {
+	ctx = metadata.AppendToOutgoingContext(ctx, "x-request-id", requestIDFrom(ctx))
+	if c.Token != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, EngineTokenMetadata, c.Token)
+	}
+	return ctx
 }
 
 // withTimeout applies d unless ctx already carries a deadline.
@@ -235,7 +257,7 @@ func (c *Client) Health(ctx context.Context) (HealthStatus, error) {
 	if err != nil {
 		return HealthStatus{}, wrapErr(err)
 	}
-	resp, err := stub.Health(withMeta(ctx), &gen.HealthRequest{})
+	resp, err := stub.Health(c.withMeta(ctx), &gen.HealthRequest{})
 	if err != nil {
 		return HealthStatus{}, wrapErr(err)
 	}
@@ -289,7 +311,7 @@ func (c *Client) call(ctx context.Context, fn func(gen.NetworkEngineClient, cont
 	if err != nil {
 		return wrapErr(err)
 	}
-	return wrapErr(fn(stub, withMeta(ctx)))
+	return wrapErr(fn(stub, c.withMeta(ctx)))
 }
 
 // CreateNetwork creates a network (lab) in the engine.

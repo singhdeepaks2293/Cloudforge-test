@@ -14,6 +14,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ var (
 	ErrInvalidPassword  = errors.New("invalid password")
 	ErrInvalidToken     = errors.New("invalid token")
 	ErrTokenExpired     = errors.New("token expired")
+	ErrTokenRevoked     = errors.New("token revoked")
 	ErrInvalidEmail     = errors.New("invalid email")
 	ErrPasswordTooShort = errors.New("password must be at least 8 characters")
 	ErrInvalidRole      = errors.New("invalid role")
@@ -83,17 +85,39 @@ type Store struct {
 	now     func() time.Time // overridable in tests
 	// TokenTTL overrides the package default when set.
 	TokenTTL time.Duration
+	// Revoker is the token denylist (Phase 7). Nil means no
+	// revocation: ValidateToken accepts any well-formed token.
+	// SetRevoker installs it (memory by default in tests; Redis or
+	// Postgres in production via cmd/api).
+	Revoker Revoker
+	// fallback is the in-process denylist used when Revoker is set
+	// but its backend is unreachable (e.g. Redis down): revocation
+	// degrades to single-process scope rather than disappearing.
+	fallback *MemoryRevoker
+}
+
+// SetRevoker installs revoker as the token denylist and initialises
+// the in-memory fallback used when the revoker errors.
+func (s *Store) SetRevoker(r Revoker) {
+	s.Revoker = r
+	s.fallback = NewMemoryRevoker()
 }
 
 // NewStore returns a Store using secret to sign bearer tokens.
 func NewStore(secret string) *Store {
-	return &Store{
+	s := &Store{
 		byID:     make(map[string]*User),
 		byEmail:  make(map[string]*User),
 		secret:   []byte(secret),
 		now:      time.Now,
 		TokenTTL: TokenTTL,
 	}
+	// A memory revoker is installed by default, so logout works
+	// even in tests and in the in-memory fallback; cmd/api replaces
+	// it with the Postgres (or Redis) revoker when those backends
+	// are up.
+	s.SetRevoker(NewMemoryRevoker())
+	return s
 }
 
 func newID() string { return ids.New() }
@@ -206,13 +230,18 @@ func (s *Store) SetRole(id, role string) (*User, error) {
 }
 
 // sessionClaims is the HS256 JWT payload. Only the user id is
-// carried; no roles or PII are embedded in the token.
+// carried; no roles or PII are embedded in the token. ID is the
+// token id (jti, Phase 7): logout and admin session-revocation
+// deny-list this value, so a stolen token stops working before its
+// 12h expiry.
 type sessionClaims struct {
 	jwt.RegisteredClaims
 }
 
 // IssueToken returns a signed HS256 JWT for userID valid for the
-// configured TTL, plus its expiry time.
+// configured TTL, plus its expiry time. The token carries a fresh
+// random jti, recorded with the revoker (best-effort) so an admin
+// can later revoke all of the user's sessions.
 func (s *Store) IssueToken(userID string) (string, time.Time) {
 	ttl := s.TokenTTL
 	if ttl <= 0 {
@@ -222,6 +251,7 @@ func (s *Store) IssueToken(userID string) (string, time.Time) {
 	exp := now.Add(ttl)
 	claims := sessionClaims{RegisteredClaims: jwt.RegisteredClaims{
 		Subject:   userID,
+		ID:        NewJTI(),
 		Issuer:    "cloudforge",
 		IssuedAt:  jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(exp),
@@ -232,14 +262,15 @@ func (s *Store) IssueToken(userID string) (string, time.Time) {
 		// return an empty token rather than panicking the handler.
 		return "", exp
 	}
+	if s.Revoker != nil {
+		_ = s.Revoker.RecordIssued(context.Background(), claims.ID, userID, exp)
+	}
 	return token, exp
 }
 
-// ValidateToken verifies a JWT and returns the user ID it carries.
-// An expired token yields ErrTokenExpired; any other failure yields
-// ErrInvalidToken (including a token signed with another secret or
-// with a non-HMAC algorithm).
-func (s *Store) ValidateToken(token string) (string, error) {
+// parseToken parses and verifies token, returning its claims.
+// It does NOT check revocation; ValidateToken does that.
+func (s *Store) parseToken(token string) (*sessionClaims, error) {
 	claims := &sessionClaims{}
 	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -249,12 +280,109 @@ func (s *Store) ValidateToken(token string) (string, error) {
 	}, jwt.WithTimeFunc(s.now), jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer("cloudforge"))
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			return "", ErrTokenExpired
+			return nil, ErrTokenExpired
 		}
-		return "", ErrInvalidToken
+		return nil, ErrInvalidToken
 	}
 	if claims.Subject == "" {
-		return "", ErrInvalidToken
+		return nil, ErrInvalidToken
+	}
+	return claims, nil
+}
+
+// TokenJTI extracts the jti of a valid token ("", nil when the
+// token has no jti — pre-Phase-7 tokens issued before the jti claim
+// existed; those cannot be individually revoked, only by rotating
+// the secret or revoking the user via a re-login).
+func (s *Store) TokenJTI(token string) (string, error) {
+	claims, err := s.parseToken(token)
+	if err != nil {
+		return "", err
+	}
+	return claims.ID, nil
+}
+
+// TokenExpiry extracts the expiry of a valid token.
+func (s *Store) TokenExpiry(token string) (time.Time, error) {
+	claims, err := s.parseToken(token)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if claims.ExpiresAt == nil {
+		return time.Time{}, ErrInvalidToken
+	}
+	return claims.ExpiresAt.Time, nil
+}
+
+// isRevoked consults the revoker, falling back to the in-memory
+// denylist when the revoker errors (Redis/Postgres down). A
+// revoker error never turns a valid token into an accepted one
+// when the fallback knows it is revoked.
+func (s *Store) isRevoked(jti string) bool {
+	if jti == "" || s.Revoker == nil {
+		return false
+	}
+	revoked, err := s.Revoker.IsRevoked(context.Background(), jti)
+	if err == nil {
+		return revoked
+	}
+	if s.fallback != nil {
+		if fb, ferr := s.fallback.IsRevoked(context.Background(), jti); ferr == nil {
+			return fb
+		}
+	}
+	return false
+}
+
+// RevokeToken denies token until its expiry. It returns false when
+// the token is invalid or has no jti (nothing to revoke).
+func (s *Store) RevokeToken(token string) bool {
+	claims, err := s.parseToken(token)
+	if err != nil || claims.ID == "" || s.Revoker == nil {
+		return false
+	}
+	exp := time.Now().Add(s.TokenTTL)
+	if claims.ExpiresAt != nil {
+		exp = claims.ExpiresAt.Time
+	}
+	_ = s.Revoker.Revoke(context.Background(), claims.ID, claims.Subject, exp)
+	if s.fallback != nil {
+		_ = s.fallback.Revoke(context.Background(), claims.ID, claims.Subject, exp)
+	}
+	return true
+}
+
+// RevokeUser denies every session issued to userID. It returns how
+// many sessions were revoked (0 when none were recorded — e.g.
+// tokens issued before revocation was enabled).
+func (s *Store) RevokeUser(userID string) int {
+	if s.Revoker == nil {
+		return 0
+	}
+	n, err := s.Revoker.RevokeUser(context.Background(), userID)
+	if err != nil && s.fallback != nil {
+		if fb, ferr := s.fallback.RevokeUser(context.Background(), userID); ferr == nil {
+			return fb
+		}
+	}
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// ValidateToken verifies a JWT and returns the user ID it carries.
+// An expired token yields ErrTokenExpired; any other failure yields
+// ErrInvalidToken (including a token signed with another secret or
+// with a non-HMAC algorithm). A revoked token (Phase 7) yields
+// ErrTokenRevoked.
+func (s *Store) ValidateToken(token string) (string, error) {
+	claims, err := s.parseToken(token)
+	if err != nil {
+		return "", err
+	}
+	if s.isRevoked(claims.ID) {
+		return "", ErrTokenRevoked
 	}
 	return claims.Subject, nil
 }

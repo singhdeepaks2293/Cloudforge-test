@@ -1,9 +1,12 @@
 # CloudForge — LIGHTWEIGHT mode (classroom laptops).
 #
 # A complete, standalone compose file — NOT an override of
-# docker-compose.yml. Start it with `make up-lite` from the repo root
-# (or `docker compose -f docker-compose.light.yml up -d --build`
-# from this directory). It runs the same code as the full mode, but
+# docker-compose.yml. Start it with `make up-lite` from the repo root.
+# Do NOT run `docker compose -f docker-compose.light.yml up` from
+# this directory without `--env-file ../../.env`: compose reads .env
+# from the compose file's directory, not the repo root, so the root
+# .env would be silently ignored (see Makefile --env-file note).
+# It runs the same code as the full mode, but
 # trimmed for a 2–4 core / 4 GB RAM laptop:
 #
 #   Services: frontend, api, worker, network-engine, postgres, redis.
@@ -74,12 +77,28 @@ services:
       REDIS_ADDR: redis:6379
       NETWORK_ENGINE_ADDR: network-engine:50051
       CLOUDFORGE_JWT_SECRET: ${CLOUDFORGE_JWT_SECRET:?set CLOUDFORGE_JWT_SECRET in .env}
+      # Phase 7: engine auth token (shared with network-engine)
+      # and the /metrics scrape token. Fail-closed: compose
+      # refuses to start without them unless CLOUDFORGE_DEV=1.
+      CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
+      CLOUDFORGE_METRICS_TOKEN: ${CLOUDFORGE_METRICS_TOKEN:?set CLOUDFORGE_METRICS_TOKEN in .env}
+      CLOUDFORGE_DEV: ${CLOUDFORGE_DEV:-0}
       CLOUDFORGE_LITE: "true"
       CLOUDFORGE_MODE: lite
       HOST_AGENT_MODE: simulated
-      API_PORT: "8080"
+      # The API still listens on 8080 INSIDE its container (the host
+      # port is API_PORT in .env, default 8081 — see ports below);
+      # pin it explicitly because config's dev default is now :8081.
+      CLOUDFORGE_ADDR: ":8080"
+      # Curriculum (M8): mounted read-only from the repo root (see
+      # the full compose file's note); CURRICULUM_DIR set so a
+      # missing mount fails startup loudly instead of seeding
+      # nothing. The worker gets the same mount for parity.
+      CURRICULUM_DIR: /curriculum
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "${API_PORT:-8081}:8080"
+    volumes:
+      - ../../curriculum:/curriculum:ro
     networks:
       - frontend_net
       - backend_net
@@ -101,10 +120,10 @@ services:
       start_period: 10s
       retries: 5
 
-  # The full compose file has no worker service (the worker binary
-  # ships in the api image but is not run by compose). Lite runs it:
-  # lab provisioning/destroy/expiry are worker jobs, and without a
-  # worker a lite lab would sit in CREATED forever.
+  # The full compose file runs a worker too (added Phase 1 — it was
+  # missing before and full-mode labs sat in CREATED forever). Lite
+  # runs it as well: lab provisioning/destroy/expiry are worker jobs,
+  # and without a worker a lite lab would sit in CREATED forever.
   worker:
     build:
       context: ../../backend
@@ -118,9 +137,17 @@ services:
       REDIS_ADDR: redis:6379
       NETWORK_ENGINE_ADDR: network-engine:50051
       CLOUDFORGE_JWT_SECRET: ${CLOUDFORGE_JWT_SECRET:?set CLOUDFORGE_JWT_SECRET in .env}
+      CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
+      CLOUDFORGE_DEV: ${CLOUDFORGE_DEV:-0}
       CLOUDFORGE_LITE: "true"
       CLOUDFORGE_MODE: lite
       HOST_AGENT_MODE: simulated
+      # Worker listens on :8083 internally (the API host port moved
+      # to 8081, so the old worker default :8081 would collide).
+      WORKER_ADDR: ":8083"
+      CURRICULUM_DIR: /curriculum
+    volumes:
+      - ../../curriculum:/curriculum:ro
     networks:
       - backend_net
       - management_net
@@ -147,8 +174,10 @@ services:
     environment:
       NETWORK_ENGINE_ADDR: "0.0.0.0:50051"
       NETWORK_ENGINE_BACKEND: simulated
-    ports:
-      - "50051:50051"
+      # Phase 7 (R1): token required on every gRPC RPC. The port
+      # is NOT published on the host: only api/worker reach the
+      # engine, on management_net.
+      CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
     networks:
       - management_net
     deploy:
@@ -173,7 +202,7 @@ services:
     container_name: cloudforge-frontend-lite
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-80}:8080"
+      - "${FRONTEND_PORT:-8080}:8080"
     networks:
       - frontend_net
     depends_on:

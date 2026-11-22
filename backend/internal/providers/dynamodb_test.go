@@ -12,10 +12,12 @@ import (
 
 // fakeDynamo is a test double for DynamoDB Local: it answers the
 // JSON API (ListTables / CreateTable / PutItem / GetItem) from
-// memory. It is NOT a real DynamoDB.
+// memory. It is NOT a real DynamoDB. Like the real Local, it
+// requires an Authorization header on every request.
 type fakeDynamo struct {
-	mu     sync.Mutex
-	tables map[string]map[string]map[string]any // table -> key JSON -> item
+	mu      sync.Mutex
+	tables  map[string]map[string]map[string]any // table -> key JSON -> item
+	sawAuth bool
 }
 
 func (f *fakeDynamo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -23,6 +25,12 @@ func (f *fakeDynamo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if r.Header.Get("Authorization") == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"__type": "com.amazonaws.dynamodb.v20120810#MissingAuthenticationToken", "message": "Request must contain either a valid (registered) AWS access key ID or X.509 certificate."})
+		return
+	}
+	f.sawAuth = true
 	write := func(v any) {
 		w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 		_ = json.NewEncoder(w).Encode(v)
@@ -119,9 +127,17 @@ func TestDynamoDBAdapterAgainstFakeServer(t *testing.T) {
 	if len(tables) != 1 || tables[0] != "users" {
 		t.Fatalf("ListTables = %v", tables)
 	}
+	// Every request must carry the dummy Authorization header:
+	// real DynamoDB Local rejects unsigned requests with
+	// MissingAuthenticationToken (seen live 2026-11-21).
+	if !fake.sawAuth {
+		t.Fatal("adapter sent no Authorization header; DynamoDB Local would reject every call")
+	}
 	// Duplicate table is a caller error, not unavailability.
 	if err := a.CreateTable(ctx, "users", "id"); err == nil || errors.Is(err, ErrDynamoUnavailable) {
 		t.Fatalf("duplicate table err = %v, want a caller error", err)
+	} else if !errors.Is(err, ErrDynamoTableExists) {
+		t.Fatalf("duplicate table err = %v, want ErrDynamoTableExists", err)
 	}
 }
 

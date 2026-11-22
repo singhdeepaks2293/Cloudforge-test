@@ -51,52 +51,76 @@ func (s *Server) terraformRunView(r *store.TerraformRun) map[string]any {
 	}
 }
 
+// terraformAvailability checks the provider config and the runner
+// without writing a response. It returns the HTTP status, error code
+// and message to report when Terraform cannot run, and available=true
+// when it can.
+func (s *Server) terraformAvailability(r *http.Request) (status int, code, message string, available bool) {
+	if err := terraform.ValidateProviderConfig(s.EmulatorEndpoint, s.MinIOEndpoint); err != nil {
+		return http.StatusBadRequest, "invalid_provider_config", err.Error(), false
+	}
+	if ok, reason := s.TerraformRunner.Available(r.Context()); !ok {
+		return http.StatusServiceUnavailable, "terraform_unavailable", reason, false
+	}
+	return 0, "", "", true
+}
+
 // checkTerraformAvailable validates the provider config and the
 // runner before any run is created. A 503 here means "Docker (or
 // the emulator endpoint) is not available", never a faked run.
 func (s *Server) checkTerraformAvailable(w http.ResponseWriter, r *http.Request) bool {
-	if err := terraform.ValidateProviderConfig(s.EmulatorEndpoint, s.MinIOEndpoint); err != nil {
-		s.writeError(w, r, http.StatusBadRequest, "invalid_provider_config", err.Error())
-		return false
+	status, code, message, ok := s.terraformAvailability(r)
+	if ok {
+		return true
 	}
-	if ok, reason := s.TerraformRunner.Available(r.Context()); !ok {
-		s.writeJSON(w, r, http.StatusServiceUnavailable, map[string]any{
+	if status == http.StatusServiceUnavailable {
+		s.writeJSON(w, r, status, map[string]any{
 			"error": map[string]any{
-				"code": "terraform_unavailable", "message": reason,
+				"code": code, "message": message,
 				"request_id": RequestID(r.Context()),
 			},
 			"capability": map[string]any{
 				"service": "terraform", "operation": "run",
-				"detail": reason, "image": terraform.DefaultImage,
+				"detail": message, "image": terraform.DefaultImage,
 			},
 		})
 		return false
 	}
-	return true
+	s.writeError(w, r, status, code, message)
+	return false
 }
 
-func (s *Server) enqueueTerraform(w http.ResponseWriter, r *http.Request, u *auth.User, lab *labs.Lab, action string, req terraformRequest) {
+// terraformEnqueueFailure is a failed run creation: status + error
+// code + message, so callers can render it in their own envelope.
+type terraformEnqueueFailure struct {
+	status  int
+	code    string
+	message string
+}
+
+// enqueueTerraformRun creates a terraform run row and enqueues its
+// worker job without writing an HTTP response. The lab handlers use
+// it through enqueueTerraform; the Terraform Learning executions use
+// it directly so both paths share one creation + gating path.
+func (s *Server) enqueueTerraformRun(r *http.Request, u *auth.User, lab *labs.Lab, action string, req terraformRequest) (*store.TerraformRun, *store.Job, *terraformEnqueueFailure) {
 	meta, ok := terraformActions[action]
 	if !ok {
-		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "unknown terraform action "+action)
-		return
+		return nil, nil, &terraformEnqueueFailure{http.StatusBadRequest, "invalid_request", "unknown terraform action " + action}
 	}
 	if req.Configuration != "" {
 		if err := terraform.ValidateConfiguration(req.Configuration); err != nil {
-			s.writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
-			return
+			return nil, nil, &terraformEnqueueFailure{http.StatusBadRequest, "invalid_request", err.Error()}
 		}
 	}
-	if !s.checkTerraformAvailable(w, r) {
-		return
+	if status, code, message, available := s.terraformAvailability(r); !available {
+		return nil, nil, &terraformEnqueueFailure{status, code, message}
 	}
 	run, err := s.TerraformRuns.CreateRun(r.Context(), &store.TerraformRun{
 		UserID: u.ID, LabID: lab.ID, Action: action, State: "QUEUED",
 		Configuration: req.Configuration,
 	})
 	if err != nil {
-		s.writeError(w, r, http.StatusInternalServerError, "internal_error", err.Error())
-		return
+		return nil, nil, &terraformEnqueueFailure{http.StatusInternalServerError, "internal_error", err.Error()}
 	}
 	payload := map[string]any{"lab_id": lab.ID, "run_id": run.ID, "action": action, "user_id": u.ID}
 	if req.Configuration != "" {
@@ -107,12 +131,33 @@ func (s *Server) enqueueTerraform(w http.ResponseWriter, r *http.Request, u *aut
 	}
 	job, _, err := s.Jobs.Enqueue(r.Context(), meta.jobType, payload, "terraform:"+action+":"+run.ID)
 	if err != nil {
-		s.writeError(w, r, http.StatusInternalServerError, "internal_error", "could not enqueue terraform job: "+err.Error())
-		return
+		return nil, nil, &terraformEnqueueFailure{http.StatusInternalServerError, "internal_error", "could not enqueue terraform job: " + err.Error()}
 	}
 	run.JobID = job.ID
 	if _, err := s.TerraformRuns.UpdateRun(r.Context(), run); err != nil {
 		s.Logger.Warn("could not link terraform job to run", "run_id", run.ID, "error", err)
+	}
+	return run, job, nil
+}
+
+func (s *Server) enqueueTerraform(w http.ResponseWriter, r *http.Request, u *auth.User, lab *labs.Lab, action string, req terraformRequest) {
+	run, job, fail := s.enqueueTerraformRun(r, u, lab, action, req)
+	if fail != nil {
+		if fail.status == http.StatusServiceUnavailable {
+			s.writeJSON(w, r, fail.status, map[string]any{
+				"error": map[string]any{
+					"code": fail.code, "message": fail.message,
+					"request_id": RequestID(r.Context()),
+				},
+				"capability": map[string]any{
+					"service": "terraform", "operation": "run",
+					"detail": fail.message, "image": terraform.DefaultImage,
+				},
+			})
+			return
+		}
+		s.writeError(w, r, fail.status, fail.code, fail.message)
+		return
 	}
 	s.audit(r, u.ID, "terraform_"+action+"_requested", "terraform_run", run.ID,
 		map[string]any{"lab_id": lab.ID, "job_id": job.ID})
@@ -120,6 +165,34 @@ func (s *Server) enqueueTerraform(w http.ResponseWriter, r *http.Request, u *aut
 		"run_id": run.ID, "job_id": job.ID, "action": action, "state": "QUEUED",
 		"run": s.terraformRunView(run),
 	})
+}
+
+// loadApprovablePlan loads the M7 plan an apply needs: it must exist,
+// belong to this lab, be a SUCCEEDED plan, be approved, and be
+// unexpired. Any other state is a failure the caller renders.
+func (s *Server) loadApprovablePlan(r *http.Request, lab *labs.Lab, planID string) (*store.TerraformRun, *terraformEnqueueFailure) {
+	planRun, err := s.TerraformRuns.GetRunByPlanID(r.Context(), planID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, &terraformEnqueueFailure{http.StatusNotFound, "plan_not_found", "no plan with that plan_id"}
+		}
+		return nil, &terraformEnqueueFailure{http.StatusInternalServerError, "internal_error", err.Error()}
+	}
+	if planRun.LabID != lab.ID {
+		return nil, &terraformEnqueueFailure{http.StatusNotFound, "plan_not_found", "no plan with that plan_id"}
+	}
+	if planRun.Action != "plan" || planRun.State != "SUCCEEDED" {
+		return nil, &terraformEnqueueFailure{http.StatusConflict, "plan_not_ready",
+			fmt.Sprintf("plan %s is %s; only a succeeded plan can be applied", planID, planRun.State)}
+	}
+	if planRun.ApprovedAt == nil {
+		return nil, &terraformEnqueueFailure{http.StatusConflict, "plan_not_approved",
+			"plan " + planID + " has not been approved; POST /terraform/approve first"}
+	}
+	if planRun.PlanExpiresAt == nil || time.Now().UTC().After(*planRun.PlanExpiresAt) {
+		return nil, &terraformEnqueueFailure{http.StatusConflict, "plan_expired", "the approved plan has expired; run plan again"}
+	}
+	return planRun, nil
 }
 
 func (s *Server) decodeTerraformRequest(w http.ResponseWriter, r *http.Request) (terraformRequest, bool) {
@@ -276,31 +349,8 @@ func (s *Server) handleTerraformApply(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "plan_id is required: apply needs an approved plan")
 		return
 	}
-	planRun, err := s.TerraformRuns.GetRunByPlanID(r.Context(), req.PlanID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			s.writeError(w, r, http.StatusNotFound, "plan_not_found", "no plan with that plan_id")
-			return
-		}
-		s.writeError(w, r, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-	if planRun.LabID != lab.ID {
-		s.writeError(w, r, http.StatusNotFound, "plan_not_found", "no plan with that plan_id")
-		return
-	}
-	if planRun.Action != "plan" || planRun.State != "SUCCEEDED" {
-		s.writeError(w, r, http.StatusConflict, "plan_not_ready",
-			fmt.Sprintf("plan %s is %s; only a succeeded plan can be applied", req.PlanID, planRun.State))
-		return
-	}
-	if planRun.ApprovedAt == nil {
-		s.writeError(w, r, http.StatusConflict, "plan_not_approved",
-			"plan "+req.PlanID+" has not been approved; POST /terraform/approve first")
-		return
-	}
-	if planRun.PlanExpiresAt == nil || time.Now().UTC().After(*planRun.PlanExpiresAt) {
-		s.writeError(w, r, http.StatusConflict, "plan_expired", "the approved plan has expired; run plan again")
+	if _, fail := s.loadApprovablePlan(r, lab, req.PlanID); fail != nil {
+		s.writeError(w, r, fail.status, fail.code, fail.message)
 		return
 	}
 	s.enqueueTerraform(w, r, u, lab, "apply", req)

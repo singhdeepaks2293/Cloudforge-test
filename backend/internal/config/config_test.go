@@ -20,7 +20,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DatabaseURL != DefaultDatabaseURL {
 		t.Fatalf("default DATABASE_URL: %q", cfg.DatabaseURL)
 	}
-	if cfg.RedisAddr != "localhost:6379" || cfg.Addr != ":8080" || cfg.WorkerMaxAttempts != 5 {
+	if cfg.RedisAddr != "localhost:6379" || cfg.Addr != ":8081" || cfg.WorkerAddr != ":8083" || cfg.WorkerMaxAttempts != 5 {
 		t.Fatalf("defaults wrong: %+v", cfg)
 	}
 }
@@ -166,4 +166,74 @@ func TestLoadModeFlag(t *testing.T) {
 func TestMain(m *testing.M) {
 	// Ensure tests do not leak env between cases (t.Setenv handles it).
 	os.Exit(m.Run())
+}
+
+// --- Phase 7: fail-closed secrets ---------------------------------------
+
+// TestValidateSecretsFailsClosed verifies R4: without CLOUDFORGE_DEV=1,
+// unset or dev-default secrets refuse startup with an error naming
+// the variable; with the opt-in, dev defaults are allowed (with a
+// warning) and production secrets pass clean.
+func TestValidateSecretsFailsClosed(t *testing.T) {
+	t.Setenv("CLOUDFORGE_DEV", "")
+	t.Setenv("CLOUDFORGE_JWT_SECRET", "")
+	t.Setenv("CLOUDFORGE_ENGINE_TOKEN", "")
+	t.Setenv("CLOUDFORGE_METRICS_TOKEN", "")
+	t.Setenv("MINIO_ACCESS_KEY", "minioadmin")
+	t.Setenv("MINIO_SECRET_KEY", "minioadmin")
+	t.Setenv("HOST_AGENT_TOKEN", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := cfg.ValidateSecrets(); err == nil {
+		t.Fatal("ValidateSecrets must fail with unset/dev-default secrets and no dev opt-in")
+	} else {
+		for _, want := range []string{"CLOUDFORGE_JWT_SECRET", "CLOUDFORGE_ENGINE_TOKEN", "CLOUDFORGE_METRICS_TOKEN"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q must name %s", err.Error(), want)
+			}
+		}
+	}
+
+	// Dev opt-in: dev defaults are usable, with a warning.
+	t.Setenv("CLOUDFORGE_DEV", "1")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load dev: %v", err)
+	}
+	if !cfg.Dev || cfg.EngineToken != DevEngineToken {
+		t.Fatalf("dev mode must set Dev and the dev engine token, got %+v", cfg)
+	}
+	warns, err := cfg.ValidateSecrets()
+	if err != nil {
+		t.Fatalf("dev mode must not fail validation: %v", err)
+	}
+	if len(warns) == 0 {
+		t.Error("dev mode must return a warning naming the opt-in")
+	}
+
+	// Production secrets pass.
+	t.Setenv("CLOUDFORGE_DEV", "")
+	t.Setenv("CLOUDFORGE_JWT_SECRET", "a-very-long-production-jwt-secret-0123456789")
+	t.Setenv("CLOUDFORGE_ENGINE_TOKEN", "engine-token-long-enough")
+	t.Setenv("CLOUDFORGE_METRICS_TOKEN", "metrics-token-long-enough")
+	t.Setenv("MINIO_ACCESS_KEY", "prod-access-key")
+	t.Setenv("MINIO_SECRET_KEY", "prod-secret-key-long")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load prod: %v", err)
+	}
+	if warns, err := cfg.ValidateSecrets(); err != nil || len(warns) != 0 {
+		t.Fatalf("production secrets must validate clean: warns=%v err=%v", warns, err)
+	}
+	// A short JWT secret is still refused.
+	t.Setenv("CLOUDFORGE_JWT_SECRET", "short")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := cfg.ValidateSecrets(); err == nil {
+		t.Fatal("short JWT secret must fail validation")
+	}
 }

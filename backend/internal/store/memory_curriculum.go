@@ -19,6 +19,7 @@ import (
 type MemoryCurriculumStore struct {
 	mu           sync.Mutex
 	courses      *MemoryCourseStore
+	tracks       map[string]bool // ids of courses seeded as curriculum tracks (UpsertTrack)
 	assessments  map[string][]curriculum.Question
 	labDefs      map[string]*curriculum.LabDefinition
 	achievements map[string]*curriculum.Achievement
@@ -56,6 +57,7 @@ func NewMemoryCurriculumStore(courses *MemoryCourseStore) *MemoryCurriculumStore
 	}
 	return &MemoryCurriculumStore{
 		courses:      courses,
+		tracks:       make(map[string]bool),
 		assessments:  make(map[string][]curriculum.Question),
 		labDefs:      make(map[string]*curriculum.LabDefinition),
 		achievements: make(map[string]*curriculum.Achievement),
@@ -86,6 +88,13 @@ func (m *MemoryCurriculumStore) UpsertTrack(ctx context.Context, t *curriculum.T
 	m.courses.upsertCourse(c)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Phase 1 fix (14-vs-17): record that this course id is a real
+	// curriculum track. ListTracks must return tracks only — the
+	// shared course store also holds the 3 legacy M1 courses
+	// (vpc-fundamentals, iam-security, ec2-basics), which are courses
+	// but not tracks, and listing them here inflated the count to 17
+	// while the seed report (correctly) said 14.
+	m.tracks[t.ID] = true
 	m.assessments[t.ID] = append([]curriculum.Question(nil), t.Assessment...)
 	guided := t.GuidedLab
 	m.labDefs[guided.ID] = &guided
@@ -118,8 +127,16 @@ func (m *MemoryCurriculumStore) ListTracks(ctx context.Context) ([]*curriculum.T
 	if err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []*curriculum.TrackSummary
 	for _, c := range list {
+		// Phase 1 fix (14-vs-17): only courses seeded via
+		// UpsertTrack are tracks. The 3 legacy M1 courses in the
+		// shared course store are courses, not tracks.
+		if !m.tracks[c.ID] {
+			continue
+		}
 		out = append(out, &curriculum.TrackSummary{ID: c.ID, Title: c.Title, Description: c.Description,
 			Difficulty: c.Difficulty, EstimatedHours: c.EstimatedHours, XPReward: c.XPReward,
 			LessonCount: c.LessonCount(), ModuleCount: len(c.Modules)})

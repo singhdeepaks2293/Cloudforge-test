@@ -121,36 +121,3 @@ func (s *Server) handleS3ListBuckets(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeJSON(w, r, http.StatusOK, map[string]any{"buckets": buckets})
 }
-
-type iamEvaluateRequest struct {
-	Policies []providers.Policy `json:"policies"`
-	Action   string             `json:"action"`
-	Resource string             `json:"resource"`
-	Username string             `json:"username"`
-}
-
-func (s *Server) handleIAMEvaluate(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.requireAuth(w, r)
-	if !ok {
-		return
-	}
-	var req iamEvaluateRequest
-	if !s.decodeJSON(w, r, &req) {
-		return
-	}
-	if req.Action == "" || req.Resource == "" {
-		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "action and resource are required")
-		return
-	}
-	if len(req.Policies) == 0 {
-		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "at least one policy is required")
-		return
-	}
-	result := providers.Evaluate(req.Policies, providers.EvalRequest{
-		Action: req.Action, Resource: req.Resource, Username: req.Username,
-	})
-	s.audit(r, u.ID, "aws_iam_evaluated", "iam-policy", "", map[string]any{
-		"action": req.Action, "resource": req.Resource, "decision": result.Decision,
-	})
-	s.writeJSON(w, r, http.StatusOK, result)
-}

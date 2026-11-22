@@ -28,6 +28,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudforge/cloudforge/backend/internal/hostagent"
@@ -45,6 +46,7 @@ type fakeEngine struct {
 	gen.UnimplementedNetworkEngineServer
 	mu       sync.Mutex
 	networks map[string]*fakeNetwork
+	nats     map[string]struct{}
 }
 
 func okResult() *gen.OperationResult {
@@ -92,6 +94,27 @@ func (f *fakeEngine) DeleteSubnet(_ context.Context, req *gen.DeleteSubnetReques
 	return okResult(), nil
 }
 
+// CreateNAT / DeleteNAT record NAT state in memory. The API creates a
+// NAT gateway through the engine (Phase 2); without these the E2E
+// gateway step fails with Unimplemented. A missing NAT on delete is
+// fine — the API tolerates NOT_FOUND there.
+func (f *fakeEngine) CreateNAT(_ context.Context, req *gen.CreateNATRequest) (*gen.OperationResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.nats == nil {
+		f.nats = map[string]struct{}{}
+	}
+	f.nats[req.GetNatId()] = struct{}{}
+	return okResult(), nil
+}
+
+func (f *fakeEngine) DeleteNAT(_ context.Context, req *gen.DeleteNATRequest) (*gen.OperationResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.nats, req.GetNatId())
+	return okResult(), nil
+}
+
 func (f *fakeEngine) InspectTopology(_ context.Context, req *gen.InspectTopologyRequest) (*gen.InspectTopologyResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -126,6 +149,10 @@ func (f *fakeEngine) CleanupLab(_ context.Context, req *gen.CleanupLabRequest) (
 
 func main() {
 	engineAddr := flag.String("engine-addr", "127.0.0.1:50051", "gRPC listen address for the fake network engine")
+	// Phase 7: the fake engine enforces the same token the real
+	// engine does (metadata x-cloudforge-engine-token). Empty =
+	// unauthenticated (legacy behaviour, only for ad-hoc runs).
+	engineToken := flag.String("engine-token", "", "shared-secret token required on every fake-engine RPC")
 	haAddr := flag.String("host-agent-addr", "127.0.0.1:18082", "HTTP listen address for the simulated host agent")
 	haToken := flag.String("host-agent-token", "e2e-token", "shared bearer <redacted> for the host-agent API")
 	flag.Parse()
@@ -138,7 +165,20 @@ func main() {
 		logger.Error("fake engine listen failed", "addr", *engineAddr, "error", err)
 		os.Exit(1)
 	}
-	grpcSrv := grpc.NewServer()
+	// Phase 7: unary interceptor enforcing the engine token
+	// when one is configured (mirrors the Rust engine).
+	var opts []grpc.ServerOption
+	if *engineToken != "" {
+		token := *engineToken
+		opts = append(opts, grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+			md, ok := metadata.FromIncomingContext(ctx)
+			if !ok || len(md.Get("x-cloudforge-engine-token")) == 0 || md.Get("x-cloudforge-engine-token")[0] != token {
+				return nil, status.Error(codes.Unauthenticated, "ENGINE_UNAUTHENTICATED: a valid x-cloudforge-engine-token is required")
+			}
+			return handler(ctx, req)
+		}))
+	}
+	grpcSrv := grpc.NewServer(opts...)
 	gen.RegisterNetworkEngineServer(grpcSrv, &fakeEngine{networks: map[string]*fakeNetwork{}})
 	go func() {
 		if err := grpcSrv.Serve(lis); err != nil {

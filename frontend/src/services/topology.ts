@@ -38,6 +38,8 @@ const KIND_LABELS: Record<LabResourceKind, string> = {
   instance: 'Instance',
   gateway: 'Gateway',
   loadbalancer: 'Load Balancer',
+  'route-table': 'Route Table',
+  'security-group': 'Security Group',
   unknown: 'Resource',
 }
 

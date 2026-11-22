@@ -347,6 +347,25 @@ type ContainerRunner struct {
 	Image      string
 	SocketPath string
 	HTTP       *http.Client
+	// NetworkMode is the Docker network mode for terraform
+	// containers: "bridge" (default — the container shares the
+	// Docker bridge and can reach the emulator via
+	// host.docker.internal) or "isolated" (--network none: no
+	// egress at all, not even the emulator; Phase 7, risk R11).
+	// Isolated mode is real network-namespace isolation enforced
+	// by the Docker daemon; it is NOT approximated in-process.
+	NetworkMode string
+}
+
+// WithNetworkMode returns r with NetworkMode set ("bridge" when
+// empty/invalid input is normalised by config, so any other value
+// here is a programming error and is treated as bridge).
+func (r *ContainerRunner) WithNetworkMode(mode string) *ContainerRunner {
+	if mode == "" {
+		mode = "bridge"
+	}
+	r.NetworkMode = mode
+	return r
 }
 
 // NewContainerRunner builds a runner for image (DefaultImage when
@@ -366,7 +385,7 @@ func NewContainerRunner(image, socketPath string) *ContainerRunner {
 		},
 	}
 	return &ContainerRunner{Image: image, SocketPath: socketPath,
-		HTTP: &http.Client{Transport: transport, Timeout: 5 * time.Minute}}
+		HTTP: &http.Client{Transport: transport, Timeout: 5 * time.Minute}, NetworkMode: "bridge"}
 }
 
 // Available checks the socket exists and the daemon answers /_ping.
@@ -427,6 +446,27 @@ func (r *ContainerRunner) call(ctx context.Context, method, path string, body an
 	return nil
 }
 
+// tfHostConfig builds the Docker HostConfig for a terraform run.
+// In isolated mode the container gets --network none and NO
+// ExtraHosts entry: it cannot reach the emulator, the host, or the
+// internet. A plan/apply that needs the emulator then fails
+// honestly (provider init error) instead of silently reaching
+// somewhere it should not.
+func tfHostConfig(r *ContainerRunner, workdir string) map[string]any {
+	hc := map[string]any{
+		"Binds":      []string{workdir + ":/work"},
+		"NanoCpus":   1_000_000_000,
+		"Memory":     512 * 1024 * 1024,
+		"AutoRemove": false,
+	}
+	if r.NetworkMode == "isolated" {
+		hc["NetworkMode"] = "none"
+	} else {
+		hc["ExtraHosts"] = []string{"host.docker.internal:host-gateway"}
+	}
+	return hc
+}
+
 // Run executes one terraform operation in a fresh container. The
 // workdir must already exist with provider.tf (+ main.tf when the lab
 // supplied configuration); the container mounts only that directory,
@@ -458,13 +498,7 @@ func (r *ContainerRunner) Run(ctx context.Context, req RunRequest) (RunResult, e
 		"Cmd":        []string{"sh", "-c", shell},
 		"WorkingDir": "/work",
 		"Env":        envList(req.Env),
-		"HostConfig": map[string]any{
-			"Binds":      []string{req.Workdir + ":/work"},
-			"NanoCpus":   1_000_000_000,
-			"Memory":     512 * 1024 * 1024,
-			"AutoRemove": false,
-			"ExtraHosts": []string{"host.docker.internal:host-gateway"},
-		},
+		"HostConfig": tfHostConfig(r, req.Workdir),
 	}
 	var created struct {
 		ID string `json:"Id"`

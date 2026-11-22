@@ -8,7 +8,7 @@
 //! Structured logs go to stdout; set `RUST_LOG` to tune verbosity,
 //! e.g. `RUST_LOG=network_engine=debug,grpc_server=debug`.
 
-use grpc_server::{serve, EngineState};
+use grpc_server::EngineState;
 use std::net::SocketAddr;
 use tracing::info;
 
@@ -26,12 +26,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()
         .map_err(|e| format!("invalid NETWORK_ENGINE_ADDR: {e}"))?;
 
+    // Phase 7 (R1): fail closed. The engine never starts
+    // unauthenticated in production: a token must be configured
+    // (CLOUDFORGE_ENGINE_TOKEN) or dev mode explicitly opted into
+    // (CLOUDFORGE_DEV=1, which uses the well-known dev token).
+    let token = grpc_server::engine_token_from_env();
+    if token.is_none() {
+        return Err("refusing to start: set CLOUDFORGE_ENGINE_TOKEN to a long random value, or CLOUDFORGE_DEV=1 for local development only".into());
+    }
+
     let state = EngineState::from_env();
     info!(
         backend = state.backend.fidelity(),
         "starting network-engine"
     );
-    serve(addr, state).await?;
+    grpc_server::serve_with_token(addr, state, token).await?;
     info!("network-engine shut down cleanly");
     Ok(())
 }

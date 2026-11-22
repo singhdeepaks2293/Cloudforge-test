@@ -59,10 +59,24 @@ func main() {
 	}
 	logger.Info("cloudforge api starting", "config", cfg.String())
 
+	// Phase 7 (R4): fail closed on production secrets. Without
+	// CLOUDFORGE_DEV=1, an unset or dev-default JWT/engine/metrics
+	// secret (or MinIO default) refuses startup with an error naming
+	// the variable. In dev mode the well-known defaults are allowed
+	// only via the explicit opt-in, and the warning is loud.
+	if warns, err := cfg.ValidateSecrets(); err != nil {
+		logger.Error("refusing to start: production secrets are not configured", "error", err)
+		os.Exit(1)
+	} else {
+		for _, w := range warns {
+			logger.Warn(w)
+		}
+	}
 	secret := cfg.JWTSecret
 	if secret == "" {
-		secret = "dev-only-change-me"
-		logger.Warn("CLOUDFORGE_JWT_SECRET is not set; using insecure dev default — set it before any shared deployment")
+		// Dev mode only (ValidateSecrets already enforced this):
+		// the dev default JWT secret.
+		secret = config.DevJWTSecret
 	}
 
 	// PostgreSQL: try to connect and migrate; fall back to in-memory
@@ -82,16 +96,22 @@ func main() {
 		jobStore  store.JobStore
 		curr      store.CurriculumStore
 		quotas    store.QuotaStore
+		iamStore  store.IAMStore
+		p3Store   store.Phase3Store
 		dbOK      bool
 		asyncProv bool
 	)
 	signer := auth.NewStore(secret)
 	signer.TokenTTL = cfg.TokenTTL
+	// Phase 7 (R3): durable token revocation. The revoker is
+	// installed after the store choice below (Postgres when the DB
+	// is up, Redis when it is reachable, memory otherwise); see
+	// the installRevoker call after the if/else.
 	if dbErr != nil {
 		logger.Warn("PostgreSQL unavailable; running with in-memory stores (data is lost on restart)", "error", dbErr)
 		memLabs := labs.NewStore()
 		memLabs.CheckNetwork = func() bool {
-			ok, _ := networkclient.New(cfg.NetworkEngineAddr).Reachable(context.Background())
+			ok, _ := networkclient.NewWithToken(cfg.NetworkEngineAddr, cfg.EngineToken).Reachable(context.Background())
 			return ok
 		}
 		users = signer
@@ -104,6 +124,8 @@ func main() {
 		jobStore = store.NewMemoryJobStore()
 		curr = store.NewMemoryCurriculumStore(courses.(*store.MemoryCourseStore))
 		quotas = store.NewMemoryQuotaStore()
+		iamStore = store.NewMemoryIAMStore()
+		p3Store = store.NewMemoryPhase3Store()
 	} else {
 		defer db.Close()
 		migCtx, migCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -126,6 +148,8 @@ func main() {
 		jobStore = store.NewPostgresJobStore(db)
 		curr = store.NewPostgresCurriculumStore(db)
 		quotas = store.NewPostgresQuotaStore(db)
+		iamStore = store.NewPostgresIAMStore(db)
+		p3Store = store.NewPostgresPhase3Store(db)
 		dbOK = true
 		asyncProv = true
 	}
@@ -204,7 +228,17 @@ func main() {
 		defer redisCache.Close()
 	}
 
-	netClient := networkclient.New(cfg.NetworkEngineAddr)
+	// Phase 7 (R3): install the token revoker on the shared signer.
+	// Postgres is durable across restarts; Redis is shared across
+	// replicas; memory is single-process only (in-memory fallback).
+	if dbOK {
+		signer.SetRevoker(store.NewPostgresRevoker(db))
+	} else if redisCache != nil && redisCache.Available() {
+		signer.SetRevoker(auth.NewRedisRevoker(ratelimit.NewClient(cfg.RedisAddr)))
+	}
+	// (Otherwise the memory revoker from auth.NewStore stays.)
+
+	netClient := networkclient.NewWithToken(cfg.NetworkEngineAddr, cfg.EngineToken)
 	// M5: AWS provider backends (MinIO S3, DynamoDB Local, the
 	// educational simulators, LocalStack emulator probe). Client
 	// construction performs no network I/O; reachability is
@@ -259,13 +293,22 @@ func main() {
 		ProvisionAsync: asyncProv, DBConnected: dbOK,
 		HostAgent: hostAgentClient, HostAgentMode: cfg.HostAgentMode,
 		Resources: resources, TerraformRuns: tfRuns, TerminalSessions: termSess,
-		Jobs: jobStore, TerraformRunner: terraform.NewContainerRunner(cfg.TerraformImage, ""),
+		Jobs: jobStore, TerraformRunner: terraform.NewContainerRunner(cfg.TerraformImage, "").WithNetworkMode(cfg.TFNetworkMode),
 		EmulatorEndpoint: cfg.EmulatorEndpoint, MinIOEndpoint: cfg.MinIOEndpoint,
 		WorkdirRoot: cfg.TerraformWorkdirRoot,
 		Curriculum:  curr, CurriculumDir: cfg.CurriculumDir,
 		DBHealth:    dbHealth,
 		AuthLimiter: authLimiter, APILimiter: apiLimiter,
-		Quotas: quotas, Lite: cfg.Lite,
+		UserAPILimiter: ratelimit.New(rlClient, "api-user", cfg.UserAPIRateLimit, cfg.UserAPIRateWindow),
+		MetricsToken:   cfg.MetricsToken, TLSEnabled: cfg.TLSEnabled,
+		TrustedProxies:       cfg.TrustedProxies,
+		AuditExportRetention: cfg.AuditExportRetention,
+		Quotas:               quotas, Lite: cfg.Lite,
+		IAM: iamStore, P3: p3Store,
+		P3DatabaseURL: cfg.DatabaseURL, P3RedisAddr: cfg.RedisAddr,
+		P3DynamoEndpoint: cfg.DynamoDBEndpoint, P3WorkdirRoot: cfg.TerraformWorkdirRoot,
+		P4RegistryURL: cfg.ECRRegistryURL, P4BuildSourceRoot: cfg.BuildSourceRoot,
+		P6MasterKey: kmsMasterKey(),
 	})
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
@@ -296,11 +339,11 @@ func main() {
 }
 
 // healthCheck probes the API's own /readyz. The port follows the
-// same rules as config.Load: CLOUDFORGE_ADDR (":8080" form) wins,
-// else PORT, else 8080.
+// same rules as config.Load: CLOUDFORGE_ADDR (":8081" form) wins,
+// else PORT, else 8081.
 func healthCheck() int {
 	addr := os.Getenv("CLOUDFORGE_ADDR")
-	port := "8080"
+	port := "8081"
 	if addr != "" {
 		if _, p, err := net.SplitHostPort(addr); err == nil && p != "" {
 			port = p
@@ -323,4 +366,13 @@ func healthCheck() int {
 		return 1
 	}
 	return 0
+}
+
+// kmsMasterKey returns the Phase 6 KMS master secret:
+// CLOUDFORGE_KMS_MASTER_KEY when set, else the JWT secret.
+func kmsMasterKey() string {
+	if v := os.Getenv("CLOUDFORGE_KMS_MASTER_KEY"); v != "" {
+		return v
+	}
+	return os.Getenv("CLOUDFORGE_JWT_SECRET")
 }

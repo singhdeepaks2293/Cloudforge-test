@@ -47,6 +47,11 @@ type Service struct {
 	// configured: reconcile reports it and skips engine checks
 	// rather than deleting anything.
 	Engine EngineTopology
+	// AuditExportDir is where audit_cleanup archives rows older
+	// than 90 days before deleting them (Phase 7, R10). Empty =
+	// no archive is written (the delete still happens, and the
+	// missing archive is logged).
+	AuditExportDir string
 }
 
 func (s *Service) log() *slog.Logger {
@@ -335,6 +340,18 @@ func (s *Service) SweepExpired(ctx context.Context) error {
 func (s *Service) auditCleanup(ctx context.Context, j *store.Job) error {
 	if s.Audit == nil {
 		return nil
+	}
+	// Phase 7 (R10): audit retention is no longer delete-only.
+	// Rows older than 90 days are exported to a CSV archive file
+	// first; only then are they deleted. A failed export blocks
+	// the delete, so history is never silently lost.
+	if s.AuditExportDir != "" {
+		if err := exportAuditArchive(ctx, s.Audit, s.AuditExportDir); err != nil {
+			s.log().Error("audit cleanup archive failed; old entries kept", "error", err)
+			return err
+		}
+	} else {
+		s.log().Warn("audit cleanup has no export directory configured; old entries will be deleted without an archive")
 	}
 	n, err := s.Audit.CleanupOlderThan(ctx, 90)
 	if err != nil {

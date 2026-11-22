@@ -37,9 +37,41 @@ services:
       REDIS_ADDR: redis:6379
       NETWORK_ENGINE_ADDR: network-engine:50051
       CLOUDFORGE_JWT_SECRET: ${CLOUDFORGE_JWT_SECRET:?set CLOUDFORGE_JWT_SECRET in .env}
-      API_PORT: "8080"
+      # Phase 7: engine auth token (shared with network-engine)
+      # and the /metrics scrape token (shared with Prometheus).
+      # Both are fail-closed: compose refuses to start without
+      # them unless CLOUDFORGE_DEV=1 is set in .env.
+      CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
+      CLOUDFORGE_METRICS_TOKEN: ${CLOUDFORGE_METRICS_TOKEN:?set CLOUDFORGE_METRICS_TOKEN in .env}
+      CLOUDFORGE_DEV: ${CLOUDFORGE_DEV:-0}
+      # The API still listens on 8080 INSIDE its container (the host
+      # port is API_PORT in .env, default 8081 — see ports below);
+      # pin it explicitly because config's dev default is now :8081.
+      CLOUDFORGE_ADDR: ":8080"
+      # Curriculum (M8): the API seeds tracks/lessons/achievements
+      # from curriculum/ at startup. The api build context is
+      # backend/ only, so the repo-root curriculum/ is NOT in the
+      # image — it is mounted read-only below (a volume mount, not
+      # a build-context change, so backend/Dockerfile is untouched).
+      # CURRICULUM_DIR is set explicitly: with it set, a missing
+      # mount fails startup loudly instead of silently running
+      # with no curriculum ("seeding skipped" warning). Relative
+      # bind paths resolve against this compose file's directory,
+      # so ../../curriculum is the repo-root curriculum/ from any
+      # working directory.
+      CURRICULUM_DIR: /curriculum
+      # Phase 4: when set, the ECR registry backend proxies to the
+      # local registry:2 container below instead of the local-disk
+      # backend. Empty (or unset) in lite/dev = local-disk backend.
+      ECR_REGISTRY_URL: http://registry:5000
+      # Phase 4: CodeBuild/CodePipeline sources must be absolute
+      # paths under this root. In the full compose stack the workdir
+      # root is the labs volume; the API defaults to it when unset.
+      CLOUDFORGE_BUILD_SOURCE_ROOT: /var/lib/cloudforge/labs
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "${API_PORT:-8081}:8080"
+    volumes:
+      - ../../curriculum:/curriculum:ro
     networks:
       - frontend_net
       - backend_net
@@ -60,6 +92,53 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  # Phase 1: the full compose file runs a worker, mirroring lite.
+  # Lab provisioning/destroy/expiry are worker jobs; without a worker
+  # a full-mode lab would sit in CREATED forever (the API returns 202
+  # and enqueues the job). The worker listens on :8083 internally
+  # (the API host port moved to 8081, so the old worker default :8081
+  # would collide).
+  worker:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    image: cloudforge-api:0.1.0
+    container_name: cloudforge-worker
+    restart: unless-stopped
+    command: ["/app/worker"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cloudforge}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-cloudforge}?sslmode=disable
+      REDIS_ADDR: redis:6379
+      NETWORK_ENGINE_ADDR: network-engine:50051
+      CLOUDFORGE_JWT_SECRET: ${CLOUDFORGE_JWT_SECRET:?set CLOUDFORGE_JWT_SECRET in .env}
+      CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
+      CLOUDFORGE_DEV: ${CLOUDFORGE_DEV:-0}
+      # Worker listens on :8083 internally (see the port table in
+      # docs/IMPLEMENTATION_STATUS.md §1).
+      WORKER_ADDR: ":8083"
+      CURRICULUM_DIR: /curriculum
+    volumes:
+      - ../../curriculum:/curriculum:ro
+    networks:
+      - backend_net
+      - management_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.50"
+
 
   network-engine:
     build:
@@ -76,8 +155,10 @@ services:
       - NET_ADMIN
     environment:
       NETWORK_ENGINE_ADDR: "0.0.0.0:50051"
-    ports:
-      - "50051:50051"
+      # Phase 7 (R1): the engine requires this token on every gRPC
+      # RPC. The port is NOT published on the host any more: only
+      # the api/worker reach the engine, on management_net.
+      CLOUDFORGE_ENGINE_TOKEN: ${CLOUDFORGE_ENGINE_TOKEN:?set CLOUDFORGE_ENGINE_TOKEN in .env}
     networks:
       - management_net
     healthcheck:
@@ -92,6 +173,12 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.50"
+
 
   frontend:
     build:
@@ -107,9 +194,9 @@ services:
     container_name: cloudforge-frontend
     restart: unless-stopped
     # M9 Part 3: nginx runs unprivileged and listens on 8080 inside
-    # the container (see frontend/Dockerfile); the host port is :80.
+    # the container (see frontend/Dockerfile); the host port is :8080.
     ports:
-      - "${FRONTEND_PORT:-80}:8080"
+      - "${FRONTEND_PORT:-8080}:8080"
     networks:
       - frontend_net
     depends_on:
@@ -121,6 +208,12 @@ services:
       timeout: 3s
       start_period: 5s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.50"
+
 
   postgres:
     image: postgres:16.4
@@ -140,6 +233,12 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
 
   redis:
     image: redis:7.4
@@ -155,6 +254,40 @@ services:
       interval: 10s
       timeout: 5s
       start_period: 5s
+      retries: 5
+
+  # Optional: local Docker registry (registry:2) for the Phase 4
+  # ECR backend. Start with: docker compose --profile optional up -d registry
+  # The api then proxies ECR push/pull to it (ECR_REGISTRY_URL above);
+  # without this profile the api uses the local-disk backend instead.
+  # The registry has NO auth (local-only — the engine gRPC it
+  # resembles is now token-authenticated, Phase 7) and is not
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.50"
+
+  # exposed on a host port:
+  # only the api reaches it, on emulator_net. UNVERIFIED in the
+  # sandbox (no Docker here) — first verified run must be on a real
+  # Docker host; see docs/IMPLEMENTATION_STATUS.md §13.
+  registry:
+    profiles: ["optional"]
+    image: registry:2.8.3
+    container_name: cloudforge-registry
+    restart: unless-stopped
+    environment:
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    volumes:
+      - registrydata:/var/lib/registry
+    networks:
+      - emulator_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:5000/v2/"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
       retries: 5
 
   # Optional: S3-compatible object storage for the M5 S3 adapter.
@@ -193,6 +326,10 @@ services:
     image: prom/prometheus:v3.3.0
     container_name: cloudforge-prometheus
     restart: unless-stopped
+    environment:
+      # Phase 7 (R5): Prometheus scrapes /metrics with this token
+      # (prometheus.yml substitutes it into the scrape config).
+      CLOUDFORGE_METRICS_TOKEN: ${CLOUDFORGE_METRICS_TOKEN:?set CLOUDFORGE_METRICS_TOKEN in .env}
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -215,7 +352,9 @@ services:
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      # Phase 7 (R4): no more admin/admin default — compose
+      # refuses to start the monitoring profile without this.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ../../infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -248,6 +387,8 @@ volumes:
     name: cloudforge_redisdata
   miniodata:
     name: cloudforge_miniodata
+  registrydata:
+    name: cloudforge_registrydata
   prometheusdata:
     name: cloudforge_prometheusdata
   grafanadata:

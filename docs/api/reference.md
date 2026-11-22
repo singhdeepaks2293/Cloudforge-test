@@ -2,7 +2,7 @@
 
 Base URL: same-origin in the Docker deployment (nginx proxies
 `/api`, `/healthz`, `/readyz`, `/metrics` to the Go API), or
-`http://localhost:8080` when running the API directly / with
+`http://localhost:8081` when running the API directly / with
 `VITE_API_URL` set. All `/api/v1` paths below are relative to that
 base. The frontend client (`frontend/src/services/api.ts`) uses
 relative URLs when `VITE_API_URL` is unset.
@@ -49,20 +49,25 @@ Version: `0.9.0-m9` (see `GET /api/v1/health`).
 | `GET /healthz` | — | Liveness: `{"status":"ok"}` |
 | `GET /api/v1/health` | — | `{service, version, ok, uptime_seconds, network_engine_grpc, network_engine_detail, network_engine_reachable, network_engine_tcp_detail, database_connected, redis_connected, host_agent?}`. `network_engine_grpc` is the real gRPC Health RPC; `network_engine_reachable` is only a TCP probe, never engine health. |
 | `GET /readyz` | — | `{status: ready\|not_ready, components: {postgres, redis, engine}, checked_at}`. Each component: `{status: ok\|down\|disabled\|not_configured, latency_ms, error?}`. Live-checked on every call. **200** when ready; **503** when Postgres (if configured) is down. Redis/engine outages are reported but do not gate readiness. |
-| `GET /metrics` | — | Prometheus text format: `cloudforge_http_requests_total{method,route,status}`, `cloudforge_http_request_duration_seconds{method,route}`, `cloudforge_network_engine_up`, plus Go/process collectors. The `route` label is the chi route pattern, never a raw id. |
+| `GET /metrics` | Token or loopback | **Phase 7 (R5).** Prometheus text format: `cloudforge_http_requests_total{method,route,status}`, `cloudforge_http_request_duration_seconds{method,route}`, `cloudforge_network_engine_up`, plus Go/process collectors. The `route` label is the chi route pattern, never a raw id. Auth: `X-Metrics-Token: <CLOUDFORGE_METRICS_TOKEN>` or `Authorization: Bearer <token>`; without a token configured, loopback only (dev). No token → 401. nginx no longer proxies `/metrics` (404). |
 
 ## Auth & users
 
 | Method & path | Auth | Notes |
 |---|---|---|
 | `POST /api/v1/auth/register` | — | `{email, name, password}` (password ≥ 8 chars). New passwords are Argon2id-hashed. 201 `{token, expires_at, user}`; 409 `user_exists`. First user with `CLOUDFORGE_ADMIN_EMAIL` becomes admin. |
-| `POST /api/v1/auth/login` | — | `{email, password}` → 200 `{token, expires_at, user}`. Legacy bcrypt hashes still verify and are upgraded to Argon2id on success. |
-| `GET /api/v1/auth/me` | Bearer | Current user (public view). |
-| `GET /api/v1/users/me` | Bearer | Alias of `/auth/me`. |
+| `POST /api/v1/auth/login` | — | `{email, password}` → 200 `{token, expires_at, user}`. Legacy bcrypt hashes still verify and are upgraded to Argon2id on success. Sets the `HttpOnly` `cf_session` cookie (Phase 7). |
+| `POST /api/v1/auth/logout` | Bearer or cookie | **Phase 7 (R3).** Revokes the caller's token (`{logged_out: true, token_revoked: true}`) and clears the session cookie; the revoked token then gets 401. |
+| `POST /api/v1/admin/users/{id}/sessions/revoke` | Admin | **Phase 7 (R3).** Revokes all recorded sessions of the given user (`{revoked: N}`); the admin's own token still works. |
+| `GET /api/v1/auth/me` | Bearer or cookie | Current user (public view). Phase 7: the `cf_session` cookie alone authenticates. |
+| `GET /api/v1/users/me` | Bearer or cookie | Alias of `/auth/me`. |
 | `GET /api/v1/users` | Admin | All users (public views). |
 | `GET /api/v1/users/me/progress` | Bearer | **M8.** Per-track enrollment/percent, `total_xp`, `streak_days`. |
 | `GET /api/v1/users/me/achievements` | Bearer | **M8.** Earned + locked achievements (`locked_reason` on locked ones). |
 | `GET /api/v1/audit` | Admin | Audit entries, newest first; `?limit=`/`?offset=`. |
+| `POST /api/v1/audit/export/jobs?format=csv\|json` | Admin | **Phase 7 (R10).** Creates an audit export job (cap 10,000 events): 201 `{id, format, events, total, bytes, created_at, created_by, filename}`. Files live under `<workdir>/audit-exports/` with a `.meta.json` sidecar; retention keeps the newest N (default 7, `CLOUDFORGE_AUDIT_EXPORT_RETENTION`). |
+| `GET /api/v1/audit/export/jobs` | Admin | **Phase 7 (R10).** Lists export jobs + the retention setting. |
+| `GET /api/v1/audit/export/jobs/{id}` | Admin | **Phase 7 (R10).** Downloads the export file (CSV/JSON, real audit rows). |
 
 ## Courses & curriculum
 
@@ -135,7 +140,7 @@ answers 503 before enqueueing anything.
 
 ## Worker & host agent
 
-- Worker (`:8081`): `GET /healthz`, `GET /status`
+- Worker (`:8083`): `GET /healthz`, `GET /status`
   (`database_connected`, job counts by state, uptime).
 - Host agent (`:8082`, bearer token except `/healthz`):
   `GET /healthz`, `GET /v1/inventory`, `POST /v1/ops` (one
@@ -145,13 +150,13 @@ answers 503 before enqueueing anything.
 
 ```bash
 # Register + call an authed endpoint (same-origin in Docker;
-# http://localhost:8080 when running the API directly)
-TOKEN=$(curl -s -X POST localhost:8080/api/v1/auth/register \
+# http://localhost:8081 when running the API directly)
+TOKEN=$(curl -s -X POST localhost:8081/api/v1/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"ada@example.com","name":"Ada","password":"correct-horse"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
 
-curl -s localhost:8080/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
-curl -s localhost:8080/readyz | python3 -m json.tool
-curl -s localhost:8080/metrics | grep cloudforge_http_requests_total
+curl -s localhost:8081/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
+curl -s localhost:8081/readyz | python3 -m json.tool
+curl -s localhost:8081/metrics | grep cloudforge_http_requests_total
 ```

@@ -11,14 +11,19 @@
 # Override with e.g. `make verify GO=/usr/local/go/bin/go`.
 # GOTOOLCHAIN=local keeps the build from downloading a toolchain.
 SHELL := /bin/bash
-COMPOSE := docker compose -f deployments/compose/docker-compose.yml
+# --env-file .env is required: `docker compose -f <subdir>/...` sets
+# the project directory to the compose file's directory and reads
+# .env from THERE, not from the repo root — without it the root .env
+# is silently ignored and every ${...:?} variable reports missing
+# (seen live on Fedora 2026-11-22). Always run make from the repo root.
+COMPOSE := docker compose --env-file .env -f deployments/compose/docker-compose.yml
 # Lightweight mode (classroom laptops): a separate compose file with
 # the trimmed stack (no Prometheus/Grafana/MinIO, tuned-down
 # Postgres/Redis, simulated networking, no KVM). `make up` is always
 # the full mode; `make up-lite` is always lite. CLOUDFORGE_MODE in
 # .env (lite|full, default full) is the in-app switch — the Makefile
 # does not read it for `up`, so the two targets can never be confused.
-COMPOSE_LITE := docker compose -f deployments/compose/docker-compose.light.yml
+COMPOSE_LITE := docker compose --env-file .env -f deployments/compose/docker-compose.light.yml
 GO ?= $(shell command -v go 2>/dev/null || ls $(HOME)/go/pkg/mod/golang.org/toolchain@*/bin/go 2>/dev/null | sort | tail -n 1)
 CARGO ?= $(shell command -v cargo 2>/dev/null || echo $(HOME)/.cargo/bin/cargo)
 export GOTOOLCHAIN := local

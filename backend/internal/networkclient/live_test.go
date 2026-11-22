@@ -23,7 +23,15 @@ func TestLiveAgainstRealEngine(t *testing.T) {
 	if addr == "" {
 		addr = "127.0.0.1:50099"
 	}
-	c := New(addr)
+	// Phase 7: the engine requires the shared-secret token on
+	// every RPC. The live test sends CLOUDFORGE_ENGINE_TOKEN, or
+	// the dev default when the engine was started with
+	// CLOUDFORGE_DEV=1.
+	token := os.Getenv("CLOUDFORGE_ENGINE_TOKEN")
+	if token == "" {
+		token = "dev-only-change-me-engine"
+	}
+	c := NewWithToken(addr, token)
 	defer c.Close()
 	ctx := context.Background()
 

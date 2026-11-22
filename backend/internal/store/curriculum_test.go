@@ -43,7 +43,11 @@ func TestSeedIdempotentMemory(t *testing.T) {
 		t.Fatalf("lab definitions: got %d, want %d", rep.LabDefinitions, 14*2+6)
 	}
 	tracks, err := curr.ListTracks(context.Background())
-	if err != nil || len(tracks) != 14+3 { // 14 tracks + 3 M1 courses
+	// Phase 1 fix (14-vs-17): tracks are the 14 seeded curriculum
+	// tracks only. The 3 legacy M1 courses (vpc-fundamentals,
+	// iam-security, ec2-basics) are courses, not tracks, and must not
+	// be listed here — they still appear in GET /api/v1/courses (17).
+	if err != nil || len(tracks) != 14 {
 		t.Fatalf("ListTracks after seed: %d tracks err=%v", len(tracks), err)
 	}
 	// Re-seed: counts must be identical and no duplicate tracks.
@@ -312,5 +316,34 @@ func TestPostgresCurriculumIntegration(t *testing.T) {
 	}
 	if _, xp, err := curr.MarkBreakFixSolved(ctx, u.ID, lab.ID); err != nil || xp != 0 {
 		t.Fatalf("second solve awarded %d err=%v", xp, err)
+	}
+}
+
+func TestListTracksExcludesLegacyCourses(t *testing.T) {
+	courses, curr, rep := seedMemory(t)
+	if rep.Tracks != 14 {
+		t.Fatalf("seed report tracks: %d, want 14", rep.Tracks)
+	}
+	tracks, err := curr.ListTracks(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) != rep.Tracks {
+		t.Fatalf("ListTracks = %d, seed report = %d: the two must agree", len(tracks), rep.Tracks)
+	}
+	for _, tr := range tracks {
+		switch tr.ID {
+		case "vpc-fundamentals", "iam-security", "ec2-basics":
+			t.Fatalf("ListTracks must not include legacy M1 course %q (it is a course, not a track)", tr.ID)
+		}
+	}
+	// The courses list is a different surface and still holds all 17:
+	// 3 legacy M1 courses + 14 curriculum tracks.
+	all, err := courses.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 17 {
+		t.Fatalf("courses list = %d, want 17 (3 legacy + 14 tracks)", len(all))
 	}
 }

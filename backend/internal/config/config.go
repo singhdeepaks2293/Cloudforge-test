@@ -16,8 +16,8 @@ import (
 
 // Config holds all runtime configuration for the API and worker.
 type Config struct {
-	Addr              string // API listen address, e.g. ":8080"
-	WorkerAddr        string // worker listen address, e.g. ":8081"
+	Addr              string // API listen address, e.g. ":8081"
+	WorkerAddr        string // worker listen address, e.g. ":8083"
 	DatabaseURL       string
 	RedisAddr         string
 	NetworkEngineAddr string
@@ -51,12 +51,51 @@ type Config struct {
 	AuthRateWindow time.Duration // auth window (default 5m)
 	APIRateLimit   int           // API requests per window per IP (default 300)
 	APIRateWindow  time.Duration // API window (default 1m)
+	// Phase 4: containers + developer tools.
+	ECRRegistryURL  string // registry:2 base URL (default "" = local-disk registry backend)
+	BuildSourceRoot string // local root for CodeBuild/CodePipeline sources (default TerraformWorkdirRoot)
 	// Lightweight mode (classroom laptops): CLOUDFORGE_LITE=true
 	// caps per-role quotas at quota.LiteLimits (learner: 1 lab,
 	// Micro profile only, 30 min), defaults the host agent to
 	// simulated (no KVM required), and is reported in /api/v1/health
 	// via the lite flag on the server. Full mode is unchanged.
 	Lite bool
+	// Phase 7 hardening.
+	// Dev (CLOUDFORGE_DEV=1) is the EXPLICIT opt-in to the
+	// well-known dev defaults (JWT "dev-only-change-me", engine
+	// token, host-agent token). Without it, ValidateSecrets
+	// (called by cmd/api) refuses to start when a production
+	// secret is unset or still a known dev default — fail closed.
+	Dev bool
+	// EngineToken authenticates the Go control plane to the Rust
+	// network engine (gRPC metadata x-cloudforge-engine-token).
+	// Empty in dev mode means the dev default; empty in
+	// production is a startup error (see ValidateSecrets).
+	EngineToken string
+	// MetricsToken guards GET /metrics (header X-Metrics-Token).
+	// Empty in dev mode means loopback-only access; empty in
+	// production is a startup error.
+	MetricsToken string
+	// TLSEnabled (CLOUDFORGE_TLS=1) means the API sits behind a
+	// TLS-terminating proxy: HSTS is emitted and session cookies
+	// are marked Secure. HTTP-only remains the local-dev default.
+	TLSEnabled bool
+	// TrustedProxies are peer IPs/CIDRs whose X-Forwarded-For
+	// header the API trusts (the nginx proxy). Any other peer's
+	// XFF is ignored and the peer IP is used for rate limiting.
+	TrustedProxies []string
+	// Per-user API rate limit (in addition to the per-IP limit):
+	// CLOUDFORGE_API_USER_RATE_LIMIT / _WINDOW (default 300/1m).
+	UserAPIRateLimit  int
+	UserAPIRateWindow time.Duration
+	// AuditExportRetention is how many audit-export job files are
+	// kept under <workdir>/audit-exports (default 7).
+	AuditExportRetention int
+	// TFNetworkMode is the Docker network mode for Terraform
+	// containers: "bridge" (default, emulator reachable) or
+	// "isolated" (--network none; no egress at all, emulator
+	// unreachable — see docs/TERRAFORM_LEARNING.md).
+	TFNetworkMode string
 }
 
 // DefaultDatabaseURL is the local-dev Postgres DSN.
@@ -166,7 +205,7 @@ func Load() (*Config, error) {
 	}
 	addr := os.Getenv("CLOUDFORGE_ADDR")
 	if addr == "" {
-		addr = ":" + envOr("PORT", "8080")
+		addr = ":" + envOr("PORT", "8081")
 	}
 	// Mode selection: CLOUDFORGE_MODE=lite|full (default full) is
 	// the documented switch; CLOUDFORGE_LITE=true is accepted as
@@ -205,9 +244,59 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid CURRICULUM_SEED %q: must be 1/0, true/false, yes/no or on/off", v)
 		}
 	}
+	dev, err := envBool("CLOUDFORGE_DEV", false)
+	if err != nil {
+		return nil, err
+	}
+	tlsEnabled, err := envBool("CLOUDFORGE_TLS", false)
+	if err != nil {
+		return nil, err
+	}
+	engineToken := os.Getenv("CLOUDFORGE_ENGINE_TOKEN")
+	if engineToken == "" && dev {
+		engineToken = DevEngineToken
+	}
+	metricsToken := os.Getenv("CLOUDFORGE_METRICS_TOKEN")
+	userAPIRateLimit := 300
+	if v := os.Getenv("CLOUDFORGE_API_USER_RATE_LIMIT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("invalid CLOUDFORGE_API_USER_RATE_LIMIT %q: must be a positive integer", v)
+		}
+		userAPIRateLimit = n
+	}
+	userAPIRateWindow, err := envDuration("CLOUDFORGE_API_USER_RATE_WINDOW", time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	auditRetention := 7
+	if v := os.Getenv("CLOUDFORGE_AUDIT_EXPORT_RETENTION"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("invalid CLOUDFORGE_AUDIT_EXPORT_RETENTION %q: must be a positive integer", v)
+		}
+		auditRetention = n
+	}
+	tfNetworkMode := strings.ToLower(strings.TrimSpace(os.Getenv("CLOUDFORGE_TF_NETWORK_MODE")))
+	switch tfNetworkMode {
+	case "", "bridge":
+		tfNetworkMode = "bridge"
+	case "isolated":
+		// --network none: no egress at all.
+	default:
+		return nil, fmt.Errorf("invalid CLOUDFORGE_TF_NETWORK_MODE %q: must be bridge or isolated", os.Getenv("CLOUDFORGE_TF_NETWORK_MODE"))
+	}
+	var trustedProxies []string
+	if v := os.Getenv("CLOUDFORGE_TRUSTED_PROXIES"); v != "" {
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				trustedProxies = append(trustedProxies, p)
+			}
+		}
+	}
 	return &Config{
 		Addr:                 addr,
-		WorkerAddr:           envOr("WORKER_ADDR", ":8081"),
+		WorkerAddr:           envOr("WORKER_ADDR", ":8083"),
 		DatabaseURL:          dbURL,
 		RedisAddr:            envOr("REDIS_ADDR", "localhost:6379"),
 		NetworkEngineAddr:    envOr("NETWORK_ENGINE_ADDR", "localhost:50051"),
@@ -228,6 +317,8 @@ func Load() (*Config, error) {
 		TerraformImage:       envOr("TERRAFORM_IMAGE", "hashicorp/terraform:1.9.8"),
 		LabRoot:              envOr("CLOUDFORGE_LAB_ROOT", "/var/lib/cloudforge/labs"),
 		TerraformWorkdirRoot: envOr("TERRAFORM_WORKDIR_ROOT", "/var/lib/cloudforge/labs"),
+		ECRRegistryURL:       os.Getenv("ECR_REGISTRY_URL"),
+		BuildSourceRoot:      os.Getenv("CLOUDFORGE_BUILD_SOURCE_ROOT"),
 		CurriculumDir:        os.Getenv("CURRICULUM_DIR"),
 		CurriculumSeed:       curriculumSeed,
 		AuthRateLimit:        authRateLimit,
@@ -235,7 +326,73 @@ func Load() (*Config, error) {
 		APIRateLimit:         apiRateLimit,
 		APIRateWindow:        apiRateWindow,
 		Lite:                 lite,
+		Dev:                  dev,
+		EngineToken:          engineToken,
+		MetricsToken:         metricsToken,
+		TLSEnabled:           tlsEnabled,
+		TrustedProxies:       trustedProxies,
+		UserAPIRateLimit:     userAPIRateLimit,
+		UserAPIRateWindow:    userAPIRateWindow,
+		AuditExportRetention: auditRetention,
+		TFNetworkMode:        tfNetworkMode,
 	}, nil
+}
+
+// Known dev-default secrets. Any of these in a non-dev run is a
+// startup error (ValidateSecrets), never a warning.
+const (
+	// DevJWTSecret is the insecure JWT default cmd/api used to
+	// fall back to with only a warning (M9). Phase 7: it is only
+	// usable with CLOUDFORGE_DEV=1.
+	DevJWTSecret = "dev-only-change-me"
+	// DevEngineToken is the dev default for the engine token.
+	DevEngineToken = "dev-only-change-me-engine"
+	// DevHostAgentToken mirrors hostagent.DevToken.
+	DevHostAgentToken = "dev-only-change-me-host-agent"
+	// DevMinIOAccessKey / DevMinIOSecretKey are the MinIO defaults.
+	DevMinIOAccessKey = "minioadmin"
+	DevMinIOSecretKey = "minioadmin"
+)
+
+// ValidateSecrets fails closed in non-dev mode: every production
+// secret must be set, long enough, and not a known dev default.
+// In dev mode (CLOUDFORGE_DEV=1) it only warns via the returned
+// list of warnings (empty in production when valid). The error
+// names the exact variable to fix.
+func (c *Config) ValidateSecrets() ([]string, error) {
+	if c.Dev {
+		return []string{"CLOUDFORGE_DEV=1: running with dev-default secrets; never use on a shared host"}, nil
+	}
+	var bad []string
+	if c.JWTSecret == "" {
+		bad = append(bad, "CLOUDFORGE_JWT_SECRET is unset (set it to a long random value, e.g. openssl rand -hex 32)")
+	} else if c.JWTSecret == DevJWTSecret {
+		bad = append(bad, "CLOUDFORGE_JWT_SECRET is still the dev default")
+	} else if len(c.JWTSecret) < 32 {
+		bad = append(bad, "CLOUDFORGE_JWT_SECRET is shorter than 32 characters")
+	}
+	if c.EngineToken == "" {
+		bad = append(bad, "CLOUDFORGE_ENGINE_TOKEN is unset (set it to a long random value shared with the network engine)")
+	} else if c.EngineToken == DevEngineToken {
+		bad = append(bad, "CLOUDFORGE_ENGINE_TOKEN is still the dev default")
+	} else if len(c.EngineToken) < 16 {
+		bad = append(bad, "CLOUDFORGE_ENGINE_TOKEN is shorter than 16 characters")
+	}
+	if c.MetricsToken == "" {
+		bad = append(bad, "CLOUDFORGE_METRICS_TOKEN is unset (set it to a long random value shared with Prometheus)")
+	} else if len(c.MetricsToken) < 16 {
+		bad = append(bad, "CLOUDFORGE_METRICS_TOKEN is shorter than 16 characters")
+	}
+	if c.MinIOAccessKey == DevMinIOAccessKey || c.MinIOSecretKey == DevMinIOSecretKey {
+		bad = append(bad, "MINIO_ACCESS_KEY / MINIO_SECRET_KEY are still the minioadmin defaults (set MINIO_ROOT_USER / MINIO_ROOT_PASSWORD in .env)")
+	}
+	if c.HostAgentToken == DevHostAgentToken {
+		bad = append(bad, "HOST_AGENT_TOKEN is still the dev default")
+	}
+	if len(bad) > 0 {
+		return nil, fmt.Errorf("refusing to start without production secrets:\n  - %s", strings.Join(bad, "\n  - "))
+	}
+	return nil, nil
 }
 
 // String returns a log-safe summary with secrets redacted.

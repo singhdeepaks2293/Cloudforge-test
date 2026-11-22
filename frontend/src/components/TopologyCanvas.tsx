@@ -42,6 +42,8 @@ const KIND_STYLES: Record<LabResourceKind, string> = {
   instance: 'border-aws-orange bg-aws-orange-light',
   gateway: 'border-[#7a5cfa] bg-[#f0ebfe]',
   loadbalancer: 'border-aws-error bg-aws-error-bg',
+  'route-table': 'border-[#007a7a] bg-[#e6f4f4]',
+  'security-group': 'border-aws-error bg-aws-error-bg',
   unknown: 'border-aws-border-dark bg-aws-bg',
 }
 

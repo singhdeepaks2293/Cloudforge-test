@@ -152,7 +152,7 @@ architecture (see `docs/security/model.md`,
 - **Same-origin proxy:** nginx proxies `/api`, `/healthz`,
   `/readyz`, `/metrics` to the API; the frontend defaults to
   relative URLs when `VITE_API_URL` is unset, and `npm run dev`
-  proxies the same paths to `localhost:8080`.
+  proxies the same paths to `localhost:8081`.
 - Compose fixed two env-name bugs: `JWT_SECRET` →
   `CLOUDFORGE_JWT_SECRET` and `REDIS_URL` → `REDIS_ADDR`.
 
@@ -265,7 +265,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 docker compose --profile optional up -d minio
 ```
 
-Services: frontend on `:80`, API on `:8080`, network engine gRPC on
+Services: frontend on `:8080`, API on `:8081`, network engine gRPC on
 `:50051`, PostgreSQL on `:5432` (dev only), Redis on `:6379` (dev only).
 
 ### 3. Run each service directly (development)
@@ -288,7 +288,7 @@ cd rust-network-engine && cargo test --workspace && cargo build --workspace
 ### 4. Verify
 
 ```bash
-curl http://localhost:8080/api/v1/health
+curl http://localhost:8081/api/v1/health
 # {"service":"cloudforge-api","version":"0.2.0-m2","ok":true,
 #  "uptime_seconds":...,"network_engine_reachable":true,
 #  "database_connected":true,"redis_connected":true}

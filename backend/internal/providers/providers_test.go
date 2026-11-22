@@ -11,7 +11,19 @@ func TestRegistrySeededCapabilities(t *testing.T) {
 		{"ec2", "RunInstances", FidelityAPIEmulated, true},
 		{"s3", "CreateBucket", FidelityAPIEmulated, true},
 		{"vpc", "CreateVpc", FidelitySimulated, true},
-		{"lambda", "InvokeFunction", FidelitySimulated, true},
+		// Phase 3: Lambda now has a real subprocess invoker
+		// (PARTIAL — real execution, not AWS Lambda, no Docker
+		// invoker; the old SIMULATED/Docker claim is gone).
+		{"lambda", "InvokeFunction", FidelityPartial, true},
+		{"sqs", "ReceiveMessage", FidelityAPIEmulated, true},
+		{"sns", "Publish", FidelityAPIEmulated, true},
+		{"eventbridge", "PutEvents", FidelityAPIEmulated, true},
+		{"dynamodb", "Query", FidelityAPIEmulated, true},
+		{"rds", "CreateDBInstance", FidelityPartial, true},
+		{"elasticache", "CreateCacheCluster", FidelityPartial, true},
+		{"elb", "CreateLoadBalancer", FidelitySimulated, true},
+		{"route53", "CreateHostedZone", FidelitySimulated, true},
+		{"apigateway", "CreateRestApi", FidelityPartial, true},
 	}
 	for _, tc := range cases {
 		c, ok := r.Get(tc.service, tc.operation)

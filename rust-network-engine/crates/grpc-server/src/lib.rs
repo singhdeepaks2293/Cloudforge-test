@@ -80,18 +80,134 @@ impl EngineState {
     }
 }
 
-/// Build the tonic router for the given state.
-pub fn router(state: EngineState) -> NetworkEngineServer<NetworkEngineService> {
-    NetworkEngineServer::new(NetworkEngineService::new(state))
+/// The gRPC metadata key carrying the shared-secret engine token
+/// (Phase 7, risk R1). The Go control plane sends it on every RPC;
+/// the server rejects any RPC without a matching token.
+pub const ENGINE_TOKEN_METADATA: &str = "x-cloudforge-engine-token";
+
+/// The well-known dev default engine token. Usable only when
+/// `CLOUDFORGE_DEV=1` explicitly opts in; the binary refuses to
+/// start without a real token otherwise (see main.rs).
+pub const DEV_ENGINE_TOKEN: &str = "dev-only-change-me-engine";
+
+/// Resolve the engine auth token from the environment:
+/// `CLOUDFORGE_ENGINE_TOKEN` when set, else the dev default when
+/// `CLOUDFORGE_DEV=1`, else `None` (unauthenticated — only the
+/// in-process integration tests run this way; the binary entrypoint
+/// in main.rs refuses to start with `None`).
+pub fn engine_token_from_env() -> Option<String> {
+    match std::env::var("CLOUDFORGE_ENGINE_TOKEN") {
+        Ok(t) if !t.is_empty() => Some(t),
+        _ => {
+            if std::env::var("CLOUDFORGE_DEV")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+            {
+                Some(DEV_ENGINE_TOKEN.to_string())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Constant-time string equality for the token comparison, so the
+/// check does not leak the token length/prefix through timing.
+fn timing_safe_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// tonic interceptor enforcing the engine token on every RPC
+/// (including Health). `expected: None` means unauthenticated —
+/// used only by the in-process integration tests, never by the
+/// deployed binary (main.rs refuses to start that way).
+#[derive(Clone)]
+pub struct EngineAuthInterceptor {
+    expected: Option<std::sync::Arc<String>>,
+}
+
+impl tonic::service::Interceptor for EngineAuthInterceptor {
+    fn call(&mut self, req: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
+        let ok = match &self.expected {
+            None => true,
+            Some(expected) => req
+                .metadata()
+                .get(ENGINE_TOKEN_METADATA)
+                .and_then(|v| v.to_str().ok())
+                .map(|got| timing_safe_eq(got, expected))
+                .unwrap_or(false),
+        };
+        if ok {
+            Ok(req)
+        } else {
+            Err(tonic::Status::unauthenticated(
+                "ENGINE_UNAUTHENTICATED: a valid x-cloudforge-engine-token is required",
+            ))
+        }
+    }
+}
+
+/// The router type: the generated server wrapped in the auth
+/// interceptor.
+pub type AuthenticatedRouter = tonic::service::interceptor::InterceptedService<
+    NetworkEngineServer<NetworkEngineService>,
+    EngineAuthInterceptor,
+>;
+
+/// Build the tonic router for the given state, authenticating every
+/// RPC (including Health) against `token` when `Some`. With `None`
+/// the router is unauthenticated — used only by the in-process
+/// integration tests, never by the deployed binary.
+pub fn router_with_auth(state: EngineState, token: Option<String>) -> AuthenticatedRouter {
+    NetworkEngineServer::with_interceptor(
+        NetworkEngineService::new(state),
+        EngineAuthInterceptor {
+            expected: token.map(std::sync::Arc::new),
+        },
+    )
+}
+
+/// Build the tonic router for the given state (unauthenticated;
+/// integration tests only — see `router_with_auth`).
+pub fn router(state: EngineState) -> AuthenticatedRouter {
+    router_with_auth(state, None)
 }
 
 /// Serve forever on `addr` until SIGTERM/SIGINT, then shut down
 /// gracefully (in-flight RPCs are allowed to finish; tonic drains the
-/// listener on shutdown).
+/// listener on shutdown). The engine token comes from the
+/// environment (see `engine_token_from_env`); when it is `None` the
+/// server logs a loud warning and serves unauthenticated — the
+/// binary in main.rs refuses that configuration, so a deployed
+/// engine is never unauthenticated.
 pub async fn serve(addr: SocketAddr, state: EngineState) -> Result<(), tonic::transport::Error> {
+    serve_with_token(addr, state, engine_token_from_env()).await
+}
+
+/// Serve with an explicit token (`None` = unauthenticated).
+pub async fn serve_with_token(
+    addr: SocketAddr,
+    state: EngineState,
+    token: Option<String>,
+) -> Result<(), tonic::transport::Error> {
     let fidelity = state.backend.fidelity();
-    let svc = router(state);
-    info!(fidelity, "network-engine listening");
+    let authenticated = token.is_some();
+    let svc = router_with_auth(state, token);
+    if authenticated {
+        info!(
+            fidelity,
+            "network-engine listening (gRPC auth: token required)"
+        );
+    } else {
+        tracing::warn!("network-engine listening WITHOUT gRPC auth (no CLOUDFORGE_ENGINE_TOKEN and CLOUDFORGE_DEV != 1) — test-only configuration");
+    }
     Server::builder()
         .timeout(Duration::from_secs(30))
         .add_service(svc)

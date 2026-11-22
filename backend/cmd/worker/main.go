@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -37,6 +38,15 @@ func main() {
 	if err != nil {
 		logger.Error("invalid configuration", "error", err)
 		os.Exit(1)
+	}
+	// Phase 7 (R4): same fail-closed secret check as the API.
+	if warns, err := cfg.ValidateSecrets(); err != nil {
+		logger.Error("refusing to start: production secrets are not configured", "error", err)
+		os.Exit(1)
+	} else {
+		for _, w := range warns {
+			logger.Warn(w)
+		}
 	}
 	logger.Info("cloudforge worker starting", "config", cfg.String())
 
@@ -60,7 +70,7 @@ func main() {
 		if len(applied) > 0 {
 			logger.Info("applied migrations", "migrations", applied)
 		}
-		netClient := networkclient.New(cfg.NetworkEngineAddr)
+		netClient := networkclient.NewWithToken(cfg.NetworkEngineAddr, cfg.EngineToken)
 		svc = &jobs.Service{
 			Jobs:        store.NewPostgresJobStore(db),
 			Labs:        store.NewPostgresLabStore(db),
@@ -72,7 +82,7 @@ func main() {
 				ok, _ := netClient.Reachable(context.Background())
 				return ok
 			},
-			TerraformRunner: terraform.NewContainerRunner(cfg.TerraformImage, ""),
+			TerraformRunner: terraform.NewContainerRunner(cfg.TerraformImage, "").WithNetworkMode(cfg.TFNetworkMode),
 			TerraformRuns:   store.NewPostgresTerraformRunStore(db),
 			Resources:       store.NewPostgresResourceStore(db),
 			TerraformCfg: jobs.TerraformConfig{
@@ -82,6 +92,8 @@ func main() {
 			},
 			// M9 Part 3: engine topology for cleanup_reconcile jobs.
 			Engine: jobs.NewEngineAdapter(netClient),
+			// Phase 7 (R10): audit_cleanup archives before deleting.
+			AuditExportDir: filepath.Join(cfg.TerraformWorkdirRoot, "audit-exports"),
 		}
 		// M3: use the host agent for lab provisioning when it is
 		// explicitly configured (HOST_AGENT_ADDR set in the

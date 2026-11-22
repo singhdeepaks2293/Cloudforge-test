@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudforge/cloudforge/backend/internal/auth"
@@ -28,6 +29,8 @@ import (
 	"github.com/cloudforge/cloudforge/backend/internal/labs"
 	"github.com/cloudforge/cloudforge/backend/internal/metrics"
 	"github.com/cloudforge/cloudforge/backend/internal/networkclient"
+	"github.com/cloudforge/cloudforge/backend/internal/phase3"
+	"github.com/cloudforge/cloudforge/backend/internal/phase4"
 	"github.com/cloudforge/cloudforge/backend/internal/providers"
 	"github.com/cloudforge/cloudforge/backend/internal/quota"
 	"github.com/cloudforge/cloudforge/backend/internal/ratelimit"
@@ -103,6 +106,14 @@ type Deps struct {
 	// Redis-less dev runs are unthrottled).
 	AuthLimiter *ratelimit.Limiter // register/login; fail-closed on Redis error
 	APILimiter  *ratelimit.Limiter // general /api/v1; fail-open on Redis error
+	// Phase 7 hardening (see security_p7.go).
+	UserAPILimiter *ratelimit.Limiter // per-user /api/v1; fail-open on Redis error
+	MetricsToken   string             // X-Metrics-Token for GET /metrics ("" = loopback-only)
+	TLSEnabled     bool               // HSTS + Secure cookies when a TLS proxy fronts the API
+	TrustedProxies []string           // extra peer IPs/CIDRs trusted for X-Forwarded-For
+	// AuditExportRetention is how many audit-export job files are
+	// kept (default 7; 0 = default).
+	AuditExportRetention int
 	// Milestone 9, Part 3: per-role quota sets. Nil gets an
 	// in-memory default (seeded with quota.DefaultLimits) in
 	// NewServerWithDeps.
@@ -114,6 +125,35 @@ type Deps struct {
 	// handler builds a jobs.Service from this server's own
 	// stores/engine/host-agent on demand.
 	Reconciler jobs.Reconciler
+	// Phase 2: IAM identity store. Nil gets an in-memory default in
+	// NewServerWithDeps (Postgres in cmd/api when a DB is up).
+	IAM store.IAMStore
+	// Phase 2: CloudWatch-style alarm store (in-memory definitions).
+	// Nil gets a fresh store in NewServerWithDeps.
+	Alarms *alarmStore
+	// Phase 3: data/messaging/serverless store + backends. Nil P3
+	// gets an in-memory default in NewServerWithDeps (Postgres in
+	// cmd/api when a DB is up). Empty DatabaseURL means RDS cannot
+	// provision (503, honestly); empty RedisAddr defaults to
+	// localhost:6379; empty DynamoEndpoint defaults to
+	// http://localhost:8000.
+	P3               store.Phase3Store
+	P3DatabaseURL    string
+	P3RedisAddr      string
+	P3DynamoEndpoint string
+	P3WorkdirRoot    string
+	// Phase 6: advanced services. P6MasterKey is the KMS master
+	// secret (CLOUDFORGE_KMS_MASTER_KEY, else the JWT secret);
+	// empty means the dev default (keys still work, but the
+	// wrapping key is the well-known dev string).
+	P6MasterKey string
+	// Phase 4: containers + developer tools. Empty P4RegistryURL
+	// means the local-disk registry backend; a URL points at a real
+	// registry:2 container (full mode). Empty P4BuildSourceRoot
+	// defaults to P3WorkdirRoot: CodeBuild/CodePipeline sources must
+	// be local paths under it.
+	P4RegistryURL     string
+	P4BuildSourceRoot string
 }
 
 // Server wires the API handlers to their stores.
@@ -147,9 +187,42 @@ type Server struct {
 	DBHealth         func(ctx context.Context) error
 	AuthLimiter      *ratelimit.Limiter
 	APILimiter       *ratelimit.Limiter
-	Quotas           store.QuotaStore
-	Reconciler       jobs.Reconciler
-	Lite             bool // lightweight mode: cap role limits at quota.LiteLimits
+	// Phase 7 hardening (see security_p7.go).
+	UserAPILimiter       *ratelimit.Limiter
+	MetricsToken         string
+	TLSEnabled           bool
+	TrustedProxies       []string
+	AuditExportRetention int
+	Quotas               store.QuotaStore
+	Reconciler           jobs.Reconciler
+	Lite                 bool // lightweight mode: cap role limits at quota.LiteLimits
+	IAM                  store.IAMStore
+	Alarms               *alarmStore
+	// Phase 3 stores and backend addresses (see Deps).
+	P3               store.Phase3Store
+	P3DatabaseURL    string
+	P3RedisAddr      string
+	P3DynamoEndpoint string
+	P3WorkdirRoot    string
+	// Phase 4 config (see Deps).
+	P4RegistryURL     string
+	P4BuildSourceRoot string
+	// Phase 6 config (see Deps).
+	P6MasterKey string
+	// Phase 3 runtime state: DynamoDB backend probe cache and the
+	// per-load-balancer round-robin counters (process-local).
+	dynamoMu          sync.Mutex
+	dynamoBackendName string
+	dynamoCheckedAt   time.Time
+	elbMu             sync.Mutex
+	elbRR             map[string]*phase3.RoundRobin
+	// Phase 4 runtime state: ECR registry backend (local disk by
+	// default; a registry:2 container when P4RegistryURL is set),
+	// the ECS/Fargate task runner, and the once-only orphan sweep.
+	p4Mu         sync.Mutex
+	p4Reg        phase4.RegistryBackend
+	p4TaskRunner *phase4.TaskRunner
+	p4OrphanOnce sync.Once
 }
 
 // NewServer builds a Server from the M1 concrete stores (in-memory).
@@ -222,6 +295,24 @@ func NewServerWithDeps(d Deps) *Server {
 	if d.Quotas == nil {
 		d.Quotas = store.NewMemoryQuotaStore()
 	}
+	if d.IAM == nil {
+		d.IAM = store.NewMemoryIAMStore()
+	}
+	if d.Alarms == nil {
+		d.Alarms = newAlarmStore()
+	}
+	if d.P3 == nil {
+		d.P3 = store.NewMemoryPhase3Store()
+	}
+	if d.P3RedisAddr == "" {
+		d.P3RedisAddr = "localhost:6379"
+	}
+	if d.P3DynamoEndpoint == "" {
+		d.P3DynamoEndpoint = providers.DefaultDynamoDBEndpoint
+	}
+	if d.P3WorkdirRoot == "" {
+		d.P3WorkdirRoot = d.WorkdirRoot
+	}
 	return &Server{
 		Users: d.Users, Labs: d.Labs, Courses: d.Courses, Audit: d.Audit,
 		Cache: d.Cache, Registry: d.Registry, AWS: d.AWS, Network: d.Network, Logger: d.Logger,
@@ -237,7 +328,15 @@ func NewServerWithDeps(d Deps) *Server {
 		Curriculum:  d.Curriculum, CurriculumDir: d.CurriculumDir,
 		DBHealth:    d.DBHealth,
 		AuthLimiter: d.AuthLimiter, APILimiter: d.APILimiter,
-		Quotas: d.Quotas, Reconciler: d.Reconciler, Lite: d.Lite,
+		UserAPILimiter: d.UserAPILimiter, MetricsToken: d.MetricsToken,
+		TLSEnabled: d.TLSEnabled, TrustedProxies: d.TrustedProxies,
+		AuditExportRetention: d.AuditExportRetention,
+		Quotas:               d.Quotas, Reconciler: d.Reconciler, Lite: d.Lite,
+		IAM: d.IAM, Alarms: d.Alarms,
+		P3: d.P3, P3DatabaseURL: d.P3DatabaseURL, P3RedisAddr: d.P3RedisAddr,
+		P3DynamoEndpoint: d.P3DynamoEndpoint, P3WorkdirRoot: d.P3WorkdirRoot,
+		P4RegistryURL: d.P4RegistryURL, P4BuildSourceRoot: d.P4BuildSourceRoot, P6MasterKey: d.P6MasterKey,
+		elbRR: map[string]*phase3.RoundRobin{},
 	}
 }
 
@@ -327,22 +426,6 @@ func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return h.Hijack()
 }
 
-// clientIP returns the caller IP for rate limiting: the first
-// X-Forwarded-For entry when present (the deployment sits behind
-// nginx), otherwise the peer address without its port.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if ip, _, ok := strings.Cut(xff, ","); ok {
-			return strings.TrimSpace(ip)
-		}
-		return strings.TrimSpace(xff)
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}
-
 func retryAfterSeconds(reset time.Time) int {
 	secs := int(time.Until(reset).Seconds()) + 1
 	if secs < 1 {
@@ -360,7 +443,7 @@ func (s *Server) withAuthRateLimit(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		res, err := s.AuthLimiter.Allow(r.Context(), clientIP(r))
+		res, err := s.AuthLimiter.Allow(r.Context(), s.clientIP(r))
 		if err != nil {
 			s.Logger.Warn("auth rate limiter unavailable", "error", err)
 			s.writeError(w, r, http.StatusServiceUnavailable, "rate_limiter_unavailable", "request throttling is temporarily unavailable; try again shortly")
@@ -387,7 +470,7 @@ func (s *Server) withAPIRateLimit(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		res, err := s.APILimiter.Allow(r.Context(), clientIP(r))
+		res, err := s.APILimiter.Allow(r.Context(), s.clientIP(r))
 		if err != nil {
 			s.Logger.Warn("api rate limiter unavailable; failing open", "error", err)
 			next.ServeHTTP(w, r)
@@ -430,11 +513,13 @@ func (s *Server) withMetrics(next http.Handler) http.Handler {
 // --- auth ---------------------------------------------------------------
 
 func (s *Server) currentUser(r *http.Request) (*auth.User, bool) {
-	h := r.Header.Get("Authorization")
-	if !strings.HasPrefix(h, "Bearer ") {
+	// Phase 7: the session token comes from the HttpOnly cookie
+	// first, then the Authorization header (API clients/tests).
+	token := s.sessionToken(r)
+	if token == "" {
 		return nil, false
 	}
-	id, err := s.Users.ValidateToken(strings.TrimPrefix(h, "Bearer "))
+	id, err := s.Users.ValidateToken(token)
 	if err != nil {
 		return nil, false
 	}
@@ -519,7 +604,8 @@ type componentHealth struct {
 
 // handleReadyz is the honest readiness probe (M9): it live-checks
 // Postgres, Redis and the network engine on every call — nothing is
-// cached or assumed from startup.
+// cached or assumed from startup. The checks live in readiness()
+// (monitoring.go), shared with GET /api/v1/monitoring.
 //
 // Overall readiness is gated ONLY on Postgres when it is
 // configured: Redis is a fail-open cache by design (the API serves
@@ -530,66 +616,11 @@ type componentHealth struct {
 // fallback mode) its check reports "disabled" and does not gate.
 // A failed Postgres ping returns 503 with status "not_ready".
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
-	components := map[string]componentHealth{}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-
-	// Postgres (gating when configured).
-	start := time.Now()
-	pgErr := error(nil)
-	if s.DBHealth == nil {
-		components["postgres"] = componentHealth{Status: "disabled", LatencyMs: time.Since(start).Milliseconds(), Error: "postgres not configured (in-memory fallback)"}
-	} else {
-		pgErr = s.DBHealth(ctx)
-		c := componentHealth{Status: "ok", LatencyMs: time.Since(start).Milliseconds()}
-		if pgErr != nil {
-			c.Status = "down"
-			c.Error = pgErr.Error()
-		}
-		components["postgres"] = c
-	}
-
-	// Redis (reported, never gating: fail-open cache).
-	start = time.Now()
-	if s.Cache == nil || !s.Cache.Available() {
-		components["redis"] = componentHealth{Status: "disabled", LatencyMs: time.Since(start).Milliseconds(), Error: "redis not configured or unavailable"}
-	} else {
-		ok := s.Cache.Ping(ctx)
-		c := componentHealth{Status: "ok", LatencyMs: time.Since(start).Milliseconds()}
-		if !ok {
-			c.Status = "down"
-			c.Error = "redis ping failed"
-		}
-		components["redis"] = c
-	}
-
-	// Network engine (reported, never gating).
-	start = time.Now()
-	engineUp := false
-	if s.Network == nil {
-		components["engine"] = componentHealth{Status: "not_configured", LatencyMs: time.Since(start).Milliseconds(), Error: "network engine client not configured"}
-	} else {
-		ectx := networkclient.ContextWithRequestID(ctx, RequestID(r.Context()))
-		st, err := s.Network.Health(ectx)
-		c := componentHealth{Status: "ok", LatencyMs: time.Since(start).Milliseconds()}
-		switch {
-		case err != nil:
-			c.Status = "down"
-			c.Error = err.Error()
-		case !st.OK:
-			c.Status = "down"
-			c.Error = st.Detail
-		default:
-			engineUp = true
-		}
-		components["engine"] = c
-	}
-	metrics.SetEngineUp(engineUp)
-
-	status := "ready"
+	status, components, pgErr := s.readiness(ctx)
 	code := http.StatusOK
 	if pgErr != nil {
-		status = "not_ready"
 		code = http.StatusServiceUnavailable
 	}
 	s.writeJSON(w, r, code, map[string]any{
@@ -710,6 +741,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, u.ID, "user_registered", "user", u.ID, map[string]any{"email": u.Email})
 	token, exp := s.Users.IssueToken(u.ID)
+	s.setSessionCookie(w, token, exp)
 	s.writeJSON(w, r, http.StatusCreated, authResponse{Token: token, ExpiresAt: exp, User: u})
 }
 
@@ -726,11 +758,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	u, err := s.Users.Authenticate(req.Email, req.Password)
 	if err != nil {
 		// Do not distinguish "unknown email" from "wrong password".
+		// The attempt IS audited (Phase 6 GuardDuty reads it). The
+		// actor is "" (stored as NULL): audit_logs.user_id is a UUID
+		// column, so the literal "anonymous" made every failed-login
+		// insert fail with "invalid input syntax for type uuid" and
+		// GuardDuty silently saw zero evidence (found live 2026-11-22).
+		s.audit(r, "", "auth.login_failed", "user", "", map[string]any{"client_ip": s.clientIP(r), "email": req.Email})
 		s.writeError(w, r, http.StatusUnauthorized, "invalid_credentials", "email or password is incorrect")
 		return
 	}
 	s.audit(r, u.ID, "user_logged_in", "user", u.ID, nil)
 	token, exp := s.Users.IssueToken(u.ID)
+	s.setSessionCookie(w, token, exp)
 	s.writeJSON(w, r, http.StatusOK, authResponse{Token: token, ExpiresAt: exp, User: u})
 }
 
@@ -1181,26 +1220,6 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, r, http.StatusOK, map[string]any{"capabilities": caps})
 }
 
-// --- audit --------------------------------------------------------------
-
-func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
-	admin, ok := s.requireAdmin(w, r)
-	if !ok {
-		return
-	}
-	limit, offset := parsePagination(r)
-	entries, total, err := s.Audit.List(r.Context(), limit, offset)
-	if err != nil {
-		s.writeError(w, r, http.StatusInternalServerError, "internal_error", err.Error())
-		return
-	}
-	if entries == nil {
-		entries = []*store.AuditEntry{}
-	}
-	_ = admin
-	s.writeJSON(w, r, http.StatusOK, map[string]any{"audit": entries, "total": total, "limit": limit, "offset": offset})
-}
-
 // Routes returns the full HTTP handler tree (go-chi/chi v5, M9).
 //
 // Every route from the M1–M8 ServeMux is preserved verbatim: same
@@ -1211,14 +1230,20 @@ func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 // requests a 405, as with the stdlib mux.
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
-	r.Use(s.withRequestID, s.withLogging, s.withMetrics)
+	r.Use(s.withRequestID, s.withLogging, s.withMetrics, s.withSecurityHeaders)
 	r.Get("/healthz", s.handleHealthz)
 	r.Get("/readyz", s.handleReadyz)
-	r.Method(http.MethodGet, "/metrics", metrics.Handler())
+	// Phase 7 (R5): /metrics requires the scrape token (or is
+	// loopback-only in dev); nginx no longer proxies it.
+	r.Get("/metrics", s.handleMetrics)
+	// Phase 4: Docker Registry HTTP API subset (unauthenticated,
+	// local-only — a docker client cannot present a CloudForge JWT).
+	s.registerECRRegistryRoutes(r)
 	r.Route("/api/v1", func(r chi.Router) {
 		// General API limiter (fail-open) covers every /api/v1
 		// route; /healthz, /readyz and /metrics are outside it.
-		r.Use(s.withAPIRateLimit)
+		// The per-user limiter (Phase 7, R8) runs alongside it.
+		r.Use(s.withAPIRateLimit, s.withUserAPIRateLimit)
 		r.Get("/health", s.handleHealth)
 		// Auth endpoints get the stricter, fail-closed limiter
 		// on top of the general one.
@@ -1227,6 +1252,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/auth/register", s.handleRegister)
 			r.Post("/auth/login", s.handleLogin)
 		})
+		r.Post("/auth/logout", s.handleLogout)
 		r.Get("/auth/me", s.handleMe)
 		r.Get("/users/me", s.handleMe)
 		r.Get("/users", s.handleListUsers)
@@ -1241,13 +1267,27 @@ func (s *Server) Routes() http.Handler {
 		r.Post("/courses/{id}/progress", s.handleCompleteLesson)
 		r.Post("/labs", s.handleCreateLab)
 		r.Get("/labs", s.handleListLabs)
+		r.Get("/labs/definitions", s.handleLabDefinitions)
 		r.Get("/labs/{id}", s.handleGetLab)
+		r.Post("/labs/{id}/start", s.handleStartLab)
 		r.Post("/labs/{id}/stop", s.handleStopLab)
+		r.Post("/labs/{id}/reboot", s.handleRebootLab)
 		r.Post("/labs/{id}/destroy", s.handleDestroyLab)
+		r.Get("/labs/{id}/events", s.handleLabEvents)
 		// Milestone 6: lab resources, live topology, validation, terminal.
 		r.Get("/labs/{id}/resources", s.handleListResources)
 		r.Post("/labs/{id}/resources", s.handleCreateResource)
 		r.Delete("/labs/{id}/resources/{resourceId}", s.handleDeleteResource)
+		// Phase 2: VPC detail — routes, security-group rules, gateway
+		// attach/detach, tags.
+		r.Post("/labs/{id}/resources/{resourceId}/routes", s.handleAddRoute)
+		r.Delete("/labs/{id}/resources/{resourceId}/routes/{routeId}", s.handleDeleteRoute)
+		r.Post("/labs/{id}/resources/{resourceId}/rules", s.handleAddSGRule)
+		r.Delete("/labs/{id}/resources/{resourceId}/rules/{ruleId}", s.handleDeleteSGRule)
+		r.Post("/labs/{id}/resources/{resourceId}/attach-instance", s.handleAttachSGInstance)
+		r.Post("/labs/{id}/resources/{resourceId}/attach", s.handleGatewayAttach)
+		r.Post("/labs/{id}/resources/{resourceId}/detach", s.handleGatewayDetach)
+		r.Put("/labs/{id}/resources/{resourceId}/tags", s.handleUpdateTags)
 		r.Get("/labs/{id}/topology", s.handleLabTopology)
 		r.Post("/labs/{id}/validate", s.handleValidateLab)
 		r.Post("/labs/{id}/terminal/token", s.handleTerminalToken)
@@ -1272,11 +1312,75 @@ func (s *Server) Routes() http.Handler {
 		r.Post("/labs/{id}/break-fix/start", s.handleBreakFixStart)
 		r.Post("/labs/{id}/break-fix/solve", s.handleBreakFixSolve)
 		r.Get("/providers/capabilities", s.handleCapabilities)
+		// Phase 1: backend-driven service registry + resource explorer.
+		r.Get("/services", s.handleListServices)
+		r.Get("/services/{id}", s.handleGetService)
+		r.Get("/explorer/resources", s.handleExplorerResources)
 		r.Get("/aws/{service}/capabilities", s.handleAWSCapabilities)
 		r.Post("/aws/s3/buckets", s.handleS3CreateBucket)
 		r.Get("/aws/s3/buckets", s.handleS3ListBuckets)
+		r.Delete("/aws/s3/buckets/{bucket}", s.handleS3DeleteBucket)
+		// Phase 2: S3 objects, versioning and bucket policy.
+		r.Get("/aws/s3/buckets/{bucket}/objects", s.handleS3ListObjects)
+		r.Post("/aws/s3/buckets/{bucket}/objects", s.handleS3UploadObject)
+		r.Get("/aws/s3/buckets/{bucket}/objects/*", s.handleS3DownloadObject)
+		r.Delete("/aws/s3/buckets/{bucket}/objects/*", s.handleS3DeleteObject)
+		r.Get("/aws/s3/buckets/{bucket}/metadata/*", s.handleS3ObjectMetadata)
+		r.Get("/aws/s3/buckets/{bucket}/versioning", s.handleS3GetVersioning)
+		r.Put("/aws/s3/buckets/{bucket}/versioning", s.handleS3SetVersioning)
+		r.Get("/aws/s3/buckets/{bucket}/policy", s.handleS3GetPolicy)
+		r.Put("/aws/s3/buckets/{bucket}/policy", s.handleS3SetPolicy)
+		// Phase 2: IAM identities (admin-only CRUD) + simulator.
 		r.Post("/aws/iam/evaluate", s.handleIAMEvaluate)
+		r.Get("/aws/iam/users", s.handleIAMListUsers)
+		r.Post("/aws/iam/users", s.handleIAMCreateUser)
+		r.Get("/aws/iam/users/{id}", s.handleIAMGetUser)
+		r.Delete("/aws/iam/users/{id}", s.handleIAMDeleteUser)
+		r.Post("/aws/iam/users/{id}/access-keys", s.handleIAMCreateAccessKey)
+		r.Get("/aws/iam/users/{id}/access-keys", s.handleIAMListAccessKeys)
+		r.Delete("/aws/iam/users/{id}/access-keys/{keyId}", s.handleIAMDeleteAccessKey)
+		r.Post("/aws/iam/users/{id}/access-keys/{keyId}/status", s.handleIAMAccessKeyStatus)
+		r.Post("/aws/iam/users/{id}/policies", s.handleIAMAttachPolicy("user"))
+		r.Delete("/aws/iam/users/{id}/policies/{policyId}", s.handleIAMDetachPolicy("user"))
+		r.Get("/aws/iam/groups", s.handleIAMListGroups)
+		r.Post("/aws/iam/groups", s.handleIAMCreateGroup)
+		r.Get("/aws/iam/groups/{id}", s.handleIAMGetGroup)
+		r.Delete("/aws/iam/groups/{id}", s.handleIAMDeleteGroup)
+		r.Post("/aws/iam/groups/{id}/members", s.handleIAMAddGroupMember)
+		r.Delete("/aws/iam/groups/{id}/members/{userId}", s.handleIAMRemoveGroupMember)
+		r.Post("/aws/iam/groups/{id}/policies", s.handleIAMAttachPolicy("group"))
+		r.Delete("/aws/iam/groups/{id}/policies/{policyId}", s.handleIAMDetachPolicy("group"))
+		r.Get("/aws/iam/roles", s.handleIAMListRoles)
+		r.Post("/aws/iam/roles", s.handleIAMCreateRole)
+		r.Get("/aws/iam/roles/{id}", s.handleIAMGetRole)
+		r.Delete("/aws/iam/roles/{id}", s.handleIAMDeleteRole)
+		r.Post("/aws/iam/roles/{id}/assume", s.handleIAMAssumeRole)
+		r.Post("/aws/iam/roles/{id}/policies", s.handleIAMAttachPolicy("role"))
+		r.Delete("/aws/iam/roles/{id}/policies/{policyId}", s.handleIAMDetachPolicy("role"))
+		r.Get("/aws/iam/sessions/{id}", s.handleIAMGetSession)
+		r.Get("/aws/iam/policies", s.handleIAMListPolicies)
+		r.Post("/aws/iam/policies", s.handleIAMCreatePolicy)
+		r.Get("/aws/iam/policies/{id}", s.handleIAMGetPolicy)
+		r.Delete("/aws/iam/policies/{id}", s.handleIAMDeletePolicy)
+		// Phase 2: monitoring + audit UI backend.
+		r.Get("/monitoring", s.handleMonitoring)
+		r.Post("/monitoring/alarms", s.handleCreateAlarm)
+		r.Delete("/monitoring/alarms/{id}", s.handleDeleteAlarm)
 		r.Get("/audit", s.handleListAudit)
+		r.Get("/audit/export", s.handleAuditExport)
+		// Phase 7 (R10): durable audit export jobs with retention.
+		r.Post("/audit/export/jobs", s.handleCreateAuditExportJob)
+		r.Get("/audit/export/jobs", s.handleListAuditExportJobs)
+		r.Get("/audit/export/jobs/{id}", s.handleGetAuditExportJob)
+		r.Post("/admin/users/{id}/sessions/revoke", s.handleRevokeUserSessions)
+		// Phase 3: data, messaging and serverless.
+		s.registerPhase3Routes(r)
+		// Phase 4: containers and developer tools.
+		s.registerPhase4Routes(r)
+		// Phase 5: Terraform Learning.
+		s.registerTFlearnRoutes(r)
+		// Phase 6: advanced services.
+		s.registerPhase6Routes(r)
 		r.Get("/admin/quotas", s.handleGetQuotas)
 		r.Put("/admin/quotas", s.handleUpdateQuotas)
 		r.Post("/admin/cleanup-reconcile", s.handleCleanupReconcile)

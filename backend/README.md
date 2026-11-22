@@ -22,9 +22,9 @@ cd backend
 go build ./...
 go test ./...
 
-# API server (default :8080) — connects to Postgres if reachable,
+# API server (default :8081) — connects to Postgres if reachable,
 # otherwise runs with in-memory stores and logs a warning.
-PORT=8080 NETWORK_ENGINE_ADDR=localhost:50051 CLOUDFORGE_JWT_SECRET=change-me \
+PORT=8081 NETWORK_ENGINE_ADDR=localhost:50051 CLOUDFORGE_JWT_SECRET=change-me \
   go run ./cmd/api
 
 # Seed the curriculum even when CURRICULUM_SEED=0 (default is on):
@@ -33,7 +33,7 @@ go run ./cmd/api -seed-curriculum
 # Re-seed a running API (admin only):
 #   POST /api/v1/admin/seed-curriculum
 
-# Background worker (default :8081)
+# Background worker (default :8083)
 go run ./cmd/worker
 
 # Host agent (default :8082, simulated mode; see "Host agent" below)
@@ -79,8 +79,8 @@ DATABASE_URL=postgres://cloudforge:cloudforge@localhost:5432/cloudforge?sslmode=
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORT` | `8080` | API listen port (ignored if `CLOUDFORGE_ADDR` is set) |
-| `CLOUDFORGE_ADDR` | `:8080` | Full API listen address |
+| `PORT` | `8081` | API listen port (ignored if `CLOUDFORGE_ADDR` is set) |
+| `CLOUDFORGE_ADDR` | `:8081` | Full API listen address |
 | `DATABASE_URL` | `postgres://cloudforge:cloudforge@localhost:5432/cloudforge?sslmode=disable` | Postgres DSN; invalid values fail startup fast |
 | `REDIS_ADDR` | `localhost:6379` | Redis address; unreachable Redis only disables the cache (never fails the API) — except auth rate limiting, which is fail-closed (see Milestone 9). In compose this is `redis:6379`; the old `REDIS_URL` name was never read. |
 | `NETWORK_ENGINE_ADDR` | `localhost:50051` | Rust network engine address; `/api/v1/health` reports `network_engine_grpc` (real gRPC Health RPC) and `network_engine_reachable` (TCP listener probe, labelled as such) |
@@ -98,7 +98,7 @@ DATABASE_URL=postgres://cloudforge:cloudforge@localhost:5432/cloudforge?sslmode=
 | `CLOUDFORGE_MODE` | `full` | Mode switch: `lite` \| `full`. Lite = classroom laptop (see `docs/operations/lightweight.md`): caps quotas at 1 lab / Micro / 30 min for learners, simulated host agent, no KVM required. Full is the default and changes nothing. `CLOUDFORGE_LITE=true` is an alias for `MODE=lite`; setting both to different modes fails startup. |
 | `CLOUDFORGE_LITE` | _(unset)_ | Alias for `CLOUDFORGE_MODE=lite` (`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`). |
 | `CLOUDFORGE_ADMIN_EMAIL` | _(unset)_ | The first user registering with this email is promoted to `admin` (bootstrap) |
-| `WORKER_ADDR` | `:8081` | Worker listen address |
+| `WORKER_ADDR` | `:8083` | Worker listen address |
 | `WORKER_POLL_INTERVAL` | `2s` | Jobs poll interval |
 | `WORKER_MAX_ATTEMPTS` | `5` | Max job attempts before dead-lettering |
 | `HOST_AGENT_MODE` | `simulated` | Host-agent backend: `simulated` \| `docker` \| `libvirt` \| `auto` |
@@ -177,7 +177,7 @@ carries `X-Request-ID` (echoed when supplied, generated otherwise) and is
 logged as structured JSON via `slog`.
 
 Worker endpoints: `GET /healthz` and `GET /status` (database_connected,
-job counts by state, uptime) on `:8081`.
+job counts by state, uptime) on `:8083`.
 
 Host-agent endpoints (port `:8082`, bearer token required except
 `/healthz`):
@@ -780,7 +780,7 @@ Full detail: `docs/security/model.md`, `docs/api/reference.md`,
   for `/api/v1/labs/{id}/terminal` with Upgrade headers).
   `frontend/src/services/api.ts` defaults to same-origin relative
   URLs when `VITE_API_URL` is unset; `frontend/vite.config.ts`
-  proxies the same paths to `localhost:8080` under `npm run dev`.
+  proxies the same paths to `localhost:8081` under `npm run dev`.
   Compose builds the frontend with an empty `VITE_API_URL` by
   default. Compose also fixed two env-name bugs: `JWT_SECRET` →
   `CLOUDFORGE_JWT_SECRET` and `REDIS_URL` → `REDIS_ADDR` (neither

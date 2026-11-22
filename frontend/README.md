@@ -39,7 +39,7 @@ npm run lint       # oxlint
 ## Configuration
 
 Copy `.env.example` to `.env` and set `VITE_API_URL` (default
-`http://localhost:8080`) — the Go API base URL. It is baked in at build
+`http://localhost:8081`) — the Go API base URL. It is baked in at build
 time for the Docker image (see `Dockerfile`, `VITE_API_URL` build arg).
 
 ## Pages
@@ -147,7 +147,7 @@ full before/after and verification.
   (WS `101` + simulated-shell banner with the short-lived token;
   `401` with the old Bearer-as-WS-token behaviour).
 - `frontend/nginx.conf` and `vite.config.ts` (dev proxy for `/api`,
-  `/healthz`, `/readyz`, `/metrics` to :8080) and the same-origin
+  `/healthz`, `/readyz`, `/metrics` to :8081) and the same-origin
   default in `src/services/api.ts` are unchanged from M9 Part 1.
 
 ### Verification (M9 Part 2)
@@ -162,7 +162,7 @@ New tests: `src/services/catalog.test.ts` (header-search navigation,
 active-nav behaviour), `src/components/aws.test.tsx` (header, nav,
 table, badges/buttons), `src/pages/console-home.test.tsx` (Console
 Home renders live health + real courses; Instances table renders a
-real lab row). Live check: dev server + Go API on :5173/:8080, all
+real lab row). Live check: dev server + Go API on :5173/:8081, all
 SPA routes → 200, proxy served real health/courses; terminal token →
 WS flow verified end to end (see `MILESTONE_LOG.md`).
 

@@ -14,7 +14,7 @@ model assumes:
 
 - The operator is trusted; the network between the containers is
   trusted (compose networks, no public ingress except the frontend
-  on `:80`).
+  on `:8080`).
 - Users are learners who may be curious or careless, not
   professional attackers. The controls below stop casual abuse
   (credential stuffing, token forgery, enumeration, accidental
@@ -50,27 +50,41 @@ encryption at rest (Postgres/Redis volumes are local files).
   tokens are no longer accepted. Users must log in again after the
   M9 upgrade; passwords are unaffected.
 
-### Sessions — HS256 JWT (M9)
+### Sessions — HS256 JWT (M9), revocation + cookies (Phase 7)
 
 - `POST /api/v1/auth/login` and `/register` return a signed
   **HS256 JWT** (`golang-jwt/jwt/v5`), 12h TTL
   (`CLOUDFORGE_TOKEN_TTL`), signed with `CLOUDFORGE_JWT_SECRET`.
-  Claims: `sub` (user id), `iss: cloudforge`, `iat`, `exp`. No
-  roles or PII are embedded in the token.
+  Claims: `sub` (user id), `iss: cloudforge`, `iat`, `exp`, and
+  since Phase 7 a `jti` (unique token id, `auth.NewJTI`).
+  No roles or PII are embedded in the token.
+- **Revocation (Phase 7, R3):** tokens are checked against a
+  denylist on every authenticated request. `POST
+  /api/v1/auth/logout` revokes the caller's `jti`; an admin can
+  revoke all of a user's sessions (`POST
+  /api/v1/admin/users/{id}/sessions/revoke`). The denylist is
+  Postgres (`revoked_tokens` / `issued_tokens`, migration 013)
+  when the DB is up, else Redis, else in-memory. Pre-Phase-7
+  tokens (no `jti`) cannot be individually revoked.
+- **Session cookie (Phase 7, R6):** login/register also set an
+  `HttpOnly`, `SameSite=Lax` cookie `cf_session` (`Secure` only
+  when `CLOUDFORGE_TLS=1`). The `Authorization: Bearer` header
+  path still works for API clients/tests during a transition;
+  the plan is to make it API-client-only (see `docs/SECURITY.md`).
 - Validation (`auth.Store.ValidateToken`) requires the HS256
   algorithm explicitly (`WithValidMethods(["HS256"])`) — `none` and
   foreign-algorithm tokens are rejected — checks the issuer, and
   maps expiry to `ErrTokenExpired`. Tokens signed with another
-  secret fail.
+  secret fail. A revoked token maps to `ErrTokenRevoked` (401).
 - The secret **must** be set in any shared deployment
-  (`openssl rand -hex 32`); startup warns loudly when the
-  `dev-only-change-me` default is in use. The compose file and
+  (`openssl rand -hex 32`); since Phase 7 the API and worker
+  **refuse to start** in non-dev mode when the secret is unset or
+  still the `dev-only-change-me` default (`ValidateSecrets`,
+  naming the variable). Dev defaults work only with the explicit
+  `CLOUDFORGE_DEV=1` opt-in. The compose file and
   `.env.example` use the name `CLOUDFORGE_JWT_SECRET` — an earlier
   `JWT_SECRET` name was never read by config and silently fell back
   to the dev default; it was renamed in M9.
-- There is no server-side session store and no revocation list: a
-  token is valid until it expires. Rotating the secret invalidates
-  **all** sessions at once (see runbook).
 
 ### Roles and ownership
 
@@ -270,7 +284,71 @@ for the defaults and the retention note below.
 
 Audit rows are retained **90 days**: the worker's
 `audit_cleanup` job calls `AuditStore.CleanupOlderThan(90)`.
-There is no separate archival step — entries older than 90 days
-are deleted, not exported. Operators who need longer retention
-must snapshot the `audit_logs` table (e.g. with the backup
-script in `scripts/backup.sh`) before the cleanup job runs.
+Since Phase 7 the cleanup **exports rows to
+`audit-archive-<date>.csv` before deleting them**; a failed
+export blocks the delete. Admins can also export on demand as
+jobs (`POST /api/v1/audit/export/jobs`, CSV/JSON, cap 10,000
+events, retention newest 7 by default). If the worker's export
+directory is unset, it logs a warning and still deletes
+(documented in `docs/SECURITY.md`). Operators who need longer
+retention should also snapshot the `audit_logs` table (e.g.
+with the backup script in `scripts/backup.sh`) before the
+cleanup job runs.
+
+## Phase 7 — Production hardening (2026-11-22)
+
+Phase 7 closed the Phase 0 audit §5 risks R1, R3–R8, R10–R12
+(`docs/IMPLEMENTATION_STATUS.md` §5, §16). Operator summary in
+`docs/SECURITY.md`; this section records the mechanisms.
+
+### Engine auth (R1)
+
+The Rust engine's gRPC channel is authenticated with a
+shared-secret token on metadata `x-cloudforge-engine-token`,
+enforced by `EngineAuthInterceptor` on **every** RPC including
+Health, in the server and in the Go client
+(`networkclient.NewWithToken`). The engine fails closed at startup
+without a token (`CLOUDFORGE_ENGINE_TOKEN`) unless
+`CLOUDFORGE_DEV=1`. The old unauthenticated path refuses
+connections. `:50051` is no longer published on the host in
+either compose file. mTLS is the documented next step, not built.
+
+### Metrics (R5)
+
+`GET /metrics` requires a token (`X-Metrics-Token` or
+`Authorization: Bearer <CLOUDFORGE_METRICS_TOKEN>`); with no token
+configured it is loopback-only (dev). nginx no longer proxies
+`/metrics` (404). Prometheus scrapes with the token
+(`infrastructure/monitoring/prometheus.yml`).
+
+### Security headers (R6, R12)
+
+API middleware (`withSecurityHeaders`) and nginx set CSP
+(`default-src 'self'`, `frame-ancestors 'none'`, …),
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: strict-origin-when-cross-origin`,
+`Permissions-Policy: camera=(), microphone=(), geolocation=()`.
+HSTS (`max-age=31536000; includeSubDomains`) only when
+`CLOUDFORGE_TLS=1`. TLS itself is opt-in (self-signed cert via
+`scripts/gen-tls-cert.sh`, compose override
+`docker-compose.tls.yml`); the TLS compose/nginx path is
+unverified in the sandbox (no Docker/nginx).
+
+### Trusted proxy and rate limits (R7, R8)
+
+`X-Forwarded-For` is honoured only when the peer is loopback, a
+private (RFC 1918/ULA) address, or an explicitly configured
+`CLOUDFORGE_TRUSTED_PROXIES` IP/CIDR; otherwise the peer IP is
+used. The per-IP limiters from M9 are unchanged; a per-user
+limiter (default 300/min, `CLOUDFORGE_API_USER_RATE_LIMIT`) now
+runs in addition on `/api/v1`. Unauthenticated requests skip it.
+Both fail open on Redis error (documented, by design); the auth
+limiter fails closed (503).
+
+### Terraform isolation (R11)
+
+`CLOUDFORGE_TF_NETWORK_MODE=isolated` runs the Terraform
+container with `--network none` (no ExtraHosts, no egress at
+all). Default `bridge` keeps the `host.docker.internal` emulator
+route and only approximates isolation. See
+`docs/TERRAFORM_LEARNING.md`.

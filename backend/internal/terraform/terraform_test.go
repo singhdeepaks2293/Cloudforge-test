@@ -163,3 +163,26 @@ func TestTestStubRunnerIsLabelled(t *testing.T) {
 		t.Fatal("stub FailOperation must fail the run")
 	}
 }
+
+// TestTFHostConfigIsolated verifies Phase 7 (R11): isolated mode
+// gives the terraform container --network none and NO ExtraHosts
+// entry (no egress at all); bridge mode keeps the emulator route.
+func TestTFHostConfigIsolated(t *testing.T) {
+	iso := NewContainerRunner("", "").WithNetworkMode("isolated")
+	hc := tfHostConfig(iso, "/work/lab-1")
+	if hc["NetworkMode"] != "none" {
+		t.Fatalf("isolated HostConfig NetworkMode = %v, want none", hc["NetworkMode"])
+	}
+	if _, ok := hc["ExtraHosts"]; ok {
+		t.Fatalf("isolated HostConfig must not set ExtraHosts: %v", hc)
+	}
+	bridge := NewContainerRunner("", "")
+	hc = tfHostConfig(bridge, "/work/lab-1")
+	if _, ok := hc["NetworkMode"]; ok {
+		t.Fatalf("bridge HostConfig must not set NetworkMode: %v", hc)
+	}
+	hosts, _ := hc["ExtraHosts"].([]string)
+	if len(hosts) != 1 || hosts[0] != "host.docker.internal:host-gateway" {
+		t.Fatalf("bridge ExtraHosts = %v", hosts)
+	}
+}

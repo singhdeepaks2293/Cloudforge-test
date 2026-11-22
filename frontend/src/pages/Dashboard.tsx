@@ -7,7 +7,8 @@ import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
 import { ServiceIcon } from '../components/AwsNav.tsx'
 import { ErrorBox, Loading, StatusBadge } from '../components/Layout.tsx'
-import { getRecentServices } from '../services/catalog.ts'
+import { getRecentServiceIds } from '../services/catalog.ts'
+import { useServices } from '../services/registry.ts'
 
 function formatUptime(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
@@ -28,7 +29,10 @@ export function Dashboard() {
   const courses = useQuery({ queryKey: ['courses'], queryFn: fetchCourses, retry: 1 })
   const authed = getToken() !== null
   const labs = useQuery({ queryKey: ['labs'], queryFn: fetchLabs, retry: 1, enabled: authed })
-  const recent = getRecentServices()
+  const servicesQuery = useServices()
+  const recent = getRecentServiceIds()
+    .map((id) => (servicesQuery.data ?? []).find((s) => s.id === id))
+    .filter((s): s is NonNullable<typeof s> => s !== undefined)
 
   return (
     <div className="space-y-4">
@@ -163,13 +167,13 @@ export function Dashboard() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {recent.map((s) => (
               <Link
-                key={s.name}
-                to={s.to}
+                key={s.id}
+                to={s.route}
                 className="flex flex-col gap-1 border border-aws-border px-3 py-3 text-aws-text hover:border-aws-orange hover:no-underline"
               >
                 <ServiceIcon icon={s.icon} className="h-5 w-5 text-aws-orange-dark" />
                 <span className="text-sm font-semibold">{s.name}</span>
-                <span className="text-xs text-aws-muted">{s.label}</span>
+                <span className="text-xs text-aws-muted">{s.description}</span>
               </Link>
             ))}
           </div>

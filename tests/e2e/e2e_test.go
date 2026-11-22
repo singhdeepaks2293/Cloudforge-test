@@ -257,7 +257,7 @@ func TestEndToEnd(t *testing.T) {
 	// --- Fakes: fake gRPC engine + simulated host agent. -------------
 	fakesLog := filepath.Join(binDir, "fakes.log")
 	start(t, "e2e-fakes", fakesBin,
-		[]string{"-engine-addr", engineAddr, "-host-agent-addr", haAddr, "-host-agent-token", haToken},
+		[]string{"-engine-addr", engineAddr, "-host-agent-addr", haAddr, "-host-agent-token", haToken, "-engine-token", "e2e-engine-token"},
 		os.Environ(), fakesLog)
 	waitForTCP(t, "fake engine", engineAddr, 15*time.Second)
 	waitFor(t, "simulated host agent", "http://"+haAddr+"/healthz", 15*time.Second)
@@ -281,6 +281,11 @@ func TestEndToEnd(t *testing.T) {
 		"CLOUDFORGE_ADDR=" + apiAddr,
 		"NETWORK_ENGINE_ADDR=" + engineAddr,
 		"HOST_AGENT_ADDR=" + haAddr,
+		// Phase 7: dev opt-in (explicit) + the engine token the
+		// fake engine enforces, so the API's authenticated gRPC
+		// client is exercised end to end.
+		"CLOUDFORGE_DEV=1",
+		"CLOUDFORGE_ENGINE_TOKEN=e2e-engine-token",
 		"HOST_AGENT_TOKEN=" + haToken,
 		"HOST_AGENT_MODE=simulated",
 		"CLOUDFORGE_ADMIN_EMAIL=admin@example.com",

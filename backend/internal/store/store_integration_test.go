@@ -203,4 +203,86 @@ func TestPostgresIntegration(t *testing.T) {
 	if err != nil || total < 1 || len(entries) == 0 {
 		t.Fatalf("audit list: total=%d entries=%d err=%v", total, len(entries), err)
 	}
+	// Regression (Phase 6, found live 2026-11-22): a failed login is
+	// audited with an empty actor (no user authenticated). The old
+	// literal "anonymous" made the Postgres insert fail — user_id is
+	// a UUID column — so GuardDuty scans saw zero failed logins.
+	// An empty actor must record as NULL and stay listable by action;
+	// a non-UUID actor must keep failing, so nobody reintroduces a
+	// literal actor that silently drops audit evidence.
+	if err := auditStore.Record(ctx, AuditEntry{ActorID: "anonymous", Action: "auth.login_failed", ResourceType: "user", ResourceID: ""}); err == nil {
+		t.Fatalf("audit record with non-UUID actor %q should fail (user_id is a UUID column)", "anonymous")
+	}
+	if err := auditStore.Record(ctx, AuditEntry{ActorID: "", Action: "auth.login_failed", ResourceType: "user", ResourceID: "", Metadata: map[string]any{"client_ip": "203.0.113.9", "email": email}}); err != nil {
+		t.Fatalf("audit record with empty actor: %v", err)
+	}
+	failed, _, err := auditStore.ListFiltered(ctx, AuditFilter{Action: "auth.login_failed", Limit: 10})
+	if err != nil {
+		t.Fatalf("audit list filtered: %v", err)
+	}
+	found := false
+	for _, e := range failed {
+		if e.Metadata["client_ip"] == "203.0.113.9" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("anonymous failed-login audit entry not found by ListFiltered (got %d auth.login_failed entries)", len(failed))
+	}
+}
+
+// TestPostgresRevocationIntegration verifies the Phase 7 durable
+// denylist (migration 013): a revoked jti is denied, another
+// user's jti is not, and RevokeUser denies every recorded jti.
+func TestPostgresRevocationIntegration(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL is unset; integration test skipped (no PostgreSQL available)")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := database.Connect(ctx, dsn)
+	if err != nil {
+		t.Skipf("PostgreSQL at DATABASE_URL is unreachable (%v); integration test skipped", err)
+	}
+	defer db.Close()
+	if _, err := database.Migrate(ctx, db, migrations.FS); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	rev := NewPostgresRevoker(db)
+	suffix := ids.New()[:8]
+	userA := "rev-user-a-" + suffix
+	userB := "rev-user-b-" + suffix
+	exp := time.Now().Add(time.Hour)
+	jtiA1, jtiA2, jtiB := "jti-a1-"+suffix, "jti-a2-"+suffix, "jti-b-"+suffix
+	for _, rec := range [][3]string{{jtiA1, userA, ""}, {jtiA2, userA, ""}, {jtiB, userB, ""}} {
+		if err := rev.RecordIssued(ctx, rec[0], rec[1], exp); err != nil {
+			t.Fatalf("RecordIssued %s: %v", rec[0], err)
+		}
+	}
+	if revoked, err := rev.IsRevoked(ctx, jtiA1); err != nil || revoked {
+		t.Fatalf("fresh jti must not be revoked: %v %v", revoked, err)
+	}
+	if err := rev.Revoke(ctx, jtiA1, userA, exp); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if revoked, err := rev.IsRevoked(ctx, jtiA1); err != nil || !revoked {
+		t.Fatalf("revoked jti must be denied: %v %v", revoked, err)
+	}
+	// jtiA1 was already revoked individually, so RevokeUser inserts
+	// only the one remaining jti (n counts newly revoked rows).
+	if n, err := rev.RevokeUser(ctx, userA); err != nil || n != 1 {
+		t.Fatalf("RevokeUser(userA) = %d, err %v, want 1 newly revoked jti", n, err)
+	}
+	for _, jti := range []string{jtiA1, jtiA2} {
+		if revoked, err := rev.IsRevoked(ctx, jti); err != nil || !revoked {
+			t.Fatalf("jti %s must be denied after RevokeUser: %v %v", jti, revoked, err)
+		}
+	}
+	if revoked, err := rev.IsRevoked(ctx, jtiB); err != nil || revoked {
+		t.Fatalf("other user's jti must not be revoked: %v %v", revoked, err)
+	}
+	// Cleanup test rows.
+	_, _ = db.Pool.Exec(ctx, "DELETE FROM revoked_tokens WHERE user_id IN ($1,$2)", userA, userB)
+	_, _ = db.Pool.Exec(ctx, "DELETE FROM issued_tokens WHERE user_id IN ($1,$2)", userA, userB)
 }

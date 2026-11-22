@@ -47,6 +47,13 @@ func (m *MemoryLabStore) Destroy(ctx context.Context, id string) (*labs.Lab, err
 	return m.inner.Destroy(id)
 }
 
+// Start re-provisions a STOPPED lab through the in-memory store's
+// Retry path (STOPPED -> PROVISIONING -> READY/FAILED via the engine
+// reachability check, exactly like a failed lab's retry).
+func (m *MemoryLabStore) Start(ctx context.Context, id string) (*labs.Lab, error) {
+	return m.inner.Retry(id)
+}
+
 // Transition validates and persists the new state via the in-memory
 // store (its async goroutines may still race it; tests use short
 // ProvisionDelay values to avoid that).
@@ -457,22 +464,35 @@ func (m *MemoryAuditStore) Record(ctx context.Context, e AuditEntry) error {
 }
 
 func (m *MemoryAuditStore) List(ctx context.Context, limit, offset int) ([]*AuditEntry, int, error) {
+	return m.ListFiltered(ctx, AuditFilter{Limit: limit, Offset: offset})
+}
+
+// ListFiltered returns newest-first entries matching f.
+func (m *MemoryAuditStore) ListFiltered(ctx context.Context, f AuditFilter) ([]*AuditEntry, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	total := len(m.entries)
-	// Newest first.
-	ordered := make([]*AuditEntry, 0, total)
-	for i := total - 1; i >= 0; i-- {
-		ordered = append(ordered, m.entries[i])
+	if f.Limit <= 0 || f.Limit > 1000 {
+		f.Limit = 50
 	}
-	if offset >= total {
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	// Newest first.
+	ordered := make([]*AuditEntry, 0, len(m.entries))
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if f.Matches(m.entries[i]) {
+			ordered = append(ordered, m.entries[i])
+		}
+	}
+	total := len(ordered)
+	if f.Offset >= total {
 		return []*AuditEntry{}, total, nil
 	}
-	end := offset + limit
+	end := f.Offset + f.Limit
 	if end > total {
 		end = total
 	}
-	return ordered[offset:end], total, nil
+	return ordered[f.Offset:end], total, nil
 }
 
 func (m *MemoryAuditStore) CleanupOlderThan(ctx context.Context, days int) (int64, error) {
@@ -647,6 +667,18 @@ func (m *MemoryResourceStore) CreateResource(ctx context.Context, r *LabResource
 	if m.byLab[cp.LabID] == nil {
 		m.byLab[cp.LabID] = make(map[string]*LabResource)
 	}
+	m.byLab[cp.LabID][cp.ID] = cp
+	return copyResource(cp), nil
+}
+
+// UpdateResource replaces the stored row (matched by LabID+ID).
+func (m *MemoryResourceStore) UpdateResource(ctx context.Context, r *LabResource) (*LabResource, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.byLab[r.LabID][r.ID]; !ok {
+		return nil, ErrNotFound
+	}
+	cp := copyResource(r)
 	m.byLab[cp.LabID][cp.ID] = cp
 	return copyResource(cp), nil
 }

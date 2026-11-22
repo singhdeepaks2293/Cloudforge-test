@@ -1,0 +1,46 @@
+# CloudForge — TLS termination override (Phase 7, risk R12).
+#
+# Opt-in TLS for the frontend (nginx). This is an OVERRIDE file: it
+# is layered on top of the base compose file, never used alone:
+#
+#   ./scripts/gen-tls-cert.sh cloudforge.local   # self-signed cert
+#   docker compose --env-file .env \
+#     -f deployments/compose/docker-compose.yml \
+#     -f deployments/compose/docker-compose.tls.yml up -d --build
+#
+# and set CLOUDFORGE_TLS=1 in .env so the API emits HSTS and marks
+# session cookies Secure.
+#
+# What it does:
+#   - mounts the certificate + key (deployments/tls/, created by
+#     scripts/gen-tls-cert.sh) read-only into the frontend container;
+#   - REPLACES the frontend's nginx config with frontend/nginx.tls.conf
+#     (mounted over /etc/nginx/conf.d/default.conf): :8443 serves the
+#     app over TLS (1.2+, HSTS), and plain HTTP :8080 redirects to
+#     https://$host (port 443 on the host);
+#   - publishes host :443 -> container :8443. Port 443 is deliberate:
+#     HSTS is host-wide, so HTTPS must be on the default port or a
+#     browser that learned HSTS would upgrade http://host:8080 to
+#     https://host:8080 (plain HTTP) and fail. Do not change the host
+#     port to 8443 while HSTS is on.
+#
+# UNVERIFIED in this sandbox (no Docker/nginx here): the override
+# YAML parses, the nginx TLS config was reviewed against the base
+# nginx.conf, and the cert script was run (openssl) — but no
+# container ever served HTTPS here. The first verified TLS run must
+# be on a real Docker host; see docs/DEPLOYMENT.md.
+#
+# For a shared host, replace the self-signed files with a real CA
+# certificate (same filenames) — browsers will otherwise warn,
+# correctly, that the certificate is self-signed.
+
+services:
+  frontend:
+    ports:
+      - "${FRONTEND_TLS_PORT:-443}:8443"
+      - "${FRONTEND_PORT:-8080}:8080"
+    volumes:
+      - ../../deployments/tls/fullchain.pem:/etc/nginx/tls/fullchain.pem:ro
+      - ../../deployments/tls/privkey.pem:/etc/nginx/tls/privkey.pem:ro
+      # Replaces the image's default.conf (base nginx.conf) entirely.
+      - ../../frontend/nginx.tls.conf:/etc/nginx/conf.d/default.conf:ro

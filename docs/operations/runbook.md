@@ -23,11 +23,11 @@ docker compose -f deployments/compose/docker-compose.yml up -d --build
 # or: make up   (from the repo root; fails clearly without Docker)
 
 # 3. Verify
-curl -s localhost/readyz | python3 -m json.tool   # via nginx
-curl -s localhost:8080/api/v1/health | python3 -m json.tool
+curl -s localhost:8080/readyz | python3 -m json.tool   # via nginx
+curl -s localhost:8081/api/v1/health | python3 -m json.tool
 ```
 
-Services: frontend `:80`, API `:8080`, network engine gRPC
+Services: frontend `:8080`, API `:8081`, network engine gRPC
 `:50051`, PostgreSQL `:5432` (dev only), Redis `:6379` (dev only).
 
 ## Verify without Docker (`make verify`)
@@ -45,14 +45,14 @@ tests is not a green deployment; see "Pre-flight checks").
 
 ## Pre-flight checks (before calling a deployment healthy)
 
-1. `curl localhost/readyz` → 200, `postgres: ok`, `redis: ok`.
+1. `curl localhost:8080/readyz` → 200, `postgres: ok`, `redis: ok`.
    `engine: down` is acceptable if no labs need provisioning yet —
    but lab creation will fail honestly until it is up.
-2. `curl localhost:8080/api/v1/health` → `database_connected:
+2. `curl localhost:8081/api/v1/health` → `database_connected:
    true`, `redis_connected: true`.
 3. Register a user and log in (see API reference examples); the
    token must be a JWT (three dot-separated segments).
-4. `curl localhost/metrics | grep cloudforge_http_requests_total`
+4. `curl localhost:8080/metrics | grep cloudforge_http_requests_total`
    returns series after a few requests.
 5. `docker compose ps` — all services `healthy` (api healthcheck
    is `/readyz`).
@@ -115,10 +115,10 @@ to retry.
 
 ### Frontend shows "API unreachable"
 
-1. `curl localhost/api/v1/health` — if this works, the nginx proxy
+1. `curl localhost:8080/api/v1/health` — if this works, the nginx proxy
    is fine and the problem is the browser (check `VITE_API_URL`:
    it must be empty in the built image for same-origin).
-2. If it fails, `curl localhost:8080/api/v1/health` — if that
+2. If it fails, `curl localhost:8081/api/v1/health` — if that
    works, nginx is the problem (`docker compose logs frontend`,
    check `frontend/nginx.conf` proxy locations).
 3. If that fails, the api is down — see Postgres/Redis above.
@@ -162,7 +162,7 @@ users must log in again for a fresh JWT.
 - **Cleanup reconciliation:** `POST /api/v1/admin/cleanup-reconcile`
   (see "Cleanup reconciliation" below); the worker also runs it
   as a `cleanup_reconcile` job.
-- **Metrics:** scrape `http://<api>:8080/metrics` (or via nginx
+- **Metrics:** scrape `http://<api>:8081/metrics` (or via nginx
   at `/metrics`). Alert on `cloudforge_network_engine_up == 0`
   and on rising `cloudforge_http_requests_total{status="503"}`.
   Optional Prometheus + Grafana: `docker compose --profile
@@ -200,12 +200,12 @@ Per-role limits (labs, CPU, memory, disk, lab hours) live in the
 ```bash
 # Inspect (admin token required):
 curl -H "Authorization: Bearer $ADMIN_TOKEN" \
-  localhost:8080/api/v1/admin/quotas
+  localhost:8081/api/v1/admin/quotas
 # Change one role (partial update; 0 = unlimited, except
 # max_labs 0 = the built-in default of 3):
 curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"role":"learner","max_labs":5}' \
-  localhost:8080/api/v1/admin/quotas
+  localhost:8081/api/v1/admin/quotas
 ```
 
 Enforcement: lab creation is refused with `429 quota_exceeded`
@@ -227,7 +227,7 @@ the orphaned side with audit events. **Dry-run is the default.**
 # Dry-run (default): report only, nothing is removed.
 curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"dry_run": true}' \
-  localhost:8080/api/v1/admin/cleanup-reconcile
+  localhost:8081/api/v1/admin/cleanup-reconcile
 # One lab only: {"lab_id": "<id>", "dry_run": true}
 # Enforce: {"dry_run": false} — deletes the orphaned side.
 ```

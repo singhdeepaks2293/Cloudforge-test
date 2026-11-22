@@ -204,6 +204,198 @@ func (a *S3Adapter) GetObject(ctx context.Context, bucket, key string) ([]byte, 
 	return data, nil
 }
 
+// S3Object is one object as reported by ListObjects / StatObject.
+// Prefixes ("folders") are reported as objects with IsPrefix=true
+// and no size; they are a listing convenience, not stored objects.
+type S3Object struct {
+	Key          string            `json:"key"`
+	Size         int64             `json:"size"`
+	LastModified time.Time         `json:"last_modified,omitempty"`
+	ETag         string            `json:"etag,omitempty"`
+	ContentType  string            `json:"content_type,omitempty"`
+	IsPrefix     bool              `json:"is_prefix,omitempty"`
+	UserMetadata map[string]string `json:"user_metadata,omitempty"`
+}
+
+// ListObjects lists objects under prefix (recursive). A prefix
+// ending in "/" lists that "folder". Common prefixes are returned as
+// IsPrefix entries when the server reports them (non-recursive
+// listing is not used; prefixes are derived client-side).
+func (a *S3Adapter) ListObjects(ctx context.Context, bucket, prefix string) ([]S3Object, error) {
+	if err := validateBucketName(bucket); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout*5)
+	defer cancel()
+	out := []S3Object{}
+	seenPrefix := map[string]bool{}
+	for info := range a.client.ListObjects(ctx, bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
+		if info.Err != nil {
+			if isUnreachable(info.Err) {
+				return nil, fmt.Errorf("%w: %v", ErrS3Unavailable, info.Err)
+			}
+			return nil, info.Err
+		}
+		// Derive "folder" entries from keys below the prefix so the
+		// UI can navigate prefixes like the AWS console does.
+		rel := strings.TrimPrefix(info.Key, prefix)
+		if idx := strings.Index(rel, "/"); idx >= 0 {
+			dir := prefix + rel[:idx+1]
+			if !seenPrefix[dir] {
+				seenPrefix[dir] = true
+				out = append(out, S3Object{Key: dir, IsPrefix: true})
+			}
+			continue
+		}
+		out = append(out, S3Object{
+			Key: info.Key, Size: info.Size, LastModified: info.LastModified,
+			ETag: strings.Trim(info.ETag, `"`), ContentType: info.ContentType,
+			UserMetadata: info.UserMetadata,
+		})
+	}
+	return out, nil
+}
+
+// DeleteObject removes an object. A missing object is a success
+// (idempotent delete, like S3).
+func (a *S3Adapter) DeleteObject(ctx context.Context, bucket, key string) error {
+	if err := validateBucketName(bucket); err != nil {
+		return err
+	}
+	if key == "" {
+		return errors.New("object key is required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout*5)
+	defer cancel()
+	if err := a.client.RemoveObject(ctx, bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		if isUnreachable(err) {
+			return fmt.Errorf("%w: %v", ErrS3Unavailable, err)
+		}
+		return err
+	}
+	return nil
+}
+
+// StatObject returns an object's metadata (size, content type,
+// last-modified, ETag, user metadata).
+func (a *S3Adapter) StatObject(ctx context.Context, bucket, key string) (S3Object, error) {
+	if err := validateBucketName(bucket); err != nil {
+		return S3Object{}, err
+	}
+	if key == "" {
+		return S3Object{}, errors.New("object key is required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout*5)
+	defer cancel()
+	info, err := a.client.StatObject(ctx, bucket, key, minio.StatObjectOptions{})
+	if err != nil {
+		if isUnreachable(err) {
+			return S3Object{}, fmt.Errorf("%w: %v", ErrS3Unavailable, err)
+		}
+		return S3Object{}, err
+	}
+	return S3Object{
+		Key: info.Key, Size: info.Size, LastModified: info.LastModified,
+		ETag: strings.Trim(info.ETag, `"`), ContentType: info.ContentType,
+		UserMetadata: info.UserMetadata,
+	}, nil
+}
+
+// GetBucketVersioning reports whether versioning is enabled.
+// MinIO returns an empty Status when versioning was never set.
+func (a *S3Adapter) GetBucketVersioning(ctx context.Context, bucket string) (bool, error) {
+	if err := validateBucketName(bucket); err != nil {
+		return false, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout*5)
+	defer cancel()
+	cfg, err := a.client.GetBucketVersioning(ctx, bucket)
+	if err != nil {
+		if isUnreachable(err) {
+			return false, fmt.Errorf("%w: %v", ErrS3Unavailable, err)
+		}
+		return false, err
+	}
+	return cfg.Status == "Enabled", nil
+}
+
+// SetBucketVersioning enables ("Enabled") or suspends ("Suspended")
+// versioning on a bucket.
+func (a *S3Adapter) SetBucketVersioning(ctx context.Context, bucket string, enabled bool) error {
+	if err := validateBucketName(bucket); err != nil {
+		return err
+	}
+	status := "Suspended"
+	if enabled {
+		status = "Enabled"
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout*5)
+	defer cancel()
+	if err := a.client.SetBucketVersioning(ctx, bucket, minio.BucketVersioningConfiguration{Status: status}); err != nil {
+		if isUnreachable(err) {
+			return fmt.Errorf("%w: %v", ErrS3Unavailable, err)
+		}
+		return err
+	}
+	return nil
+}
+
+// GetBucketPolicy returns the bucket policy JSON ("" when none is set).
+// MinIO answers NoSuchBucketPolicy with an empty policy; that is
+// reported as "" with no error.
+func (a *S3Adapter) GetBucketPolicy(ctx context.Context, bucket string) (string, error) {
+	if err := validateBucketName(bucket); err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout*5)
+	defer cancel()
+	policy, err := a.client.GetBucketPolicy(ctx, bucket)
+	if err != nil {
+		if isUnreachable(err) {
+			return "", fmt.Errorf("%w: %v", ErrS3Unavailable, err)
+		}
+		var resp minio.ErrorResponse
+		if errors.As(err, &resp) && resp.Code == "NoSuchBucketPolicy" {
+			return "", nil
+		}
+		return "", err
+	}
+	return policy, nil
+}
+
+// SetBucketPolicy replaces the bucket policy. An empty policy removes it.
+func (a *S3Adapter) SetBucketPolicy(ctx context.Context, bucket, policy string) error {
+	if err := validateBucketName(bucket); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout*5)
+	defer cancel()
+	if err := a.client.SetBucketPolicy(ctx, bucket, policy); err != nil {
+		if isUnreachable(err) {
+			return fmt.Errorf("%w: %v", ErrS3Unavailable, err)
+		}
+		return err
+	}
+	return nil
+}
+
+// RemoveBucket deletes an empty bucket. A non-empty bucket is a
+// caller error from MinIO, not an unavailable backend.
+func (a *S3Adapter) RemoveBucket(ctx context.Context, bucket string) error {
+	if err := validateBucketName(bucket); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout*5)
+	defer cancel()
+	if err := a.client.RemoveBucket(ctx, bucket); err != nil {
+		if isUnreachable(err) {
+			return fmt.Errorf("%w: %v", ErrS3Unavailable, err)
+		}
+		return err
+	}
+	return nil
+}
+
 // validateBucketName enforces the S3 bucket naming rules we rely on
 // (lowercase DNS labels, 3–63 chars) so a bad name is a 400, never a
 // confusing backend error.

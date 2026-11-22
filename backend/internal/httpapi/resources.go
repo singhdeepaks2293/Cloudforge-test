@@ -211,6 +211,35 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 		State: "CREATED", Provider: "simulator", ParentID: req.ParentID,
 		CIDR: req.CIDR, Config: cfg, CreatedAt: time.Now().UTC(),
 	}
+	// Phase 2: CIDR validation. A bad CIDR is a 400, never a row
+	// that later fails in the engine. Subnets must sit inside their
+	// parent VPC CIDR and must not overlap a sibling subnet.
+	if kind == "vpc" && req.CIDR != "" {
+		if _, err := parseCIDR(req.CIDR); err != nil {
+			s.writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+	}
+	if kind == "subnet" {
+		if req.CIDR == "" {
+			s.writeError(w, r, http.StatusBadRequest, "invalid_request", "subnet creation requires a cidr")
+			return
+		}
+		siblings, _ := s.Resources.ListResources(r.Context(), lab.ID)
+		vpcCIDR := ""
+		if req.ParentID != "" {
+			if parent, err := s.Resources.GetResource(r.Context(), lab.ID, req.ParentID); err == nil && parent.Kind == "vpc" {
+				vpcCIDR = parent.CIDR
+			}
+		}
+		if vpcCIDR == "" {
+			vpcCIDR = s.labVPCCIDR(r.Context(), lab.ID)
+		}
+		if err := validateSubnetCIDR(vpcCIDR, siblings, req.CIDR); err != nil {
+			s.writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+	}
 	// Kind-specific provisioning through the real backends.
 	switch kind {
 	case "subnet":
@@ -296,9 +325,37 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, r, http.StatusBadGateway, "host_agent_error", "host agent CreateVM failed: "+err.Error())
 			return
 		}
+		// A launched instance must be running: CreateVM only defines
+		// the VM (state "defined"). Start it now; if the start
+		// fails, remove the defined VM again and report a 502 —
+		// never record a defined-but-never-started VM as a launched
+		// instance (reboot, and any route via the instance, would
+		// then fail later with a confusing error).
+		if _, err := s.HostAgent.Do(r.Context(), hostagent.OpRequest{
+			Op: hostagent.OpStartVM, LabID: lab.ID, OwnerID: u.ID, ID: created.ID,
+			IdempotencyKey: "resource-start:" + res.ID,
+		}); err != nil {
+			_, _ = s.HostAgent.Do(r.Context(), hostagent.OpRequest{
+				Op: hostagent.OpDeleteVM, LabID: lab.ID, OwnerID: u.ID, ID: created.ID,
+				IdempotencyKey: "resource-start-rollback:" + res.ID,
+			})
+			s.writeError(w, r, http.StatusBadGateway, "host_agent_error", "host agent StartVM failed: "+err.Error())
+			return
+		}
 		res.Provider = "host-agent"
 		res.ProviderResourceID = created.ID
-		res.State = "defined"
+		res.State = "running"
+		// Record the VM's private IP (best effort — the state is
+		// honestly "running" either way; a missing IP only means a
+		// route via this instance is refused until it is known).
+		if vms, err := s.listHostAgentVMs(r.Context(), lab.ID, u.ID); err == nil {
+			for _, vm := range vms {
+				if vm.ID == created.ID && vm.IP != "" {
+					res.PrivateIP = vm.IP
+					break
+				}
+			}
+		}
 		cfg["profile"] = profile
 		res.Config = cfg
 	case "security-group":
@@ -306,6 +363,31 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 		// separate step (the engine needs policy rules, not just a
 		// name) and is not faked here.
 		res.Provider = "rust-network-engine"
+	case "gateway":
+		// config.gateway_type is "igw" (default) or "nat".
+		// A NAT gateway creates real engine NAT state (SIMULATED
+		// backend in lite, real netlink where the engine runs it);
+		// engine failure is a 502 and nothing is persisted. An
+		// internet gateway has no engine RPC: it is recorded in
+		// the DB and labelled SIMULATED until it is attached.
+		gwType, _ := cfg["gateway_type"].(string)
+		if gwType == "" {
+			gwType = "igw"
+			cfg["gateway_type"] = gwType
+		}
+		res.Provider = "rust-network-engine"
+		res.State = "available"
+		if gwType == "nat" {
+			siblings, _ := s.Resources.ListResources(r.Context(), lab.ID)
+			if err := s.createNATGateway(r, lab.ID, u.ID, res, siblings); err != nil {
+				if errors.Is(err, errEngineUnavailable) {
+					s.writeError(w, r, http.StatusServiceUnavailable, "engine_unavailable", "network engine client is not configured")
+				} else {
+					s.writeEngineError(w, r, err)
+				}
+				return
+			}
+		}
 	case "vpc":
 		res.Provider = "rust-network-engine"
 		if res.CIDR != "" {
@@ -392,6 +474,13 @@ func (s *Server) handleDeleteResource(w http.ResponseWriter, r *http.Request) {
 	// Delete through the backend that owns the resource first; a
 	// backend failure keeps the DB row (honest, retryable).
 	switch res.Kind {
+	case "gateway":
+		if gt, _ := res.Config["gateway_type"].(string); gt == "nat" {
+			if err := s.deleteNATGateway(r, lab.ID, u.ID, res); err != nil {
+				s.writeEngineError(w, r, err)
+				return
+			}
+		}
 	case "subnet":
 		if s.Network != nil {
 			subnetID := res.ProviderResourceID

@@ -249,6 +249,33 @@ func (p *PostgresLabStore) Stop(ctx context.Context, id string) (*labs.Lab, erro
 	return l, nil
 }
 
+// Start re-provisions a STOPPED lab: STOPPED -> PROVISIONING in one
+// transaction plus a fresh lab_provision job for the worker. The key
+// is unique per start (a replayed create key would return the old,
+// already-done provision job and the lab would never re-provision).
+// The worker's provision handler drives PROVISIONING -> READY/FAILED,
+// so READY is only reported when provisioning actually succeeded.
+func (p *PostgresLabStore) Start(ctx context.Context, id string) (*labs.Lab, error) {
+	tx, err := p.db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	l, err := transitionInTx(ctx, tx, id, labs.StateProvisioning, "")
+	if err != nil {
+		return nil, err
+	}
+	payload, _ := json.Marshal(map[string]string{"lab_id": id})
+	key := fmt.Sprintf("lab_start:%s:%d", id, time.Now().UnixNano())
+	if _, err := tx.Exec(ctx, `INSERT INTO jobs(type, payload, idempotency_key) VALUES('lab_provision',$1,$2)`, payload, key); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return l, nil
+}
+
 func (p *PostgresLabStore) Destroy(ctx context.Context, id string) (*labs.Lab, error) {
 	tx, err := p.db.Pool.Begin(ctx)
 	if err != nil {

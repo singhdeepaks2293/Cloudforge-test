@@ -7,9 +7,10 @@ import type { ReactNode } from 'react'
  * render functions so pages keep their own cell content.
  */
 export interface AwsColumn<T> {
-  header: string
+  /** Column header text, or a ReactNode (e.g. a select-all checkbox). */
+  header: string | ReactNode
   render: (row: T) => ReactNode
-  /** Optional stable key for the <th>. Defaults to header. */
+  /** Optional stable key for the <th>. Defaults to the header text. */
   key?: string
 }
 
@@ -55,9 +56,9 @@ export function AwsTable<T extends { id: string }>({
           {caption && <caption className="sr-only">{caption}</caption>}
           <thead>
             <tr className="bg-[#f2f3f3]">
-              {columns.map((c) => (
+              {columns.map((c, i) => (
                 <th
-                  key={c.key ?? c.header}
+                  key={c.key ?? (typeof c.header === 'string' ? c.header : `col-${i}`)}
                   scope="col"
                   className="border-b border-aws-border px-3 py-2 font-semibold whitespace-nowrap"
                 >
@@ -76,8 +77,8 @@ export function AwsTable<T extends { id: string }>({
             ) : (
               rows.map((row) => (
                 <tr key={row.id} className="border-b border-aws-border last:border-b-0 hover:bg-[#f9f9f9]">
-                  {columns.map((c) => (
-                    <td key={c.key ?? c.header} className="px-3 py-2 align-top">
+                  {columns.map((c, i) => (
+                    <td key={c.key ?? (typeof c.header === 'string' ? c.header : `col-${i}`)} className="px-3 py-2 align-top">
                       {c.render(row)}
                     </td>
                   ))}

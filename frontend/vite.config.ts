@@ -5,13 +5,13 @@ import { defineConfig } from 'vite'
 // Same-origin API proxy (Milestone 9): the frontend client uses
 // relative URLs when VITE_API_URL is unset, and the dev server
 // forwards /api, /healthz, /readyz and /metrics to the Go API on
-// :8080 — the same paths nginx proxies in the Docker deployment.
+// :8081 — the same paths nginx proxies in the Docker deployment.
 // Setting VITE_API_URL still bypasses the proxy (split deployment).
 const apiProxy = {
-  '/api': 'http://localhost:8080',
-  '/healthz': 'http://localhost:8080',
-  '/readyz': 'http://localhost:8080',
-  '/metrics': 'http://localhost:8080',
+  '/api': 'http://localhost:8081',
+  '/healthz': 'http://localhost:8081',
+  '/readyz': 'http://localhost:8081',
+  '/metrics': 'http://localhost:8081',
 }
 
 // https://vite.dev/config/
