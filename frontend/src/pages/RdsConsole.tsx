@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard } from '../components/AwsCard.tsx'
-import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ServiceConsole } from '../components/ServiceConsole.tsx'
+import { UnsupportedSection } from '../components/UnsupportedSection.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { StateBadge } from '../components/AwsBadge.tsx'
@@ -16,26 +18,42 @@ const listOf = (v: unknown, key: string): Rec[] => {
 
 /**
  * RDS console (Phase 3) — mirrors the AWS RDS console's Databases
- * list, detail tabs (Connectivity & security / Monitoring / Logs &
- * events / Configuration / Maintenance & backups) and the
- * Create-database wizard. Each instance is a REAL Postgres database
- * + role on the platform Postgres ("PostgreSQL-compatible, not
- * Aurora"). The master password is shown exactly once at creation.
- * Start/Stop are UNSUPPORTED (a shared platform database cannot be
- * stopped per instance) and are rendered disabled with the reason.
- * Snapshots are real pg_dump -Fc files; restore creates a new
- * instance from a snapshot.
+ * list; selecting a database shows stacked detail cards
+ * (Connectivity & security, Maintenance & backups) and creation is
+ * an inline form, not a wizard. There are no Monitoring, Logs &
+ * events or Configuration tabs. Each instance is a REAL Postgres
+ * database + role on the platform Postgres ("PostgreSQL-compatible,
+ * not Aurora"). The master password is shown exactly once at
+ * creation. Start/Stop are UNSUPPORTED (a shared platform database
+ * cannot be stopped per instance) and are rendered disabled with the
+ * reason. Snapshots are real pg_dump -Fc files; restore creates a
+ * new instance from a snapshot.
+ *
+ * v4 survey (2026-11-22) left nav: Dashboard, Databases, CloudWatch
+ * Database Insights, Snapshots, Exports in Amazon S3, Automated
+ * backups, Reserved instances, Capacity reservations (New), Proxies,
+ * Subnet groups, Parameter groups, Option groups, Custom engine
+ * versions, Zero-ETL integrations, Events, Event subscriptions,
+ * Recommendations, Certificate update. Only Dashboard, Databases and
+ * Snapshots (per-instance, on the database detail) have a backend;
+ * the rest are honest UNSUPPORTED sections. Databases columns are NOT
+ * OBSERVABLE in the survey, so the existing columns are kept, not
+ * invented.
  */
 export function RdsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
+  const [section, setSection] = useState(initialSection === 'home' ? 'home' : 'databases')
   const [name, setName] = useState('')
   const [version, setVersion] = useState('16')
   const [selected, setSelected] = useState('')
   const [created, setCreated] = useState<Rec | null>(null)
   const [notice, setNotice] = useState('')
+  const [filter, setFilter] = useState('')
 
   const instances = useQuery({ queryKey: ['rds-instances'], queryFn: () => request<Rec>('/api/v1/aws/rds/instances'), retry: 1 })
-  const rows = listOf(instances.data, 'instances')
+  const rows = listOf(instances.data, 'instances').filter(
+    (r) => filter.trim() === '' || String(r.name ?? '').toLowerCase().includes(filter.toLowerCase()) || String(r.id).toLowerCase().includes(filter.toLowerCase()),
+  )
   const detail = useQuery({
     queryKey: ['rds-instance', selected],
     queryFn: () => request<Rec>(`/api/v1/aws/rds/instances/${selected}`),
@@ -85,34 +103,54 @@ export function RdsConsole({ initialSection }: { initialSection?: 'home' | 'list
   const sel = rows.find((r) => String(r.id) === selected) ?? detail.data
 
   return (
-    <ConsoleWithHome
+    <ServiceConsole
       icon="database"
       breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Databases', to: '/services' }, { label: 'RDS' }]}
       title="RDS — Databases"
       description="Relational databases. Each instance is a real Postgres database + role on the platform Postgres — PostgreSQL-compatible, not Aurora. Engine postgres only."
       fidelity="PARTIAL"
       fidelityFootnote="real Postgres database + role · not Aurora"
-      homeLabel="RDS dashboard"
-      listLabel="Databases"
-      initialSection={initialSection}
-      home={(goToList) => (
+      subNav={[
+        { id: 'home', label: 'Dashboard' },
+        { id: 'databases', label: 'Databases' },
+        { id: 'insights', label: 'CloudWatch Database Insights' },
+        { id: 'snapshots', label: 'Snapshots' },
+        { id: 'exports', label: 'Exports in Amazon S3' },
+        { id: 'backups', label: 'Automated backups' },
+        { id: 'reserved', label: 'Reserved instances' },
+        { id: 'capacity', label: 'Capacity reservations', badge: 'New' },
+        { id: 'proxies', label: 'Proxies' },
+        { id: 'subnet-groups', label: 'Subnet groups' },
+        { id: 'param-groups', label: 'Parameter groups' },
+        { id: 'option-groups', label: 'Option groups' },
+        { id: 'engine-versions', label: 'Custom engine versions' },
+        { id: 'zero-etl', label: 'Zero-ETL integrations' },
+        { id: 'events', label: 'Events' },
+        { id: 'event-subs', label: 'Event subscriptions' },
+        { id: 'recommendations', label: 'Recommendations' },
+        { id: 'cert-update', label: 'Certificate update' },
+      ]}
+      activeSub={section}
+      onSubChange={setSection}
+    >
+      {section === 'home' && (
           <ServiceHomeDashboard
             serviceName="RDS"
             banner="Each instance is a real Postgres database + role on the platform Postgres — PostgreSQL-compatible, not Aurora. Engine postgres only."
             actions={[
-              { label: 'Create database', primary: true, onClick: goToList },
+              { label: 'Create database', primary: true, onClick: () => setSection('databases') },
             { label: 'Open Backup console', to: '/services/backup' },
             ]}
             cards={[
-              { label: 'DB instances', count: rows.length, onSelect: goToList, note: 'Real Postgres databases + roles' },
-            { label: 'Snapshots', count: selected !== '' ? listOf(snapshots.data, 'snapshots').length : '—', onSelect: goToList, note: 'Real pg_dump -Fc files' },
-            { label: 'Parameter groups', count: 0, disabledReason: 'Not modelled.' },
+              { label: 'DB instances', count: rows.length, onSelect: () => setSection('databases'), note: 'Real Postgres databases + roles' },
+            { label: 'Snapshots', count: selected !== '' ? listOf(snapshots.data, 'snapshots').length : '—', onSelect: () => setSection('databases'), note: 'Real pg_dump -Fc files' },
+            { label: 'Parameter groups', count: 0, onSelect: () => setSection('param-groups'), note: 'UNSUPPORTED — no parameter-group API.' },
             { label: 'Aurora clusters', count: 0, disabledReason: 'Aurora is UNSUPPORTED — see the Aurora console.' },
             ]}
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={instances.isFetching}
             health={[
-              "instances.isError ? 'Databases could not be loaded.' : `${rows.length} DB instance(s) listed.`",
+              instances.isError ? 'Databases could not be loaded.' : `${rows.length} DB instance(s) listed.`,
             "Start/Stop is UNSUPPORTED — a shared platform database cannot be stopped per instance.",
             "No Multi-AZ; no containerised per-instance Postgres.",
             ]}
@@ -125,8 +163,9 @@ export function RdsConsole({ initialSection }: { initialSection?: 'home' | 'list
             { label: 'Aurora (unsupported — exam concept)', to: '/services/aurora' },
             ]}
           />
-        )}
-    >
+      )}
+      {section === 'databases' && (
+        <>
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {created && typeof created.password === 'string' && (
         <AwsCard title="Master password — shown once">
@@ -167,7 +206,10 @@ export function RdsConsole({ initialSection }: { initialSection?: 'home' | 'list
             caption="RDS databases"
             emptyMessage="No DB instances yet. Create one above."
             rows={rows}
-            totalCount={rows.length}
+            totalCount={listOf(instances.data, 'instances').length}
+            filter={filter}
+            onFilterChange={setFilter}
+            filterPlaceholder="Filter databases by name"
             columns={[
               { header: 'DB identifier', render: (r) => <button type="button" className="text-aws-link underline" onClick={() => setSelected(String(r.id))}>{String(r.name)}</button> },
               { header: 'Engine', render: (r) => `PostgreSQL ${String(r.version ?? '')}` },
@@ -245,6 +287,125 @@ export function RdsConsole({ initialSection }: { initialSection?: 'home' | 'list
           </AwsCard>
         </>
       )}
-    </ConsoleWithHome>
+        </>
+      )}
+      {section === 'snapshots' && (
+        <AwsCard title="Snapshots">
+          <p className="text-sm text-aws-muted">
+            Snapshots are listed per database — there is no global snapshot list endpoint, so open a database on
+            the Databases page to see its snapshots. Snapshots are real pg_dump -Fc files on the API host, and
+            restoring one creates a new instance.
+          </p>
+          <div className="mt-3">
+            <AwsButton onClick={() => setSection('databases')}>Open Databases</AwsButton>
+          </div>
+        </AwsCard>
+      )}
+      {section === 'insights' && (
+        <UnsupportedSection
+          title="CloudWatch Database Insights"
+          reason="CloudWatch Database Insights is UNSUPPORTED in CloudForge — there is no Database Insights API and no per-instance performance data is collected."
+          actionLabel="Enable Database Insights"
+        />
+      )}
+      {section === 'exports' && (
+        <UnsupportedSection
+          title="Exports in Amazon S3"
+          reason="Exports in Amazon S3 are UNSUPPORTED in CloudForge — there is no snapshot-export API; snapshots are pg_dump files on the API host, not S3 objects."
+          actionLabel="Export snapshot to S3"
+        />
+      )}
+      {section === 'backups' && (
+        <UnsupportedSection
+          title="Automated backups"
+          reason="Automated backups are UNSUPPORTED in CloudForge — there is no backup window or retention API; backups are manual snapshots taken per database."
+          actionLabel="Create automated backup"
+        />
+      )}
+      {section === 'reserved' && (
+        <UnsupportedSection
+          title="Reserved instances"
+          reason="Reserved instances are UNSUPPORTED in CloudForge — there is no reservation or billing API and no usage billing to reserve against."
+          actionLabel="Purchase Reserved Instance"
+        />
+      )}
+      {section === 'capacity' && (
+        <UnsupportedSection
+          title="Capacity reservations"
+          reason="Capacity reservations are UNSUPPORTED in CloudForge — there is no capacity-reservation API; capacity is the shared platform Postgres."
+          actionLabel="Create capacity reservation"
+        />
+      )}
+      {section === 'proxies' && (
+        <UnsupportedSection
+          title="Proxies"
+          reason="RDS Proxies are UNSUPPORTED in CloudForge — there is no proxy API; connections go directly to the platform Postgres endpoint."
+          actionLabel="Create proxy"
+        />
+      )}
+      {section === 'subnet-groups' && (
+        <UnsupportedSection
+          title="Subnet groups"
+          reason="Subnet groups are UNSUPPORTED in CloudForge — there is no subnet-group API; databases run on the shared platform Postgres, not in a lab VPC."
+          actionLabel="Create DB subnet group"
+        />
+      )}
+      {section === 'param-groups' && (
+        <UnsupportedSection
+          title="Parameter groups"
+          reason="Parameter groups are UNSUPPORTED in CloudForge — there is no parameter-group API; the platform Postgres runs with its host configuration."
+          actionLabel="Create parameter group"
+        />
+      )}
+      {section === 'option-groups' && (
+        <UnsupportedSection
+          title="Option groups"
+          reason="Option groups are UNSUPPORTED in CloudForge — there is no option-group API; the engine is PostgreSQL only."
+          actionLabel="Create option group"
+        />
+      )}
+      {section === 'engine-versions' && (
+        <UnsupportedSection
+          title="Custom engine versions"
+          reason="Custom engine versions are UNSUPPORTED in CloudForge — there is no custom-engine API; PostgreSQL 14/15/16 are the only engines."
+          actionLabel="Create custom engine version"
+        />
+      )}
+      {section === 'zero-etl' && (
+        <UnsupportedSection
+          title="Zero-ETL integrations"
+          reason="Zero-ETL integrations are UNSUPPORTED in CloudForge — there is no Zero-ETL API and no integration target."
+          actionLabel="Create Zero-ETL integration"
+        />
+      )}
+      {section === 'events' && (
+        <UnsupportedSection
+          title="Events"
+          reason="RDS Events are UNSUPPORTED in CloudForge — there is no RDS event feed; audit events for databases are in CloudTrail."
+          actionLabel="View events"
+        />
+      )}
+      {section === 'event-subs' && (
+        <UnsupportedSection
+          title="Event subscriptions"
+          reason="Event subscriptions are UNSUPPORTED in CloudForge — there is no event-subscription API."
+          actionLabel="Create event subscription"
+        />
+      )}
+      {section === 'recommendations' && (
+        <UnsupportedSection
+          title="Recommendations"
+          reason="Recommendations are UNSUPPORTED in CloudForge — there is no recommendation engine; the survey records 0 recommendations."
+          actionLabel="View recommendations"
+        />
+      )}
+      {section === 'cert-update' && (
+        <UnsupportedSection
+          title="Certificate update"
+          reason="Certificate update is UNSUPPORTED in CloudForge — there is no certificate API; the platform Postgres uses its host TLS configuration."
+          actionLabel="Update certificate"
+        />
+      )}
+    </ServiceConsole>
   )
 }

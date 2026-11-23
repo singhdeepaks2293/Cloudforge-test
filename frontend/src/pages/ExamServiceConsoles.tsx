@@ -34,6 +34,7 @@
  *   /services/savingsplans      -> SavingsPlansConsole
  */
 import { useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard } from '../components/AwsCard.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
@@ -1085,10 +1086,14 @@ const BACKUP_CONFIG: ExamServiceConfig = {
       unsupported: 'Backup Audit Manager reports are not built — use CloudTrail export for audit evidence.',
     },
   ],
-  homeCards: (rows, goTo) => [
+  homeCountSources: [
+    { path: 'backup/vaults', listKey: 'vaults' },
+    { path: 'backup/jobs', listKey: 'jobs' },
+  ],
+  homeCards: (rows, goTo, extra) => [
     { label: 'Backup plans', count: rows.length, onSelect: () => goTo('plans') },
-    { label: 'Backup vaults', count: '—', note: 'Open the Vaults tab for the live count.', onSelect: () => goTo('vaults') },
-    { label: 'Backup jobs', count: '—', note: 'Open the Jobs tab for the live count.', onSelect: () => goTo('jobs') },
+    { label: 'Backup vaults', count: extra?.['backup/vaults'] ?? '—', onSelect: () => goTo('vaults') },
+    { label: 'Backup jobs', count: extra?.['backup/jobs'] ?? '—', onSelect: () => goTo('jobs') },
   ],
   homeExtra: (
     <AwsCard title="Backup scripts (host-side)">
@@ -1285,14 +1290,10 @@ const CLOUDFRONT_CONFIG: ExamServiceConfig = {
   ],
   extraTabs: [
     {
-      id: 'cache-statistics',
-      label: 'Cache statistics',
-      unsupported: 'Cache statistics are not built — no edge location caches anything in CloudForge, so there is no cache telemetry to show.',
-    },
-    {
-      id: 'origin-access',
-      label: 'Origin access',
-      unsupported: 'Origin access (OAC / OAI) is not built — there is no origin-access control API in CloudForge.',
+      id: 'policies',
+      label: 'Policies',
+      unsupported:
+        'Policies are not built — there is no CloudFront policy API in CloudForge. The 2026-11-22 v4 survey records Policies in the CloudFront left nav; the tab is shown as reference only.',
     },
     {
       id: 'functions',
@@ -1300,26 +1301,151 @@ const CLOUDFRONT_CONFIG: ExamServiceConfig = {
       unsupported: 'CloudFront Functions are not built — there is no edge function runtime in CloudForge.',
     },
     {
-      id: 'key-groups',
-      label: 'Key groups',
-      unsupported: 'Key groups are not built — there is no key management for signed URLs / cookies in CloudForge.',
+      id: 'static-ips',
+      label: 'Static IPs',
+      unsupported:
+        'Static IPs are not built — CloudFront distributions here have teaching domain names, not static anycast IPs. The 2026-11-22 v4 survey records Static IPs in the CloudFront left nav; the tab is shown as reference only.',
     },
     {
-      id: 'public-keys',
-      label: 'Public keys',
-      unsupported: 'Public keys are not built — there is no key management for signed URLs / cookies in CloudForge.',
+      id: 'vpc-origins',
+      label: 'VPC origins',
+      unsupported:
+        'VPC origins are not built — there is no VPC-origin API in CloudForge. The 2026-11-22 v4 survey records VPC origins in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'multi-tenant-distributions',
+      label: 'Multi-tenant distributions',
+      group: 'SaaS',
+      unsupported:
+        'Multi-tenant distributions are not built — there is no SaaS distribution API in CloudForge. The 2026-11-22 v4 survey records Multi-tenant distributions under SaaS in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'distribution-tenants',
+      label: 'Distribution tenants',
+      group: 'SaaS',
+      unsupported:
+        'Distribution tenants are not built — there is no SaaS tenant API in CloudForge. The 2026-11-22 v4 survey records Distribution tenants under SaaS in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'monitoring',
+      label: 'Monitoring',
+      group: 'Telemetry',
+      unsupported:
+        'Monitoring is not built — no edge location caches anything in CloudForge, so there is no CloudFront telemetry to show. The 2026-11-22 v4 survey records Monitoring under Telemetry in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'alarms',
+      label: 'Alarms',
+      group: 'Telemetry',
+      unsupported:
+        'Alarms are not built — there is no CloudFront telemetry to alarm on in CloudForge. The 2026-11-22 v4 survey records Alarms under Telemetry in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'logs',
+      label: 'Logs',
+      group: 'Telemetry',
+      unsupported:
+        'Logs are not built — no edge location logs anything in CloudForge. The 2026-11-22 v4 survey records Logs under Telemetry in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'cache-statistics',
+      label: 'Cache statistics',
+      group: 'Reports & analytics',
+      unsupported: 'Cache statistics are not built — no edge location caches anything in CloudForge, so there is no cache telemetry to show.',
+    },
+    {
+      id: 'popular-objects',
+      label: 'Popular objects',
+      group: 'Reports & analytics',
+      unsupported:
+        'Popular objects are not built — no edge usage data exists in CloudForge. The 2026-11-22 v4 survey records Popular objects under Reports & analytics in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'top-referrers',
+      label: 'Top referrers',
+      group: 'Reports & analytics',
+      unsupported:
+        'Top referrers are not built — no edge usage data exists in CloudForge. The 2026-11-22 v4 survey records Top referrers under Reports & analytics in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'usage',
+      label: 'Usage',
+      group: 'Reports & analytics',
+      unsupported:
+        'Usage is not built — no edge usage data exists in CloudForge. The 2026-11-22 v4 survey records Usage under Reports & analytics in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'viewers',
+      label: 'Viewers',
+      group: 'Reports & analytics',
+      unsupported:
+        'Viewers are not built — no edge usage data exists in CloudForge. The 2026-11-22 v4 survey records Viewers under Reports & analytics in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'origin-access',
+      label: 'Origin access',
+      group: 'Security',
+      unsupported: 'Origin access (OAC / OAI) is not built — there is no origin-access control API in CloudForge.',
+    },
+    {
+      id: 'trust-stores',
+      label: 'Trust stores',
+      group: 'Security',
+      unsupported:
+        'Trust stores are not built — there is no trust-store API in CloudForge. The 2026-11-22 v4 survey records Trust stores under Security in the CloudFront left nav; the tab is shown as reference only.',
     },
     {
       id: 'field-level-encryption',
       label: 'Field-level encryption',
+      group: 'Security',
       unsupported: 'Field-level encryption is not built in CloudForge.',
     },
-    { id: 'invalidations', label: 'Invalidations', render: (ctx) => <CloudFrontInvalidationsTab flash={ctx.flash} /> },
     {
-      id: 'reports-analytics',
-      label: 'Reports & analytics',
-      unsupported: 'Reports & analytics are not built — no edge usage data exists in CloudForge.',
+      id: 'public-keys',
+      label: 'Public keys',
+      group: 'Key management',
+      unsupported: 'Public keys are not built — there is no key management for signed URLs / cookies in CloudForge.',
     },
+    {
+      id: 'key-groups',
+      label: 'Key groups',
+      group: 'Key management',
+      unsupported: 'Key groups are not built — there is no key management for signed URLs / cookies in CloudForge.',
+    },
+    {
+      id: 'savings-overview',
+      label: 'Overview',
+      group: 'Savings Bundle',
+      unsupported:
+        'Savings Bundle overview is not built — CloudFront distributions are not priced in CloudForge. The 2026-11-22 v4 survey records Overview under Savings Bundle in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'savings-inventory',
+      label: 'Inventory',
+      group: 'Savings Bundle',
+      unsupported:
+        'Savings Bundle inventory is not built — CloudFront distributions are not priced in CloudForge. The 2026-11-22 v4 survey records Inventory under Savings Bundle in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'savings-purchase',
+      label: 'Purchase',
+      group: 'Savings Bundle',
+      unsupported:
+        'Savings Bundle purchase is not built — CloudFront distributions are not priced in CloudForge. The 2026-11-22 v4 survey records Purchase under Savings Bundle in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'resource-sharing',
+      label: 'Resource sharing',
+      unsupported:
+        'Resource sharing is not built — there is no CloudFront resource-sharing API in CloudForge. The 2026-11-22 v4 survey records Resource sharing in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    {
+      id: 'settings',
+      label: 'Settings',
+      unsupported:
+        'Settings are not built — there is no CloudFront settings API in CloudForge. The 2026-11-22 v4 survey records Settings in the CloudFront left nav; the tab is shown as reference only.',
+    },
+    { id: 'invalidations', label: 'Invalidations', render: (ctx) => <CloudFrontInvalidationsTab flash={ctx.flash} /> },
     {
       id: 'whats-new',
       label: "What's new",
@@ -1350,6 +1476,7 @@ const EFS_CONFIG: ExamServiceConfig = {
   fidelityFootnote: 'No NFS endpoint exists and nothing can be mounted; mount targets are recorded against teaching subnet names.',
   banner:
     'Elastic file systems and mount targets — durable records. No NFS endpoint exists and nothing can be mounted; mount targets are recorded against teaching subnet names.',
+  defaultSection: 'home',
   listSection: 'file-systems',
   listLabel: 'File systems',
   listPath: 'efs/file-systems',
@@ -1357,18 +1484,42 @@ const EFS_CONFIG: ExamServiceConfig = {
   kindLabel: 'file-system',
   createLabel: 'Create file system',
   columns: [
-    { header: 'File system', render: (r) => str(r, 'name') },
-    { header: 'Performance mode', render: (r) => str(r, 'performance_mode') },
-    { header: 'Throughput mode', render: (r) => str(r, 'throughput_mode') },
+    { header: 'Name', render: (r) => str(r, 'name') },
+    { header: 'File system ID', render: (r) => <code className="text-xs">{str(r, 'id')}</code> },
     { header: 'Encrypted', render: (r) => (r.encrypted === false ? 'No' : 'Yes') },
     {
-      header: 'Mount targets',
-      render: (r) => String(Array.isArray(r.mount_targets) ? (r.mount_targets as unknown[]).length : 0),
+      header: 'Total size',
+      render: () => <span title="CloudForge stores no size accounting for file systems">Not available</span>,
     },
-    { header: 'Status', render: (r) => str(r, 'status') },
-    { header: 'Created', render: (r) => fmtTime(r.created_at) },
+    {
+      header: 'Size in Standard',
+      render: () => <span title="CloudForge stores no size accounting for file systems">Not available</span>,
+    },
+    {
+      header: 'Size in IA',
+      render: () => <span title="CloudForge stores no size accounting for file systems">Not available</span>,
+    },
+    {
+      header: 'Size in Archive',
+      render: () => <span title="CloudForge stores no size accounting for file systems">Not available</span>,
+    },
+    {
+      header: 'Provisioned Throughput (MiB/s)',
+      render: () => <span title="CloudForge stores no provisioned throughput for file systems">Not available</span>,
+    },
+    { header: 'File system state', render: (r) => str(r, 'status') },
+    { header: 'Creation time', render: (r) => fmtTime(r.created_at) },
+    {
+      header: 'Availability Zone',
+      render: () => <span title="CloudForge file systems are not placed in an Availability Zone">Not available</span>,
+    },
+    {
+      header: 'Replication overwrite protection',
+      render: () => <span title="CloudForge has no EFS replication">Not available</span>,
+    },
   ],
-  columnsNote: 'File systems list columns are CloudForge’s own — the survey records only a get-started page for EFS, with no list columns.',
+  columnsNote:
+    'File systems columns are the 2026-11-22 v4 survey’s exact columns (Name, File system ID, Encrypted, Total size, Size in Standard, Size in IA, Size in Archive, Provisioned Throughput (MiB/s), File system state, Creation time, Availability Zone, Replication overwrite protection), in order. “Not available” means CloudForge stores no value for that column. Performance mode, throughput mode and mount targets are CloudForge’s own fields — they stay on the Details tab and the Mount targets tab, not as list columns.',
   createFields: [
     { key: 'performance_mode', label: 'Performance mode', type: 'select', options: ['generalPurpose', 'maxIO'], defaultValue: 'generalPurpose' },
     { key: 'throughput_mode', label: 'Throughput mode', type: 'select', options: ['bursting', 'provisioned', 'elastic'], defaultValue: 'bursting' },
@@ -1385,6 +1536,42 @@ const EFS_CONFIG: ExamServiceConfig = {
     },
   ],
   homeCards: singleCard('File systems', 'file-systems'),
+  homeExtra: (
+    <AwsCard title="Get started with EFS">
+      <p className="text-sm text-aws-muted">
+        Create your first file system from the File systems tab — a durable record with a performance mode and a
+        throughput mode. No NFS endpoint exists and nothing can be mounted; mount targets are recorded against
+        teaching subnet names. The 2026-11-22 v4 survey records the file-systems table columns used on the File
+        systems tab; the links below are CloudForge&apos;s own.
+      </p>
+      <ul className="mt-3 space-y-1 text-sm">
+        <li>
+          <Link to="/services/backup" className="text-aws-link hover:underline">
+            Backup
+          </Link>
+          <span className="text-aws-muted"> — back up file-system contents with real pg_dump jobs.</span>
+        </li>
+        <li>
+          <Link to="/services/datasync" className="text-aws-link hover:underline">
+            DataSync
+          </Link>
+          <span className="text-aws-muted"> — copy files with SHA-256 verification.</span>
+        </li>
+        <li>
+          <Link to="/services/transfer" className="text-aws-link hover:underline">
+            Transfer Family
+          </Link>
+          <span className="text-aws-muted"> — UNSUPPORTED here: no local SFTP server; DataSync is the alternative.</span>
+        </li>
+        <li>
+          <Link to="/learn" className="text-aws-link hover:underline">
+            Documentation — Learning Center
+          </Link>
+          <span className="text-aws-muted"> — storage track and certification coverage map.</span>
+        </li>
+      </ul>
+    </AwsCard>
+  ),
 }
 
 const FSX_CONFIG: ExamServiceConfig = {
@@ -1419,6 +1606,92 @@ const FSX_CONFIG: ExamServiceConfig = {
   ],
   detailTabs: [
     { id: 'mount-targets', label: 'Mount targets', render: (ctx) => <MountTargetsPanel {...ctx} basePath="fsx/file-systems" /> },
+  ],
+  extraTabs: [
+    {
+      id: 'volumes',
+      label: 'Volumes',
+      unsupported:
+        'Volumes are not built — there is no FSx volume API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'snapshots',
+      label: 'Snapshots',
+      unsupported:
+        'Snapshots are not built — there is no FSx snapshot API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 's3-access-points',
+      label: 'S3 Access Points',
+      unsupported:
+        'S3 Access Points are not built — there is no FSx S3 access-point API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'file-caches',
+      label: 'File Caches',
+      unsupported:
+        'File Caches are not built — there is no FSx file-cache API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'backups',
+      label: 'Backups',
+      unsupported:
+        'Backups are not built — there is no FSx backup API in CloudForge; use the Backup console for pg_dump jobs. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'storage-virtual-machines',
+      label: 'Storage virtual machines',
+      group: 'ONTAP',
+      unsupported:
+        'ONTAP storage virtual machines are not built — there is no ONTAP API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'cluster-peers',
+      label: 'Cluster peers',
+      group: 'ONTAP',
+      unsupported:
+        'ONTAP cluster peers are not built — there is no ONTAP API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'svm-peers',
+      label: 'SVM peers',
+      group: 'ONTAP',
+      unsupported:
+        'ONTAP SVM peers are not built — there is no ONTAP API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'snapmirror-relationships',
+      label: 'SnapMirror relationships',
+      group: 'ONTAP',
+      unsupported:
+        'SnapMirror relationships are not built — there is no ONTAP API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'snapmirror-policies',
+      label: 'SnapMirror policies',
+      group: 'ONTAP',
+      unsupported:
+        'SnapMirror policies are not built — there is no ONTAP API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'snapshot-policies',
+      label: 'Snapshot policies',
+      group: 'ONTAP',
+      unsupported:
+        'ONTAP snapshot policies are not built — there is no ONTAP API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'service-quotas',
+      label: 'FSx on Service Quotas',
+      unsupported:
+        'FSx on Service Quotas is not built — there is no Service Quotas API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'settings',
+      label: 'Settings',
+      unsupported:
+        'Settings are not built — there is no FSx settings API in CloudForge. In the 2026-11-22 v4 survey account FSx showed a paid-plan restriction dialog (“Service FSx unavailable — Upgrade to paid plan”), so only the nav label was recorded and no page structure was observed.',
+    },
   ],
   homeCards: singleCard('File systems', 'file-systems'),
 }
@@ -1618,6 +1891,56 @@ const DIRECTCONNECT_CONFIG: ExamServiceConfig = {
     { key: 'location', label: 'Location', type: 'text', defaultValue: 'EqDC2 (teaching)' },
   ],
   detailTabs: [{ id: 'confirm', label: 'Confirm', render: (ctx) => <DxConfirmPanel {...ctx} /> }],
+  extraTabs: [
+    {
+      id: 'resiliency-groups',
+      label: 'Resiliency groups',
+      unsupported:
+        'Resiliency groups are not built — there is no Direct Connect resiliency-group API in CloudForge. In the 2026-11-22 v4 survey account Direct Connect showed an advanced-features restriction dialog, so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'virtual-interfaces',
+      label: 'Virtual interfaces',
+      unsupported:
+        'Virtual interfaces are not built — there is no Direct Connect virtual-interface API in CloudForge. In the 2026-11-22 v4 survey account Direct Connect showed an advanced-features restriction dialog, so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'lags',
+      label: 'LAGs',
+      unsupported:
+        'LAGs are not built — there is no Direct Connect LAG API in CloudForge. In the 2026-11-22 v4 survey account Direct Connect showed an advanced-features restriction dialog, so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'direct-connect-gateways',
+      label: 'Direct Connect gateways',
+      unsupported:
+        'Direct Connect gateways are not built — there is no Direct Connect gateway API in CloudForge. In the 2026-11-22 v4 survey account Direct Connect showed an advanced-features restriction dialog, so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'virtual-private-gateways',
+      label: 'Virtual private gateways',
+      unsupported:
+        'Virtual private gateways are not built in this console — they are managed in the VPC console. In the 2026-11-22 v4 survey account Direct Connect showed an advanced-features restriction dialog, so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'transit-gateways',
+      label: 'Transit gateways',
+      unsupported:
+        'Transit gateways are not built in this console — they are managed in the VPC console’s Transit Gateways section. In the 2026-11-22 v4 survey account Direct Connect showed an advanced-features restriction dialog, so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'interconnect-multicloud',
+      label: 'AWS Interconnect – multicloud',
+      unsupported:
+        'AWS Interconnect – multicloud is not built — there is no interconnect API in CloudForge. In the 2026-11-22 v4 survey account Direct Connect showed an advanced-features restriction dialog, so only the nav label was recorded and no page structure was observed.',
+    },
+    {
+      id: 'interconnect-last-mile',
+      label: 'AWS Interconnect – last mile',
+      unsupported:
+        'AWS Interconnect – last mile is not built — there is no interconnect API in CloudForge. In the 2026-11-22 v4 survey account Direct Connect showed an advanced-features restriction dialog, so only the nav label was recorded and no page structure was observed.',
+    },
+  ],
   homeCards: singleCard('Connections', 'connections'),
 }
 

@@ -25,7 +25,7 @@
  */
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query'
 import { AwsCard } from '../components/AwsCard.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
@@ -40,6 +40,7 @@ import { LITE_GENERIC_SERVICES } from '../services/liteServices.ts'
 import {
   fmtTime,
   inputCls,
+  listOf,
   useExamList,
   type ExamCtx,
   type ExamDetailCtx,
@@ -115,6 +116,22 @@ export function ExamServiceConsole({ config, initialSection }: { config: ExamSer
 
   const list = useExamList(config.listPath, config.listKey)
   const rows = list.rows
+  // Extra live counts for the Home cards (config.homeCountSources),
+  // fetched with useQueries so the list is fixed-length and stable.
+  const extraCountQueries = useQueries({
+    queries: (config.homeCountSources ?? []).map((s) => ({
+      queryKey: ['exam-list', s.path],
+      queryFn: () => request<Rec>(`/api/v1/aws/${s.path}`),
+      retry: 1,
+    })),
+  })
+  const extraCounts: Record<string, number> = {}
+  ;(config.homeCountSources ?? []).forEach((s, i) => {
+    const data = extraCountQueries[i]?.data
+    // Only publish a count once the list has loaded — while it is
+    // loading (or errored) the card keeps its '—' fallback.
+    if (data !== undefined) extraCounts[s.path] = listOf(data, s.listKey).length
+  })
   const serviceQuery = useService(config.id)
   const generic = LITE_GENERIC_SERVICES[config.id]
   const sel = rows.find((r) => r.id === selectedId) ?? null
@@ -261,7 +278,7 @@ export function ExamServiceConsole({ config, initialSection }: { config: ExamSer
               : { label: config.createLabel, primary: true, disabledReason: config.createDisabledReason },
             { label: 'Learning Center', to: '/learn' },
           ]}
-          cards={config.homeCards(rows, setSection)}
+          cards={config.homeCards(rows, setSection, extraCounts)}
           onRefresh={refresh}
           refreshing={list.isFetching}
           health={health}

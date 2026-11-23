@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard } from '../components/AwsCard.tsx'
-import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ServiceConsole } from '../components/ServiceConsole.tsx'
+import { UnsupportedSection } from '../components/UnsupportedSection.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
@@ -21,18 +23,34 @@ const listOf = (v: unknown, key: string): Rec[] => {
  * (a dedicated Redis container) is NOT built and its create returns
  * an honest 503 — the button is offered so the failure is visible,
  * never faked.
+ *
+ * v4 survey (2026-11-22) left nav: Dashboard; Resources (Valkey
+ * caches, Memcached caches, Redis OSS caches, Global datastores,
+ * Reserved nodes, Backups); Configurations (Subnet groups, Parameter
+ * groups, User management, User group management); Migrations, Events,
+ * Service updates, ElastiCache cluster client, Documentation, Amazon
+ * MemoryDB. Valkey caches columns (6): Cache name, Status,
+ * Description, Engine version, Configuration, Created date. Only
+ * Cache name, Status, Configuration (the lite/full mode) and Created
+ * date have real values; Description and Engine version are not
+ * stored, so they render '—'. The single clusters list is the Valkey
+ * list — there is no separate Memcached or Redis OSS list.
  */
 export function ElastiCacheConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
+  const [section, setSection] = useState(initialSection === 'home' ? 'home' : 'valkey')
   const [name, setName] = useState('')
   const [mode, setMode] = useState('lite')
   const [selected, setSelected] = useState('')
   const [key, setKey] = useState('')
   const [value, setValue] = useState('')
   const [notice, setNotice] = useState('')
+  const [filter, setFilter] = useState('')
 
   const clusters = useQuery({ queryKey: ['cache-clusters'], queryFn: () => request<Rec>('/api/v1/aws/elasticache/clusters'), retry: 1 })
-  const rows = listOf(clusters.data, 'clusters')
+  const rows = listOf(clusters.data, 'clusters').filter(
+    (r) => filter.trim() === '' || String(r.name ?? '').toLowerCase().includes(filter.toLowerCase()) || String(r.id).toLowerCase().includes(filter.toLowerCase()),
+  )
   const keys = useQuery({
     queryKey: ['cache-keys', selected],
     queryFn: () => request<Rec>(`/api/v1/aws/elasticache/clusters/${selected}/keys`),
@@ -90,33 +108,52 @@ export function ElastiCacheConsole({ initialSection }: { initialSection?: 'home'
   const sel = rows.find((r) => String(r.id) === selected)
 
   return (
-    <ConsoleWithHome
+    <ServiceConsole
       icon="database"
       breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Databases', to: '/services' }, { label: 'ElastiCache' }]}
       title="ElastiCache — Clusters"
       description="In-memory caches. Lite mode is a real namespaced Redis database on the platform Redis. Engine redis only."
       fidelity="PARTIAL"
       fidelityFootnote="real Redis, namespaced by key prefix"
-      homeLabel="ElastiCache dashboard"
-      listLabel="Clusters"
-      initialSection={initialSection}
-      home={(goToList) => (
+      subNav={[
+        { id: 'home', label: 'Dashboard' },
+        { id: 'valkey', label: 'Valkey caches', group: 'Resources' },
+        { id: 'memcached', label: 'Memcached caches', group: 'Resources' },
+        { id: 'redis', label: 'Redis OSS caches', group: 'Resources' },
+        { id: 'global-datastores', label: 'Global datastores', group: 'Resources' },
+        { id: 'reserved-nodes', label: 'Reserved nodes', group: 'Resources' },
+        { id: 'backups', label: 'Backups', group: 'Resources' },
+        { id: 'subnet-groups', label: 'Subnet groups', group: 'Configurations' },
+        { id: 'param-groups', label: 'Parameter groups', group: 'Configurations' },
+        { id: 'user-management', label: 'User management', group: 'Configurations' },
+        { id: 'user-group-management', label: 'User group management', group: 'Configurations' },
+        { id: 'migrations', label: 'Migrations' },
+        { id: 'events', label: 'Events' },
+        { id: 'service-updates', label: 'Service updates' },
+        { id: 'cluster-client', label: 'ElastiCache cluster client' },
+        { id: 'documentation', label: 'Documentation' },
+        { id: 'memorydb', label: 'Amazon MemoryDB' },
+      ]}
+      activeSub={section}
+      onSubChange={setSection}
+    >
+      {section === 'home' && (
           <ServiceHomeDashboard
             serviceName="ElastiCache"
             banner="Lite mode is a real namespaced Redis database on the platform Redis. A dedicated Redis container (full mode) is NOT built — full-mode creates return an honest 503."
             actions={[
-              { label: 'Create cluster', primary: true, onClick: goToList },
+              { label: 'Create cluster', primary: true, onClick: () => setSection('valkey') },
             { label: 'Learning Center — databases track', to: '/learn' },
             ]}
             cards={[
-              { label: 'Clusters', count: rows.length, onSelect: goToList },
-            { label: 'Keys (selected cluster)', count: selected !== '' ? listOf(keys.data, 'keys').length : '—', onSelect: goToList, note: 'Keys browser with TTL' },
+              { label: 'Clusters', count: rows.length, onSelect: () => setSection('valkey') },
+            { label: 'Keys (selected cluster)', count: selected !== '' ? listOf(keys.data, 'keys').length : '—', onSelect: () => setSection('valkey'), note: 'Keys browser with TTL' },
             { label: 'Replication groups', count: 0, disabledReason: 'Not modelled.' },
             ]}
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={clusters.isFetching}
             health={[
-              "clusters.isError ? 'Clusters could not be loaded.' : `${rows.length} cluster(s) listed.`",
+              clusters.isError ? 'Clusters could not be loaded.' : `${rows.length} cluster(s) listed.`,
             "Memory/hit-rate metrics are platform-Redis-wide; keys-in-cluster is prefix-only.",
             ]}
             settings={[
@@ -128,8 +165,9 @@ export function ElastiCacheConsole({ initialSection }: { initialSection?: 'home'
             { label: 'CloudFront (unsupported — exam concept)', to: '/services/cloudfront' },
             ]}
           />
-        )}
-    >
+      )}
+      {section === 'valkey' && (
+        <>
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {clusters.isPending && <Loading label="Loading clusters" />}
       {clusters.isError && <ErrorBox message={`Clusters could not be loaded (${clusters.error.message}).`} />}
@@ -157,13 +195,22 @@ export function ElastiCacheConsole({ initialSection }: { initialSection?: 'home'
             caption="ElastiCache clusters"
             emptyMessage="No clusters yet. Create one above."
             rows={rows}
-            totalCount={rows.length}
+            totalCount={listOf(clusters.data, 'clusters').length}
+            filter={filter}
+            onFilterChange={setFilter}
+            filterPlaceholder="Filter clusters by name"
             columns={[
-              { header: 'Cluster', render: (c) => <button type="button" className="text-aws-link underline" onClick={() => setSelected(String(c.id))}>{String(c.name)}</button> },
-              { header: 'Engine', render: (c) => String(c.engine ?? 'redis') },
-              { header: 'Mode', render: (c) => String(c.mode ?? '—') },
+              // Valkey caches columns in the v4 survey's exact order
+              // (6). Real values: Cache name, Status, Configuration
+              // (the lite/full mode) and Created date. Description and
+              // Engine version are not stored for a cluster, so they
+              // render '—'. Actions (Delete) is CloudForge-only.
+              { header: 'Cache name', render: (c) => <button type="button" className="text-aws-link underline" onClick={() => setSelected(String(c.id))}>{String(c.name)}</button> },
               { header: 'Status', render: (c) => String(c.status ?? '—') },
-              { header: 'Endpoint', render: (c) => String(c.endpoint ?? '—') },
+              { header: 'Description', render: () => '—' },
+              { header: 'Engine version', render: () => '—' },
+              { header: 'Configuration', render: (c) => String(c.mode ?? '—') },
+              { header: 'Created date', render: (c) => String(c.created_at ?? '—') },
               {
                 header: 'Actions',
                 render: (c) => <AwsButton variant="secondary" disabled={remove.isPending} onClick={() => remove.mutate(String(c.id))}>Delete</AwsButton>,
@@ -185,7 +232,7 @@ export function ElastiCacheConsole({ initialSection }: { initialSection?: 'home'
             {typeof sel.acl_note === 'string' && sel.acl_note !== '' && <p className="mt-2 text-sm text-aws-muted">{String(sel.acl_note)}</p>}
             {typeof sel.note === 'string' && <p className="mt-1 text-sm text-aws-muted">{String(sel.note)}</p>}
           </AwsCard>
-          <AwsCard title="Keys browser (read-only listing, max 100)">
+          <AwsCard title="Keys browser (set key, flush, listing max 100)">
             <form
               className="mb-3 flex flex-wrap items-center gap-2"
               onSubmit={(e) => {
@@ -242,6 +289,126 @@ export function ElastiCacheConsole({ initialSection }: { initialSection?: 'home'
           </AwsCard>
         </>
       )}
-    </ConsoleWithHome>
+        </>
+      )}
+      {section === 'memcached' && (
+        <AwsCard title="Memcached caches">
+          <p className="text-sm text-aws-muted">
+            Memcached caches are <strong>UNSUPPORTED</strong> in CloudForge — the backend supports engine redis
+            only (Memcached is rejected by the API, not faked). All CloudForge clusters are listed under Valkey
+            caches.
+          </p>
+          <div className="mt-3">
+            <AwsButton onClick={() => setSection('valkey')}>Open Valkey caches</AwsButton>
+          </div>
+        </AwsCard>
+      )}
+      {section === 'redis' && (
+        <AwsCard title="Redis OSS caches">
+          <p className="text-sm text-aws-muted">
+            CloudForge clusters are Redis-compatible and are listed under Valkey caches — there is no separate
+            Redis OSS list. Valkey is the Redis OSS fork CloudForge&apos;s list follows.
+          </p>
+          <div className="mt-3">
+            <AwsButton onClick={() => setSection('valkey')}>Open Valkey caches</AwsButton>
+          </div>
+        </AwsCard>
+      )}
+      {section === 'global-datastores' && (
+        <UnsupportedSection
+          title="Global datastores"
+          reason="Global datastores are UNSUPPORTED in CloudForge — there is no global-datastore API; clusters are local to this deployment."
+          actionLabel="Create global datastore"
+        />
+      )}
+      {section === 'reserved-nodes' && (
+        <UnsupportedSection
+          title="Reserved nodes"
+          reason="Reserved nodes are UNSUPPORTED in CloudForge — there is no reservation API and no usage billing to reserve against."
+          actionLabel="Purchase reserved node"
+        />
+      )}
+      {section === 'backups' && (
+        <UnsupportedSection
+          title="Backups"
+          reason="Backups are UNSUPPORTED in CloudForge — there is no cache-backup API; keys live in the platform Redis and are removed with the cluster."
+          actionLabel="Create backup"
+        />
+      )}
+      {section === 'subnet-groups' && (
+        <UnsupportedSection
+          title="Subnet groups"
+          reason="Subnet groups are UNSUPPORTED in CloudForge — there is no subnet-group API; clusters run on the shared platform Redis, not in a lab VPC."
+          actionLabel="Create subnet group"
+        />
+      )}
+      {section === 'param-groups' && (
+        <UnsupportedSection
+          title="Parameter groups"
+          reason="Parameter groups are UNSUPPORTED in CloudForge — there is no parameter-group API; the platform Redis runs with its host configuration."
+          actionLabel="Create parameter group"
+        />
+      )}
+      {section === 'user-management' && (
+        <UnsupportedSection
+          title="User management"
+          reason="User management is UNSUPPORTED in CloudForge — there is no cache-user API; lite clusters get a best-effort ACL user created by the backend, not a managed user."
+          actionLabel="Create user"
+        />
+      )}
+      {section === 'user-group-management' && (
+        <UnsupportedSection
+          title="User group management"
+          reason="User group management is UNSUPPORTED in CloudForge — there is no user-group API."
+          actionLabel="Create user group"
+        />
+      )}
+      {section === 'migrations' && (
+        <UnsupportedSection
+          title="Migrations"
+          reason="Migrations are UNSUPPORTED in CloudForge — there is no cache-migration API."
+          actionLabel="Start migration"
+        />
+      )}
+      {section === 'events' && (
+        <UnsupportedSection
+          title="Events"
+          reason="ElastiCache Events are UNSUPPORTED in CloudForge — there is no cache event feed; audit events for clusters are in CloudTrail."
+          actionLabel="View events"
+        />
+      )}
+      {section === 'service-updates' && (
+        <UnsupportedSection
+          title="Service updates"
+          reason="Service updates are UNSUPPORTED in CloudForge — there is no service-update API; the platform Redis is managed by the host."
+          actionLabel="View service updates"
+        />
+      )}
+      {section === 'cluster-client' && (
+        <UnsupportedSection
+          title="ElastiCache cluster client"
+          reason="The ElastiCache cluster client is UNSUPPORTED in CloudForge — there is no cluster-client download; connect with a normal Redis client to the cluster endpoint shown on the Valkey caches list."
+          actionLabel="Download cluster client"
+        />
+      )}
+      {section === 'documentation' && (
+        <AwsCard title="Documentation">
+          <p className="text-sm text-aws-muted">
+            CloudForge has no in-console ElastiCache documentation page. The Learning Center covers caches as part
+            of the databases track.
+          </p>
+          <div className="mt-3">
+            <AwsButton onClick={() => window.location.assign('/learn')}>Open Learning Center</AwsButton>
+          </div>
+        </AwsCard>
+      )}
+      {section === 'memorydb' && (
+        <UnsupportedSection
+          title="Amazon MemoryDB"
+          reason="Amazon MemoryDB is UNSUPPORTED in CloudForge — there is no MemoryDB API; ElastiCache clusters are the only in-memory stores here."
+          actionLabel="Create MemoryDB cluster"
+        />
+      )}
+    </ServiceConsole>
   )
 }

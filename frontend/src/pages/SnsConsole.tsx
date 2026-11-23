@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard } from '../components/AwsCard.tsx'
-import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ConsoleTabs, ServiceConsole } from '../components/ServiceConsole.tsx'
+import { UnsupportedSection } from '../components/UnsupportedSection.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
+import { AwsActionsMenu, AwsPreferencesButton, AwsRefreshButton, AwsToolbar } from '../components/AwsShell.tsx'
 import { request } from '../services/api.ts'
 
 type Rec = Record<string, unknown> & { id: string }
@@ -24,12 +27,17 @@ const listOf = (v: unknown, key: string): Rec[] => {
 export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
+  const [section, setSection] = useState(initialSection === 'home' ? 'home' : 'topics')
+  const goToList = () => setSection('topics')
   const [selected, setSelected] = useState('')
   const [proto, setProto] = useState('sqs')
   const [endpoint, setEndpoint] = useState('')
   const [message, setMessage] = useState('hello from SNS')
   const [subject, setSubject] = useState('')
   const [notice, setNotice] = useState('')
+  const [filter, setFilter] = useState('')
+  const [checked, setChecked] = useState<string[]>([])
+  const [detailTab, setDetailTab] = useState<'subscriptions' | 'publish' | 'deliveries'>('subscriptions')
 
   const topics = useQuery({ queryKey: ['sns-topics'], queryFn: () => request<Rec>('/api/v1/aws/sns/topics'), retry: 1 })
   const rows = listOf(topics.data, 'topics')
@@ -80,19 +88,32 @@ export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list
   })
 
   const sel = rows.find((t) => String(t.id) === selected)
+  const checkedTopic = rows.find((t) => String(t.id) === checked[0])
+  const filteredRows = rows.filter(
+    (t) =>
+      filter.trim() === '' ||
+      String(t.name ?? '').toLowerCase().includes(filter.toLowerCase()) ||
+      String(t.id).toLowerCase().includes(filter.toLowerCase()),
+  )
 
   return (
-    <ConsoleWithHome
+    <ServiceConsole
       icon="layers"
       breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Application Integration', to: '/services' }, { label: 'SNS' }]}
       title="SNS — Topics"
       description="Durable topics with real fan-out to SQS queues, HTTP(S) endpoints and Lambda functions. Every delivery is recorded."
       fidelity="PARTIAL"
       fidelityFootnote="durable Postgres topics · no email/SMS"
-      homeLabel="SNS dashboard"
-      listLabel="Topics"
-      initialSection={initialSection}
-      home={(goToList) => (
+      subNav={[
+        { id: 'home', label: 'SNS dashboard' },
+        { id: 'topics', label: 'Topics' },
+        { id: 'mobile-push', label: 'Push notifications', group: 'Mobile' },
+        { id: 'mobile-sms', label: 'Text messaging (SMS)', group: 'Mobile' },
+      ]}
+      activeSub={section}
+      onSubChange={setSection}
+    >
+      {section === 'home' && (
           <ServiceHomeDashboard
             serviceName="SNS"
             banner="Durable Postgres topics; fan-out to SQS queues, HTTP(S) endpoints (loopback only, SSRF-guarded) and Lambda functions, with every delivery recorded. No email/SMS delivery."
@@ -108,7 +129,7 @@ export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={topics.isFetching}
             health={[
-              "topics.isError ? 'Topics could not be loaded.' : `${rows.length} topic(s) listed.`",
+              topics.isError ? 'Topics could not be loaded.' : `${rows.length} topic(s) listed.`,
             "The old in-memory simulator is replaced.",
             ]}
             settings={[
@@ -120,8 +141,23 @@ export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list
             { label: 'EventBridge (event rules)', to: '/services/eventbridge' },
             ]}
           />
-        )}
-    >
+      )}
+      {section === 'mobile-push' && (
+        <UnsupportedSection
+          title="Push notifications"
+          reason="Mobile push notifications are UNSUPPORTED in CloudForge — there is no push-notification API and no platform application endpoint."
+          actionLabel="Create platform application"
+        />
+      )}
+      {section === 'mobile-sms' && (
+        <UnsupportedSection
+          title="Text messaging (SMS)"
+          reason="SMS text messaging is UNSUPPORTED in CloudForge — there is no SMS delivery API. Publish fan-out covers SQS queues, HTTP(S) endpoints and Lambda functions only."
+          actionLabel="Send SMS"
+        />
+      )}
+      {section === 'topics' && (
+        <>
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {topics.isPending && <Loading label="Loading topics" />}
       {topics.isError && <ErrorBox message={`Topics could not be loaded (${topics.error.message}).`} />}
@@ -138,13 +174,51 @@ export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list
             <input id="sns-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="alerts" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
             <AwsButton type="submit" disabled={create.isPending}>Create topic</AwsButton>
           </form>
+          <AwsToolbar
+            right={
+              <>
+                <AwsRefreshButton onClick={refresh} busy={topics.isFetching} />
+                <AwsPreferencesButton />
+              </>
+            }
+          >
+            <AwsActionsMenu
+              items={[
+                {
+                  label: 'Delete',
+                  disabledReason: checkedTopic === undefined ? 'Select a topic first.' : undefined,
+                  onClick: () => {
+                    void request(`/api/v1/aws/sns/topics/${String(checkedTopic?.id)}`, { method: 'DELETE' }).then(() => {
+                      setNotice('Topic deleted.')
+                      setSelected('')
+                      setChecked([])
+                      refresh()
+                    }).catch((e: Error) => setNotice(`Delete failed: ${e.message}`))
+                  },
+                },
+              ]}
+            />
+          </AwsToolbar>
           <AwsTable<Rec>
             caption="SNS topics"
             emptyMessage="No topics yet. Create one above."
-            rows={rows}
+            rows={filteredRows}
             totalCount={rows.length}
+            filter={filter}
+            onFilterChange={setFilter}
+            filterPlaceholder="Filter topics by name"
+            selectable
+            selectedIds={checked}
+            onToggleRow={(id) => {
+              setSelected(id)
+              setChecked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [id]))
+            }}
+            onToggleAll={(all) => setChecked(all ? filteredRows.map((r) => r.id) : [])}
             columns={[
-              { header: 'Topic name', render: (t) => <button type="button" className="text-aws-link underline" onClick={() => setSelected(String(t.id))}>{String(t.name)}</button> },
+              // Topics columns in the v4 survey's exact order (3).
+              // Type is Standard for every topic (no FIFO topics exist).
+              { header: 'Name', render: (t) => <button type="button" className="text-aws-link underline" onClick={() => setSelected(String(t.id))}>{String(t.name)}</button> },
+              { header: 'Type', render: () => 'Standard' },
               { header: 'ARN', render: (t) => <code className="text-xs">{String(t.arn ?? '—')}</code> },
               {
                 header: 'Actions',
@@ -168,8 +242,19 @@ export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list
         </AwsCard>
       )}
       {sel && (
-        <>
-          <AwsCard title={`Subscriptions — ${String(sel.name)}`}>
+        <AwsCard title={`Topic detail — ${String(sel.name)}`}>
+          <ConsoleTabs
+            tabs={[
+              { id: 'subscriptions', label: 'Subscriptions' },
+              { id: 'publish', label: 'Publish' },
+              { id: 'deliveries', label: 'Deliveries' },
+            ]}
+            active={detailTab}
+            onChange={(id) => setDetailTab(id as typeof detailTab)}
+          />
+          <div className="mt-3">
+          {detailTab === 'subscriptions' && (
+          <>
             <form
               className="mb-3 flex flex-wrap items-center gap-2"
               onSubmit={(e) => {
@@ -223,8 +308,10 @@ export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list
                 },
               ]}
             />
-          </AwsCard>
-          <AwsCard title="Publish">
+          </>
+          )}
+          {detailTab === 'publish' && (
+          <>
             <form
               className="mb-3 flex flex-wrap items-center gap-2"
               onSubmit={(e) => {
@@ -238,6 +325,9 @@ export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list
               <input id="sns-subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="optional" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
               <AwsButton type="submit" disabled={publish.isPending}>Publish</AwsButton>
             </form>
+          </>
+          )}
+          {detailTab === 'deliveries' && (
             <AwsTable<Rec>
               caption="Delivery records"
               emptyMessage="No deliveries yet. Publish a message to see fan-out results."
@@ -250,9 +340,12 @@ export function SnsConsole({ initialSection }: { initialSection?: 'home' | 'list
                 { header: 'Detail', render: (d) => String(d.detail ?? '—') },
               ]}
             />
-          </AwsCard>
+          )}
+          </div>
+        </AwsCard>
+      )}
         </>
       )}
-    </ConsoleWithHome>
+    </ServiceConsole>
   )
 }

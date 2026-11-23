@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard } from '../components/AwsCard.tsx'
-import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ServiceConsole } from '../components/ServiceConsole.tsx'
+import { UnsupportedSection } from '../components/UnsupportedSection.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
@@ -15,14 +17,27 @@ const listOf = (v: unknown, key: string): Rec[] => {
 
 /**
  * Route 53 console (Phase 3) — mirrors the AWS Route 53 console's
- * Hosted Zones / Records views and the Create-record wizard, plus a
- * Resolve tester. SIMULATED: zones and records are durable, but no
- * DNS server serves them to the lab network — resolution happens
- * against the stored records via the resolve endpoint. A, CNAME and
- * TXT only; other types are rejected by the API, not faked.
+ * Hosted Zones / Records views with inline create-zone and
+ * create-record forms (not a wizard), plus a Resolve tester.
+ * SIMULATED: zones and records are durable, but no DNS server serves
+ * them to the lab network — resolution happens against the stored
+ * records via the resolve endpoint. A, CNAME and TXT only; other
+ * types are rejected by the API, not faked.
+ *
+ * v4 survey (2026-11-22) left nav, restructured: Dashboard, Hosted
+ * zones, Health checks, Profiles, Global Resolver (Global resolvers,
+ * Shared DNS views), VPC Resolver (VPCs, Inbound endpoints, Outbound
+ * endpoints, Rules, Query logging, Outposts), Domains (Registered
+ * domains, Requests), IP-based routing (CIDR collections), Traffic
+ * flow (Traffic policies, Policy records), DNS Firewall, Application
+ * Recovery Controller. Only Dashboard and Hosted zones have a
+ * backend; the rest are honest UNSUPPORTED sections. Hosted-zone
+ * columns are NOT OBSERVABLE in the survey, so the existing columns
+ * are kept, not invented.
  */
 export function Route53Console({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
+  const [section, setSection] = useState(initialSection === 'home' ? 'home' : 'zones')
   const [zoneName, setZoneName] = useState('')
   const [selected, setSelected] = useState('')
   const [recName, setRecName] = useState('')
@@ -32,9 +47,12 @@ export function Route53Console({ initialSection }: { initialSection?: 'home' | '
   const [resolveType, setResolveType] = useState('A')
   const [resolveResult, setResolveResult] = useState('')
   const [notice, setNotice] = useState('')
+  const [filter, setFilter] = useState('')
 
   const zones = useQuery({ queryKey: ['dns-zones'], queryFn: () => request<Rec>('/api/v1/aws/route53/zones'), retry: 1 })
-  const zoneRows = listOf(zones.data, 'zones')
+  const zoneRows = listOf(zones.data, 'zones').filter(
+    (z) => filter.trim() === '' || String(z.name ?? '').toLowerCase().includes(filter.toLowerCase()) || String(z.id).toLowerCase().includes(filter.toLowerCase()),
+  )
   const records = useQuery({
     queryKey: ['dns-records', selected],
     queryFn: () => request<Rec>(`/api/v1/aws/route53/zones/${selected}/records`),
@@ -70,34 +88,55 @@ export function Route53Console({ initialSection }: { initialSection?: 'home' | '
   const selZone = zoneRows.find((z) => String(z.id) === selected)
 
   return (
-    <ConsoleWithHome
+    <ServiceConsole
       icon="network"
       breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Networking', to: '/services' }, { label: 'Route 53' }]}
       title="Route 53 — Hosted Zones"
       description="DNS zones and records. Durable, resolvable through the resolve endpoint — no DNS server serves these records to the lab network."
       fidelity="SIMULATED"
       fidelityFootnote="stored records · resolve endpoint only"
-      homeLabel="Route 53 dashboard"
-      listLabel="Hosted zones"
-      initialSection={initialSection}
-      home={(goToList) => (
+      subNav={[
+        { id: 'home', label: 'Dashboard' },
+        { id: 'zones', label: 'Hosted zones' },
+        { id: 'health-checks', label: 'Health checks' },
+        { id: 'profiles', label: 'Profiles' },
+        { id: 'global-resolvers', label: 'Global resolvers', group: 'Global Resolver' },
+        { id: 'shared-dns-views', label: 'Shared DNS views', group: 'Global Resolver' },
+        { id: 'resolver-vpcs', label: 'VPCs', group: 'VPC Resolver' },
+        { id: 'inbound-endpoints', label: 'Inbound endpoints', group: 'VPC Resolver' },
+        { id: 'outbound-endpoints', label: 'Outbound endpoints', group: 'VPC Resolver' },
+        { id: 'resolver-rules', label: 'Rules', group: 'VPC Resolver' },
+        { id: 'query-logging', label: 'Query logging', group: 'VPC Resolver' },
+        { id: 'outposts', label: 'Outposts', group: 'VPC Resolver' },
+        { id: 'registered-domains', label: 'Registered domains', group: 'Domains' },
+        { id: 'domain-requests', label: 'Requests', group: 'Domains' },
+        { id: 'cidr-collections', label: 'CIDR collections', group: 'IP-based routing' },
+        { id: 'traffic-policies', label: 'Traffic policies', group: 'Traffic flow' },
+        { id: 'policy-records', label: 'Policy records', group: 'Traffic flow' },
+        { id: 'dns-firewall', label: 'DNS Firewall' },
+        { id: 'arc', label: 'Application Recovery Controller' },
+      ]}
+      activeSub={section}
+      onSubChange={setSection}
+    >
+      {section === 'home' && (
           <ServiceHomeDashboard
             serviceName="Route 53"
             banner="Hosted zones and DNS records — durable, resolvable via the resolve endpoint. No DNS server serves these records to the lab network."
             actions={[
-              { label: 'Create hosted zone', primary: true, onClick: goToList },
+              { label: 'Create hosted zone', primary: true, onClick: () => setSection('zones') },
             { label: 'Learning Center — networking track', to: '/learn' },
             ]}
             cards={[
-              { label: 'Hosted zones', count: zoneRows.length, onSelect: goToList },
-            { label: 'Records', count: selected !== '' ? listOf(records.data, 'records').length : '—', onSelect: goToList, note: 'A, CNAME and TXT only' },
-            { label: 'Health checks', count: 0, disabledReason: 'Not modelled.' },
-            { label: 'Route 53 Resolver', count: 0, disabledReason: 'Not built — private zones are taught in the SAP track.' },
+              { label: 'Hosted zones', count: zoneRows.length, onSelect: () => setSection('zones') },
+            { label: 'Records', count: selected !== '' ? listOf(records.data, 'records').length : '—', onSelect: () => setSection('zones'), note: 'A, CNAME and TXT only' },
+            { label: 'Health checks', count: 0, onSelect: () => setSection('health-checks'), note: 'UNSUPPORTED — no health-check API.' },
+            { label: 'Route 53 Resolver', count: 0, onSelect: () => setSection('resolver-vpcs'), note: 'UNSUPPORTED — no resolver API.' },
             ]}
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={zones.isFetching}
             health={[
-              "zones.isError ? 'Hosted zones could not be loaded.' : `${zoneRows.length} hosted zone(s) listed.`",
+              zones.isError ? 'Hosted zones could not be loaded.' : `${zoneRows.length} hosted zone(s) listed.`,
             "Resolution is against the stored records via the resolve endpoint.",
             ]}
             settings={[
@@ -109,8 +148,9 @@ export function Route53Console({ initialSection }: { initialSection?: 'home' | '
             { label: 'Global Accelerator (unsupported — exam concept)', to: '/services/globalaccelerator' },
             ]}
           />
-        )}
-    >
+      )}
+      {section === 'zones' && (
+        <>
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {resolveResult !== '' && <p className="border border-aws-border bg-white px-4 py-2 font-mono text-sm" role="status">{resolveResult}</p>}
       {zones.isPending && <Loading label="Loading hosted zones" />}
@@ -132,7 +172,10 @@ export function Route53Console({ initialSection }: { initialSection?: 'home' | '
             caption="Hosted zones"
             emptyMessage="No hosted zones yet. Create one above."
             rows={zoneRows}
-            totalCount={zoneRows.length}
+            totalCount={listOf(zones.data, 'zones').length}
+            filter={filter}
+            onFilterChange={setFilter}
+            filterPlaceholder="Filter hosted zones by name"
             columns={[
               { header: 'Zone name', render: (z) => <button type="button" className="text-aws-link underline" onClick={() => setSelected(String(z.id))}>{String(z.name)}</button> },
               { header: 'Created', render: (z) => String(z.created_at ?? '—') },
@@ -231,6 +274,127 @@ export function Route53Console({ initialSection }: { initialSection?: 'home' | '
           </div>
         </AwsCard>
       )}
-    </ConsoleWithHome>
+        </>
+      )}
+      {section === 'health-checks' && (
+        <UnsupportedSection
+          title="Health checks"
+          reason="Health checks are UNSUPPORTED in CloudForge — there is no health-check API; the resolve endpoint answers from stored records only."
+          actionLabel="Create health check"
+        />
+      )}
+      {section === 'profiles' && (
+        <UnsupportedSection
+          title="Profiles"
+          reason="Profiles are UNSUPPORTED in CloudForge — there is no Route 53 profile API."
+          actionLabel="Create profile"
+        />
+      )}
+      {section === 'global-resolvers' && (
+        <UnsupportedSection
+          title="Global resolvers"
+          reason="Global resolvers are UNSUPPORTED in CloudForge — there is no global-resolver API; resolution is against stored records via the resolve endpoint."
+          actionLabel="Create global resolver"
+        />
+      )}
+      {section === 'shared-dns-views' && (
+        <UnsupportedSection
+          title="Shared DNS views"
+          reason="Shared DNS views are UNSUPPORTED in CloudForge — there is no shared-DNS-view API."
+          actionLabel="Create shared DNS view"
+        />
+      )}
+      {section === 'resolver-vpcs' && (
+        <UnsupportedSection
+          title="VPC Resolver — VPCs"
+          reason="VPC Resolver is UNSUPPORTED in CloudForge — there is no resolver API; zones are not attached to lab VPCs and private zones are taught in the SAP track, not built here."
+          actionLabel="Associate VPC"
+        />
+      )}
+      {section === 'inbound-endpoints' && (
+        <UnsupportedSection
+          title="Inbound endpoints"
+          reason="Inbound endpoints are UNSUPPORTED in CloudForge — there is no resolver-endpoint API."
+          actionLabel="Create inbound endpoint"
+        />
+      )}
+      {section === 'outbound-endpoints' && (
+        <UnsupportedSection
+          title="Outbound endpoints"
+          reason="Outbound endpoints are UNSUPPORTED in CloudForge — there is no resolver-endpoint API."
+          actionLabel="Create outbound endpoint"
+        />
+      )}
+      {section === 'resolver-rules' && (
+        <UnsupportedSection
+          title="Resolver rules"
+          reason="Resolver rules are UNSUPPORTED in CloudForge — there is no resolver-rule API."
+          actionLabel="Create rule"
+        />
+      )}
+      {section === 'query-logging' && (
+        <UnsupportedSection
+          title="Query logging"
+          reason="Query logging is UNSUPPORTED in CloudForge — there is no query-logging API; the resolve endpoint answers from stored records without logging queries."
+          actionLabel="Configure query logging"
+        />
+      )}
+      {section === 'outposts' && (
+        <UnsupportedSection
+          title="Outposts"
+          reason="Outposts are UNSUPPORTED in CloudForge — there is no Outposts resolver API."
+          actionLabel="Create Outpost resolver"
+        />
+      )}
+      {section === 'registered-domains' && (
+        <UnsupportedSection
+          title="Registered domains"
+          reason="Registered domains are UNSUPPORTED in CloudForge — there is no domain-registration API; zones use local names like app.local."
+          actionLabel="Register domain"
+        />
+      )}
+      {section === 'domain-requests' && (
+        <UnsupportedSection
+          title="Requests"
+          reason="Domain requests are UNSUPPORTED in CloudForge — there is no domain-registration API, so there are no registration requests."
+          actionLabel="View requests"
+        />
+      )}
+      {section === 'cidr-collections' && (
+        <UnsupportedSection
+          title="CIDR collections"
+          reason="CIDR collections are UNSUPPORTED in CloudForge — there is no CIDR-collection API for IP-based routing."
+          actionLabel="Create CIDR collection"
+        />
+      )}
+      {section === 'traffic-policies' && (
+        <UnsupportedSection
+          title="Traffic policies"
+          reason="Traffic policies are UNSUPPORTED in CloudForge — there is no traffic-policy API; the resolve endpoint answers from stored records only."
+          actionLabel="Create traffic policy"
+        />
+      )}
+      {section === 'policy-records' && (
+        <UnsupportedSection
+          title="Policy records"
+          reason="Policy records are UNSUPPORTED in CloudForge — there is no traffic-policy API, so no policy records exist."
+          actionLabel="Create policy record"
+        />
+      )}
+      {section === 'dns-firewall' && (
+        <UnsupportedSection
+          title="DNS Firewall"
+          reason="DNS Firewall is UNSUPPORTED in CloudForge — there is no DNS Firewall API and no DNS filtering; see also the DNS Firewall section on the VPC console."
+          actionLabel="Create rule group"
+        />
+      )}
+      {section === 'arc' && (
+        <UnsupportedSection
+          title="Application Recovery Controller"
+          reason="Application Recovery Controller is UNSUPPORTED in CloudForge — there is no recovery-controller API."
+          actionLabel="Create recovery control"
+        />
+      )}
+    </ServiceConsole>
   )
 }

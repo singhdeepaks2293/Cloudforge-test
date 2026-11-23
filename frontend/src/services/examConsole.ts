@@ -101,7 +101,14 @@ export interface ExamServiceConfig {
   extraTabs?: ExamExtraTab[]
   /** Buttons shown in the list toolbar (e.g. Refresh recommendations). */
   listActions?: (ctx: ExamCtx) => ReactNode
-  homeCards: (rows: Rec[], goTo: (section: string) => void) => ServiceHomeCard[]
+  /**
+   * Extra backend lists whose live counts feed the Home cards (e.g.
+   * Backup vaults/jobs, which live under different list paths than
+   * the console's own list). Keyed by path in the third homeCards
+   * argument; a missing entry means that list has not loaded yet.
+   */
+  homeCountSources?: { path: string; listKey: string }[]
+  homeCards: (rows: Rec[], goTo: (section: string) => void, extraCounts?: Record<string, number>) => ServiceHomeCard[]
   homeExtra?: ReactNode
   /** Health lines on Home; defaults to a count + fidelity line. */
   health?: (rows: Rec[]) => string[]

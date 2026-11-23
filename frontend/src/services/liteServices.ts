@@ -1,14 +1,26 @@
 /**
- * v3 lite exam set — generic services with no dedicated console and
- * no backend runtime. Kept in a services module (not a component
- * file) so the map can be shared without tripping fast-refresh.
- * Each entry lists the available CloudForge service that teaches
- * the same concept, plus the honest reason the service is not built.
+ * v3 lite exam set — the "What you can do instead" map for the exam
+ * services. Every service listed here now HAS a dedicated console and
+ * a backend runtime (v3 migration 014): the 17 exam services have
+ * dedicated consoles in ExamServiceConsoles.tsx, and autoscaling, ebs
+ * and vpn have real API-emulated backends (durable records + actions)
+ * whose EC2/VPC console sections are now wired to them (v4): the EC2
+ * Volumes section creates/attaches/detaches volumes, the EC2 Auto
+ * Scaling Groups section creates/scales groups, and the VPC console
+ * VPN section creates customer gateways, VPN gateways and connections
+ * with tunnel activate/deactivate.
+ * "What you can do instead" card on every exam console, and
+ * ServiceDetail reads it as the fallback for /services/:id routes no
+ * dedicated route or redirect matched first. The `note` on each entry
+ * is the honest one-liner the Learning tab shows for that service.
+ * Kept in a services module (not a component file) so the map can be
+ * shared without tripping fast-refresh. Each entry lists the available
+ * CloudForge service that teaches the same concept.
  */
 export const LITE_GENERIC_SERVICES: Record<string, { alternatives: { label: string; to: string; note: string }[]; note?: string }> = {
   autoscaling: {
     alternatives: [{ label: 'EC2 — Instances', to: '/services/ec2', note: 'Labs use a fixed instance count; scale by launching or stopping instances.' }],
-    note: 'Auto Scaling groups are not modelled: labs use a fixed instance count. Reason about desired capacity in the SAA lessons.',
+    note: 'Auto Scaling groups have a real API-emulated backend (durable records with min/desired/max and a scale action), wired to the EC2 console Auto Scaling Groups section — create a group there to practise desired capacity. Scaling records capacity only; it launches no instances.',
   },
   aurora: {
     alternatives: [{ label: 'RDS — DB instances', to: '/services/rds', note: 'Real Postgres databases on the platform Postgres.' }],
@@ -44,8 +56,8 @@ export const LITE_GENERIC_SERVICES: Record<string, { alternatives: { label: stri
     note: 'Dedicated CloudFront console at /services/cloudfront — distributions (survey columns), invalidations and the other survey nav items.',
   },
   ebs: {
-    alternatives: [{ label: 'EC2 — Instances', to: '/services/ec2', note: 'Lab instances carry their own disks; the Volumes tab states EBS is unsupported.' }],
-    note: 'EBS volumes are not built — there is no volume API; lab instances carry their own disks.',
+    alternatives: [{ label: 'EC2 — Instances', to: '/services/ec2', note: 'Lab instances carry their own disks; the Volumes section manages EBS volumes.' }],
+    note: 'EBS volumes have a real API-emulated backend (durable records with attach/detach against real labs), wired to the EC2 console Volumes section — volumes can be created, attached and detached there. Attach is recorded only; the lab disk is unchanged.',
   },
   computeoptimizer: {
     alternatives: [
@@ -90,11 +102,11 @@ export const LITE_GENERIC_SERVICES: Record<string, { alternatives: { label: stri
       { label: 'Transit Gateway', to: '/services/transitgateway', note: 'Hub attachments as real route-table entries (SIMULATED).' },
       { label: 'VPC', to: '/services/vpc', note: 'Lab VPCs, subnets and route tables.' },
     ],
-    note: 'VPN connections are not built. Transit Gateway attachments are the available hybrid-networking practice.',
+    note: 'VPN has a real API-emulated backend (customer gateways, VPN gateways and connections with tunnel activate/deactivate), wired to the VPC console VPN section — connections can be created and managed there. Tunnel state is a teaching field; no real IPsec tunnel exists. Transit Gateway attachments are the available hybrid-networking practice.',
   },
   directconnect: {
     alternatives: [
-      { label: 'VPN', to: '/services/vpn', note: 'Also unsupported — see the hybrid-networking alternatives there.' },
+      { label: 'VPN', to: '/services/vpc?section=vpn', note: 'API-EMULATED — see the VPC console VPN section.' },
       { label: 'Transit Gateway', to: '/services/transitgateway', note: 'Hub attachments as real route-table entries (SIMULATED).' },
     ],
     note: 'Dedicated Direct Connect console at /services/directconnect — connections with a confirm step.',

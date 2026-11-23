@@ -28,6 +28,11 @@ export interface SubNavItem {
    * Transit Gateway console). Rendered as a Link, never as a button.
    */
   to?: string
+  /**
+   * v4 — short badge shown next to the label, e.g. the survey's "New"
+   * badge on the DataSync Dashboard item.
+   */
+  badge?: string
 }
 
 export function ServiceConsole({
@@ -99,6 +104,11 @@ export function ServiceConsole({
               const body = (
                 <>
                   {item.label}
+                  {item.badge !== undefined && (
+                    <span className="ml-1.5 rounded-sm bg-aws-orange px-1.5 py-0.5 align-middle text-[10px] font-bold text-aws-navy">
+                      {item.badge}
+                    </span>
+                  )}
                   {item.disabledReason !== undefined && (
                     <span className="block text-[11px] font-normal text-aws-muted">{item.disabledReason}</span>
                   )}

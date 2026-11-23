@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard } from '../components/AwsCard.tsx'
-import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ConsoleTabs, ServiceConsole } from '../components/ServiceConsole.tsx'
+import { UnsupportedSection } from '../components/UnsupportedSection.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
+import { AwsActionsMenu, AwsPreferencesButton, AwsRefreshButton, AwsToolbar } from '../components/AwsShell.tsx'
 import { request } from '../services/api.ts'
 
 type Rec = Record<string, unknown> & { id: string }
@@ -36,6 +39,12 @@ export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' 
   const [invokeBody, setInvokeBody] = useState('{"ping": "via-gateway"}')
   const [invokeResult, setInvokeResult] = useState('')
   const [notice, setNotice] = useState('')
+  const [section, setSection] = useState(initialSection === 'home' ? 'home' : 'apis')
+  const goToList = () => setSection('apis')
+  const [filter, setFilter] = useState('')
+  const [checked, setChecked] = useState<string[]>([])
+  const [apiType, setApiType] = useState<'REST' | 'HTTP' | 'WEBSOCKET'>('REST')
+  const [detailTab, setDetailTab] = useState<'resources' | 'stages' | 'invoke' | 'logs'>('resources')
 
   const apis = useQuery({ queryKey: ['apigw-apis'], queryFn: () => request<Rec>('/api/v1/aws/apigateway/apis'), retry: 1 })
   const rows = listOf(apis.data, 'apis')
@@ -93,19 +102,42 @@ export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' 
   const sel = rows.find((a) => String(a.id) === selected)
   const resources = listOf(detail.data, 'resources')
   const stages = listOf(detail.data, 'stages')
+  const checkedApi = rows.find((a) => String(a.id) === checked[0])
+  const filteredRows = rows.filter(
+    (a) =>
+      filter.trim() === '' ||
+      String(a.name ?? '').toLowerCase().includes(filter.toLowerCase()) ||
+      String(a.id).toLowerCase().includes(filter.toLowerCase()),
+  )
 
   return (
-    <ConsoleWithHome
+    <ServiceConsole
       icon="zap"
       breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Serverless', to: '/services' }, { label: 'API Gateway' }]}
       title="API Gateway — APIs"
       description="REST/HTTP APIs routing to Lambda functions and SSRF-guarded HTTP targets, with real request logging."
       fidelity="PARTIAL"
       fidelityFootnote="real routing · real logs · no WebSocket APIs"
-      homeLabel="API Gateway dashboard"
-      listLabel="APIs"
-      initialSection={initialSection}
-      home={(goToList) => (
+      subNav={[
+        { id: 'home', label: 'API Gateway dashboard' },
+        { id: 'apis', label: 'APIs' },
+        { id: 'custom-domains', label: 'Custom domain names' },
+        { id: 'domain-access', label: 'Domain name access associations' },
+        { id: 'vpc-links', label: 'VPC links' },
+        { id: 'agentcore', label: 'AgentCore targets' },
+        { id: 'usage-plans', label: 'Usage plans' },
+        { id: 'api-keys', label: 'API keys' },
+        { id: 'client-certs', label: 'Client certificates' },
+        { id: 'settings', label: 'Settings' },
+        { id: 'portal-inventory', label: 'API inventory', group: 'API Portal' },
+        { id: 'portal-products', label: 'Products', group: 'API Portal' },
+        { id: 'portal-docs', label: 'Documentation portals', group: 'API Portal' },
+        { id: 'portal-org', label: 'Organization settings', group: 'API Portal' },
+      ]}
+      activeSub={section}
+      onSubChange={setSection}
+    >
+      {section === 'home' && (
           <ServiceHomeDashboard
             serviceName="API Gateway"
             banner="Real routing to Lambda functions and SSRF-guarded HTTP targets with real request logging; a deployment snapshots resources into a stage. REST/HTTP only (no WebSocket APIs)."
@@ -122,7 +154,7 @@ export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' 
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={apis.isFetching}
             health={[
-              "apis.isError ? 'APIs could not be loaded.' : `${rows.length} API(s) listed.`",
+              apis.isError ? 'APIs could not be loaded.' : `${rows.length} API(s) listed.`,
             "Invoke requires platform auth (no API keys / usage plans).",
             ]}
             settings={[
@@ -134,13 +166,65 @@ export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' 
             { label: 'Lambda (integration target)', to: '/services/lambda' },
             ]}
           />
-        )}
-    >
+      )}
+      {section === 'custom-domains' && (
+        <UnsupportedSection
+          title="Custom domain names"
+          reason="Custom domain names are UNSUPPORTED in CloudForge — there is no custom-domain API and no TLS certificate surface."
+          actionLabel="Create custom domain name"
+        />
+      )}
+      {section === 'vpc-links' && (
+        <UnsupportedSection
+          title="VPC links"
+          reason="VPC links are UNSUPPORTED in CloudForge — there is no VPC-link API."
+          actionLabel="Create VPC link"
+        />
+      )}
+      {section === 'usage-plans' && (
+        <UnsupportedSection
+          title="Usage plans"
+          reason="Usage plans are UNSUPPORTED in CloudForge — invoke requires platform auth and there are no API keys or usage plans."
+          actionLabel="Create usage plan"
+        />
+      )}
+      {section === 'api-keys' && (
+        <UnsupportedSection
+          title="API keys"
+          reason="API keys are UNSUPPORTED in CloudForge — invoke requires platform auth and there is no API-key API."
+          actionLabel="Create API key"
+        />
+      )}
+      {section === 'apis' && (
+        <>
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
       {invokeResult !== '' && <pre className="overflow-auto border border-aws-border bg-white px-4 py-2 font-mono text-sm" role="status">{invokeResult}</pre>}
       {apis.isPending && <Loading label="Loading APIs" />}
       {apis.isError && <ErrorBox message={`APIs could not be loaded (${apis.error.message}).`} />}
-      {apis.data && (
+      <ConsoleTabs
+        tabs={[
+          { id: 'REST', label: 'REST APIs' },
+          { id: 'HTTP', label: 'HTTP APIs' },
+          { id: 'WEBSOCKET', label: 'WebSocket APIs' },
+        ]}
+        active={apiType}
+        onChange={(id) => setApiType(id as typeof apiType)}
+      />
+      {apiType === 'HTTP' && (
+        <UnsupportedSection
+          title="HTTP APIs"
+          reason="HTTP APIs are UNSUPPORTED in CloudForge — the create form only creates REST APIs; no HTTP API type can be created despite the console description saying REST/HTTP."
+          actionLabel="Create HTTP API"
+        />
+      )}
+      {apiType === 'WEBSOCKET' && (
+        <UnsupportedSection
+          title="WebSocket APIs"
+          reason="WebSocket APIs are UNSUPPORTED in CloudForge — there is no WebSocket API backend."
+          actionLabel="Create WebSocket API"
+        />
+      )}
+      {apiType === 'REST' && apis.data && (
         <AwsCard title={`APIs (${rows.length})`}>
           <form
             className="mb-3 flex flex-wrap items-center gap-2"
@@ -153,15 +237,58 @@ export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' 
             <input id="apigw-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="echo-api" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
             <AwsButton type="submit" disabled={create.isPending}>Create API</AwsButton>
           </form>
+          <AwsToolbar
+            right={
+              <>
+                <AwsRefreshButton onClick={refresh} busy={apis.isFetching} />
+                <AwsPreferencesButton />
+              </>
+            }
+          >
+            <AwsActionsMenu
+              items={[
+                {
+                  label: 'Delete',
+                  disabledReason: checkedApi === undefined ? 'Select an API first.' : undefined,
+                  onClick: () => {
+                    void request(`/api/v1/aws/apigateway/apis/${String(checkedApi?.id)}`, { method: 'DELETE' }).then(() => {
+                      setNotice('API deleted.')
+                      setSelected('')
+                      setChecked([])
+                      refresh()
+                    }).catch((e: Error) => setNotice(`Delete failed: ${e.message}`))
+                  },
+                },
+              ]}
+            />
+          </AwsToolbar>
           <AwsTable<Rec>
             caption="APIs"
             emptyMessage="No APIs yet. Create one above."
-            rows={rows}
+            rows={filteredRows}
             totalCount={rows.length}
+            filter={filter}
+            onFilterChange={setFilter}
+            filterPlaceholder="Filter APIs by name"
+            selectable
+            selectedIds={checked}
+            onToggleRow={(id) => {
+              setSelected(id)
+              setChecked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [id]))
+            }}
+            onToggleAll={(all) => setChecked(all ? filteredRows.map((r) => r.id) : [])}
             columns={[
-              { header: 'API name', render: (a) => <button type="button" className="text-aws-link underline" onClick={() => setSelected(String(a.id))}>{String(a.name)}</button> },
+              // APIs columns in the v4 survey's exact order (8).
+              // Description, Endpoint type and Security policy have
+              // no backend value and render '—'; ID is the API id.
+              { header: 'Name', render: (a) => <button type="button" className="text-aws-link underline" onClick={() => setSelected(String(a.id))}>{String(a.name)}</button> },
+              { header: 'Description', render: () => '—' },
+              { header: 'ID', render: (a) => <code className="text-xs">{String(a.id)}</code> },
               { header: 'Protocol', render: (a) => String(a.protocol ?? '—') },
-              { header: 'Status', render: (a) => String(a.status ?? '—') },
+              { header: 'Endpoint type', render: () => '—' },
+              { header: 'Created', render: (a) => (typeof a.created_at === 'string' ? new Date(a.created_at as string).toLocaleString() : '—') },
+              { header: 'Security policy', render: () => '—' },
+              { header: 'API status', render: (a) => String(a.status ?? '—') },
               {
                 header: 'Actions',
                 render: (a) => (
@@ -184,8 +311,20 @@ export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' 
         </AwsCard>
       )}
       {sel && (
-        <>
-          <AwsCard title={`Resources — ${String(sel.name)}`}>
+        <AwsCard title={`API detail — ${String(sel.name)}`}>
+          <ConsoleTabs
+            tabs={[
+              { id: 'resources', label: 'Resources' },
+              { id: 'stages', label: 'Stages' },
+              { id: 'invoke', label: 'Invoke' },
+              { id: 'logs', label: 'Logs' },
+            ]}
+            active={detailTab}
+            onChange={(id) => setDetailTab(id as typeof detailTab)}
+          />
+          <div className="mt-3">
+          {detailTab === 'resources' && (
+          <>
             <form
               className="mb-3 flex flex-wrap items-center gap-2"
               onSubmit={(e) => {
@@ -229,18 +368,29 @@ export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' 
                 },
               ]}
             />
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-aws-border pt-3">
-              <span className="text-sm font-medium">Stages:</span>
-              {stages.length === 0 && <span className="text-sm text-aws-muted">none deployed yet</span>}
-              {stages.map((s) => (
-                <span key={String(s.id)} className="rounded-sm border border-aws-border bg-aws-bg px-2 py-1 text-sm">{String(s.name)} (deployed {String(s.deployed_at ?? '').slice(0, 19)})</span>
-              ))}
+          </>
+          )}
+          {detailTab === 'stages' && (
+          <>
+            <p className="mb-3 text-sm text-aws-muted">A deployment snapshots the current resources into a stage.</p>
+            {stages.length === 0 ? (
+              <p className="mb-3 text-sm text-aws-muted">No stages deployed yet.</p>
+            ) : (
+              <ul className="mb-3 space-y-1 text-sm">
+                {stages.map((s) => (
+                  <li key={String(s.id)}>{String(s.name)} (deployed {String(s.deployed_at ?? '').slice(0, 19)})</li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
               <label htmlFor="apigw-stage" className="text-sm font-medium">Deploy stage</label>
               <input id="apigw-stage" value={stageName} onChange={(e) => setStageName(e.target.value)} className="w-24 rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
               <AwsButton disabled={deploy.isPending} onClick={() => deploy.mutate()}>Deploy</AwsButton>
             </div>
-          </AwsCard>
-          <AwsCard title="Invoke (test)">
+          </>
+          )}
+          {detailTab === 'invoke' && (
+          <>
             <form
               className="mb-3 flex flex-wrap items-end gap-2"
               onSubmit={(e) => {
@@ -283,8 +433,10 @@ export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' 
               <AwsButton type="submit">Invoke</AwsButton>
             </form>
             <p className="text-sm text-aws-muted">Invoke requires platform auth (the console sends your token). Undeployed stages and unmapped methods return 404 — never a fake success.</p>
-          </AwsCard>
-          <AwsCard title="Request logs (latest 100)">
+          </>
+          )}
+          {detailTab === 'logs' && (
+          <>
             {logs.isPending && <Loading label="Loading logs" />}
             {logs.data && (
               <AwsTable<Rec>
@@ -302,9 +454,70 @@ export function ApiGatewayConsole({ initialSection }: { initialSection?: 'home' 
                 ]}
               />
             )}
-          </AwsCard>
+            <p className="mt-2 text-sm text-aws-muted">Request logs (latest 100).</p>
+          </>
+          )}
+          </div>
+        </AwsCard>
+      )}
         </>
       )}
-    </ConsoleWithHome>
+      {section === 'domain-access' && (
+        <UnsupportedSection
+          title="Domain name access associations"
+          reason="Domain name access associations are UNSUPPORTED in CloudForge — there is no domain-name API."
+          actionLabel="Create association"
+        />
+      )}
+      {section === 'agentcore' && (
+        <UnsupportedSection
+          title="AgentCore targets"
+          reason="AgentCore targets are UNSUPPORTED in CloudForge — there is no AgentCore API and no agent runtime."
+          actionLabel="Create AgentCore target"
+        />
+      )}
+      {section === 'client-certs' && (
+        <UnsupportedSection
+          title="Client certificates"
+          reason="Client certificates are UNSUPPORTED in CloudForge — there is no client-certificate API; invoke requires platform auth instead."
+          actionLabel="Generate client certificate"
+        />
+      )}
+      {section === 'settings' && (
+        <UnsupportedSection
+          title="Settings"
+          reason="API Gateway settings are UNSUPPORTED in CloudForge — no settings are stored."
+          actionLabel="Save settings"
+        />
+      )}
+      {section === 'portal-inventory' && (
+        <UnsupportedSection
+          title="API inventory — API Portal"
+          reason="The API Portal inventory is UNSUPPORTED in CloudForge — there is no portal API."
+          actionLabel="Open API Portal"
+        />
+      )}
+      {section === 'portal-products' && (
+        <UnsupportedSection
+          title="Products — API Portal"
+          reason="API Portal products are UNSUPPORTED in CloudForge — there is no portal API."
+          actionLabel="Create product"
+        />
+      )}
+      {section === 'portal-docs' && (
+        <UnsupportedSection
+          title="Documentation portals — API Portal"
+          reason="API Portal documentation portals are UNSUPPORTED in CloudForge — there is no portal API."
+          actionLabel="Create documentation portal"
+        />
+      )}
+      {section === 'portal-org' && (
+        <UnsupportedSection
+          title="Organization settings — API Portal"
+          reason="API Portal organization settings are UNSUPPORTED in CloudForge — there is no portal API."
+          actionLabel="Save organization settings"
+        />
+      )}
+    </ServiceConsole>
   )
 }

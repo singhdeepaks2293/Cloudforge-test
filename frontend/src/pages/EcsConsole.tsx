@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard } from '../components/AwsCard.tsx'
-import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ConsoleTabs, ServiceConsole } from '../components/ServiceConsole.tsx'
+import { UnsupportedSection } from '../components/UnsupportedSection.tsx'
+import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
+import { AwsPreferencesButton, AwsRefreshButton, AwsToolbar } from '../components/AwsShell.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -25,6 +28,18 @@ const num = (r: Rec, k: string): number => (typeof r[k] === 'number' ? (r[k] as 
  * real process: PENDING → RUNNING → STOPPED with a real exit code.
  * No Docker, no VPC networking, no service discovery, no load
  * balancer integration.
+ *
+ * v4 survey (2026-11-22) left nav: Search ECS resources, Favorites
+ * and recents, Express Mode, Clusters, Gateways (New), Namespaces,
+ * Task definitions, Daemon task definitions, Account settings.
+ * Clusters columns in the survey's exact order (6): Cluster,
+ * Services, Tasks, Container instances, CloudWatch monitoring,
+ * Capacity provider strategy. Services/Tasks counts are derived
+ * from the services/tasks lists; Container instances, CloudWatch
+ * monitoring and Capacity provider strategy have no backend value
+ * and render '—'. The Clusters section shows all four cards at
+ * once (the combined view); Task definitions, Services and Tasks
+ * are also reachable as their own sections.
  */
 export function EcsConsole({ initialSection }: { initialSection?: 'home' | 'list' }) {
   const queryClient = useQueryClient()
@@ -43,6 +58,13 @@ export function EcsConsole({ initialSection }: { initialSection?: 'home' | 'list
   const [runCount, setRunCount] = useState(1)
   const [logTaskId, setLogTaskId] = useState('')
   const [notice, setNotice] = useState('')
+  const [section, setSection] = useState(initialSection === 'home' ? 'home' : 'clusters')
+  const [clusterFilter, setClusterFilter] = useState('')
+  const [tdFilter, setTdFilter] = useState('')
+  const [svcFilter, setSvcFilter] = useState('')
+  const [taskFilter, setTaskFilter] = useState('')
+  const [selectedCluster, setSelectedCluster] = useState('')
+  const [clusterTab, setClusterTab] = useState<'overview' | 'services' | 'tasks'>('overview')
 
   const clusters = useQuery({ queryKey: ['ecs-clusters'], queryFn: () => request<Rec>('/api/v1/aws/ecs/clusters'), retry: 1 })
   const taskdefs = useQuery({ queryKey: ['ecs-taskdefs'], queryFn: () => request<Rec>('/api/v1/aws/ecs/task-definitions'), retry: 1 })
@@ -58,6 +80,21 @@ export function EcsConsole({ initialSection }: { initialSection?: 'home' | 'list
   const taskdefRows = listOf(taskdefs.data, 'task_definitions')
   const serviceRows = listOf(services.data, 'services')
   const taskRows = listOf(tasks.data, 'tasks')
+  const filteredClusters = clusterRows.filter(
+    (c) => clusterFilter.trim() === '' || str(c, 'name').toLowerCase().includes(clusterFilter.toLowerCase()),
+  )
+  const filteredTaskdefs = taskdefRows.filter(
+    (t) => tdFilter.trim() === '' || str(t, 'family').toLowerCase().includes(tdFilter.toLowerCase()),
+  )
+  const filteredServices = serviceRows.filter(
+    (v) => svcFilter.trim() === '' || str(v, 'name').toLowerCase().includes(svcFilter.toLowerCase()),
+  )
+  const filteredTasks = taskRows.filter(
+    (t) => taskFilter.trim() === '' || str(t, 'name').toLowerCase().includes(taskFilter.toLowerCase()),
+  )
+  const selCluster = clusterRows.find((c) => String(c.id) === selectedCluster)
+  const clusterServices = serviceRows.filter((v) => String(v.cluster_id ?? '') === selectedCluster)
+  const clusterTasks = taskRows.filter((t) => String(t.cluster_id ?? '') === selectedCluster)
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['ecs-clusters'] })
@@ -170,302 +207,486 @@ export function EcsConsole({ initialSection }: { initialSection?: 'home' | 'list
     onError: (e: Error) => setNotice(`Stop task failed: ${e.message}`),
   })
 
+  const goToList = () => setSection('clusters')
+  const clustersCard = (
+          <AwsCard title={`Clusters (${clusterRows.length})`}>
+            <form
+              className="mb-3 flex flex-wrap items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (clusterName.trim() !== '') createCluster.mutate()
+              }}
+            >
+              <label htmlFor="ecs-cluster-name" className="text-sm font-medium">Cluster name</label>
+              <input id="ecs-cluster-name" value={clusterName} onChange={(e) => setClusterName(e.target.value)} placeholder="web" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
+              <AwsButton type="submit" disabled={createCluster.isPending}>Create cluster</AwsButton>
+            </form>
+            {clusters.isPending && <Loading label="Loading clusters" />}
+            {clusters.isError && <ErrorBox message={`Clusters could not be loaded (${clusters.error.message}).`} />}
+            {clusters.data && (
+              <>
+              <AwsToolbar
+                right={
+                  <>
+                    <AwsRefreshButton onClick={refresh} busy={clusters.isFetching} />
+                    <AwsPreferencesButton />
+                  </>
+                }
+              />
+              <AwsTable<Rec>
+                caption="ECS clusters"
+                emptyMessage="No clusters yet. Create one above."
+                rows={filteredClusters}
+                totalCount={clusterRows.length}
+                filter={clusterFilter}
+                onFilterChange={setClusterFilter}
+                filterPlaceholder="Filter clusters by name"
+                columns={[
+                  // Clusters columns in the v4 survey's exact order (6).
+                  // Services/Tasks are derived from the services/tasks
+                  // lists; Container instances, CloudWatch monitoring
+                  // and Capacity provider strategy have no backend value.
+                  { header: 'Cluster', render: (r) => <button type="button" className="text-aws-link underline" onClick={() => setSelectedCluster(String(r.id))}><span className="font-mono">{str(r, 'name')}</span></button> },
+                  { header: 'Services', render: (r) => String(serviceRows.filter((v) => String(v.cluster_id ?? '') === String(r.id)).length) },
+                  { header: 'Tasks', render: (r) => String(taskRows.filter((t) => String(t.cluster_id ?? '') === String(r.id)).length) },
+                  { header: 'Container instances', render: () => '—' },
+                  { header: 'CloudWatch monitoring', render: () => '—' },
+                  { header: 'Capacity provider strategy', render: () => '—' },
+                  {
+                    header: 'Actions',
+                    render: (r) => (
+                      <AwsButton
+                        variant="secondary"
+                        disabled={num(r, 'running_tasks') > 0}
+                        title={num(r, 'running_tasks') > 0 ? 'Stop the running tasks (or delete the services) first.' : undefined}
+                        onClick={() => deleteCluster.mutate(String(r.id))}
+                      >
+                        Delete
+                      </AwsButton>
+                    ),
+                  },
+                ]}
+              />
+              </>
+            )}
+          </AwsCard>
+  )
+  const taskDefsCard = (
+          <AwsCard title={`Task definitions (${taskdefRows.length})`}>
+            <form
+              className="mb-3 flex flex-wrap items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (family.trim() !== '') registerTaskDef.mutate()
+              }}
+            >
+              <label htmlFor="ecs-family" className="text-sm font-medium">Family</label>
+              <input id="ecs-family" value={family} onChange={(e) => setFamily(e.target.value)} placeholder="echoer" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
+              <label className="text-sm">
+                Image
+                <input value={image} onChange={(e) => setImage(e.target.value)} className="ml-2 w-48 rounded-sm border border-aws-border-dark bg-white px-2 py-1 font-mono text-xs" />
+              </label>
+              <label className="text-sm">
+                Command
+                <input value={command} onChange={(e) => setCommand(e.target.value)} className="ml-2 w-48 rounded-sm border border-aws-border-dark bg-white px-2 py-1 font-mono text-xs" />
+              </label>
+              <AwsButton type="submit" disabled={registerTaskDef.isPending}>Register task definition</AwsButton>
+            </form>
+            <p className="mb-3 text-xs text-aws-muted">CPU 256 / memory 128 MiB per container by default. A container definition without a command is rejected — the runtime needs a real command to run.</p>
+            <AwsToolbar
+              right={
+                <>
+                  <AwsRefreshButton onClick={refresh} busy={taskdefs.isFetching} />
+                  <AwsPreferencesButton />
+                </>
+              }
+            />
+            {taskdefs.data && (
+              <AwsTable<Rec>
+                caption="ECS task definitions"
+                emptyMessage="No task definitions yet. Register one above."
+                rows={filteredTaskdefs}
+                totalCount={taskdefRows.length}
+                filter={tdFilter}
+                onFilterChange={setTdFilter}
+                filterPlaceholder="Filter task definitions by family"
+                columns={[
+                  { header: 'Family', render: (r) => <span className="font-mono">{str(r, 'family')}</span> },
+                  { header: 'Revision', render: (r) => String(num(r, 'revision')) },
+                  { header: 'Image', render: (r) => <span className="font-mono text-xs">{str(r, 'image') || '—'}</span> },
+                  { header: 'Command', render: (r) => <span className="font-mono text-xs">{Array.isArray(r.command) ? (r.command as string[]).join(' ') : '—'}</span> },
+                  {
+                    header: 'Actions',
+                    render: (r) => (
+                      <AwsButton
+                        variant="secondary"
+                        title={num(r, 'in_use_by_services') > 0 ? 'In use by an active service.' : undefined}
+                        disabled={num(r, 'in_use_by_services') > 0}
+                        onClick={() => deleteTaskDef.mutate(String(r.id))}
+                      >
+                        Deregister
+                      </AwsButton>
+                    ),
+                  },
+                ]}
+              />
+            )}
+          </AwsCard>
+  )
+  const servicesCard = (
+          <AwsCard title={`Services (${serviceRows.length})`}>
+            <form
+              className="mb-3 flex flex-wrap items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (svcName.trim() !== '' && svcTaskDef !== '') createService.mutate()
+              }}
+            >
+              <label htmlFor="ecs-svc-name" className="text-sm font-medium">Service name</label>
+              <input id="ecs-svc-name" value={svcName} onChange={(e) => setSvcName(e.target.value)} placeholder="web-svc" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
+              <label className="text-sm">
+                Launch type
+                <select value={svcLaunch} onChange={(e) => setSvcLaunch(e.target.value)} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm">
+                  <option value="EC2">EC2</option>
+                  <option value="FARGATE">Fargate</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                Cluster
+                <select value={svcCluster} onChange={(e) => setSvcCluster(e.target.value)} disabled={svcLaunch === 'FARGATE'} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm disabled:opacity-50">
+                  <option value="">— select —</option>
+                  {clusterRows.map((c) => (
+                    <option key={String(c.id)} value={String(c.id)}>{str(c, 'name')}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
+                Task definition
+                <select value={svcTaskDef} onChange={(e) => setSvcTaskDef(e.target.value)} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm">
+                  <option value="">— select —</option>
+                  {taskdefRows.map((t) => (
+                    <option key={String(t.id)} value={String(t.id)}>{str(t, 'family')}:rev {num(t, 'revision')}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
+                Desired count
+                <input type="number" min={0} max={10} value={svcDesired} onChange={(e) => setSvcDesired(Number(e.target.value))} className="ml-2 w-16 rounded-sm border border-aws-border-dark px-2 py-1 text-sm" />
+              </label>
+              <AwsButton type="submit" disabled={createService.isPending}>Create service</AwsButton>
+            </form>
+            <AwsToolbar
+              right={
+                <>
+                  <AwsRefreshButton onClick={refresh} busy={services.isFetching} />
+                  <AwsPreferencesButton />
+                </>
+              }
+            />
+            {services.data && (
+              <AwsTable<Rec>
+                caption="ECS services"
+                emptyMessage="No services yet. Create one above."
+                rows={filteredServices}
+                totalCount={serviceRows.length}
+                filter={svcFilter}
+                onFilterChange={setSvcFilter}
+                filterPlaceholder="Filter services by name"
+                columns={[
+                  { header: 'Service name', render: (r) => <span className="font-mono">{str(r, 'name')}</span> },
+                  { header: 'Launch type', render: (r) => str(r, 'launch_type') || '—' },
+                  {
+                    header: 'Status',
+                    render: (r) => (
+                      <span>
+                        {str(r, 'status') || '—'}
+                        {r.reconcile_throttled === true && (
+                          <span className="block text-xs text-aws-warning">Throttled: {typeof r.reconcile_throttle_reason === 'string' ? (r.reconcile_throttle_reason as string) : 'restarts paused — update the service to resume.'}</span>
+                        )}
+                      </span>
+                    ),
+                  },
+                  { header: 'Desired', render: (r) => String(num(r, 'desired_count')) },
+                  { header: 'Running', render: (r) => String(num(r, 'running_count')) },
+                  {
+                    header: 'Actions',
+                    render: (r) => (
+                      <span className="flex gap-2">
+                        <AwsButton variant="secondary" disabled={num(r, 'desired_count') >= 10} onClick={() => updateService.mutate({ id: String(r.id), desired: num(r, 'desired_count') + 1 })}>Scale +1</AwsButton>
+                        <AwsButton variant="secondary" disabled={num(r, 'desired_count') <= 0} onClick={() => updateService.mutate({ id: String(r.id), desired: num(r, 'desired_count') - 1 })}>Scale −1</AwsButton>
+                        <AwsButton variant="secondary" onClick={() => deleteService.mutate(String(r.id))}>Delete</AwsButton>
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+            )}
+          </AwsCard>
+  )
+  const tasksCard = (
+          <AwsCard title={`Tasks (${taskRows.length}) — EC2 and Fargate runs`}>
+            <form
+              className="mb-3 flex flex-wrap items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (runTaskDef !== '') runTask.mutate()
+              }}
+            >
+              <label className="text-sm font-medium">
+                Run task
+                <select value={runTaskDef} onChange={(e) => setRunTaskDef(e.target.value)} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm">
+                  <option value="">— task definition —</option>
+                  {taskdefRows.map((t) => (
+                    <option key={String(t.id)} value={String(t.id)}>{str(t, 'family')}:rev {num(t, 'revision')}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
+                Launch type
+                <select value={runLaunch} onChange={(e) => setRunLaunch(e.target.value)} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm">
+                  <option value="EC2">EC2</option>
+                  <option value="FARGATE">Fargate (serverless — no cluster)</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                Cluster
+                <select value={runCluster} onChange={(e) => setRunCluster(e.target.value)} disabled={runLaunch === 'FARGATE'} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm disabled:opacity-50">
+                  <option value="">— select —</option>
+                  {clusterRows.map((c) => (
+                    <option key={String(c.id)} value={String(c.id)}>{str(c, 'name')}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm">
+                Count
+                <input type="number" min={1} max={10} value={runCount} onChange={(e) => setRunCount(Number(e.target.value))} className="ml-2 w-16 rounded-sm border border-aws-border-dark px-2 py-1 text-sm" />
+              </label>
+              <AwsButton type="submit" disabled={runTask.isPending}>Run task</AwsButton>
+            </form>
+            <AwsToolbar
+              right={
+                <>
+                  <AwsRefreshButton onClick={refresh} busy={tasks.isFetching} />
+                  <AwsPreferencesButton />
+                </>
+              }
+            />
+            {tasks.data && (
+              <AwsTable<Rec>
+                caption="ECS tasks"
+                emptyMessage="No tasks yet. Run one above, or create a service."
+                rows={filteredTasks}
+                totalCount={taskRows.length}
+                filter={taskFilter}
+                onFilterChange={setTaskFilter}
+                filterPlaceholder="Filter tasks by name"
+                columns={[
+                  { header: 'Task', render: (r) => <span className="font-mono text-xs">{str(r, 'name')}</span> },
+                  { header: 'Launch type', render: (r) => str(r, 'launch_type') || '—' },
+                  { header: 'Status', render: (r) => str(r, 'status') || '—' },
+                  { header: 'Exit code', render: (r) => (typeof r.exit_code === 'number' ? String(r.exit_code as number) : '—') },
+                  { header: 'Command', render: (r) => <span className="font-mono text-xs">{Array.isArray(r.command) ? (r.command as string[]).join(' ') : '—'}</span> },
+                  {
+                    header: 'Actions',
+                    render: (r) => (
+                      <span className="flex gap-2">
+                        <AwsButton variant="secondary" onClick={() => setLogTaskId(String(r.id))}>Logs</AwsButton>
+                        <AwsButton
+                          variant="secondary"
+                          disabled={str(r, 'status') !== 'RUNNING'}
+                          title={str(r, 'status') !== 'RUNNING' ? 'Only a RUNNING task can be stopped.' : str(r, 'service_id') !== '' ? 'Service-managed task — scale the service instead.' : undefined}
+                          onClick={() => stopTask.mutate(String(r.id))}
+                        >
+                          Stop
+                        </AwsButton>
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+            )}
+            {logTaskId !== '' && (
+              <div className="mt-4 border-t border-aws-border pt-3">
+                <h3 className="mb-2 text-sm font-semibold">Task logs <span className="font-mono text-xs font-normal text-aws-muted">{logTaskId}</span></h3>
+                {logs.isPending && <Loading label="Loading logs" />}
+                {logs.data && (
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-sm border border-aws-border bg-[#f7f7f7] p-3 font-mono text-xs">
+                    {typeof logs.data.logs === 'string' ? (logs.data.logs as string) : typeof logs.data.note === 'string' ? (logs.data.note as string) : 'No log output.'}
+                  </pre>
+                )}
+              </div>
+            )}
+            <p className="mt-3 text-xs text-aws-muted">
+              Runtime: subprocess sandbox — timeout + output cap + temp workdir + prlimit memory cap + uid 65534 (nobody). Fargate runs use the same runtime with no cluster to manage.
+            </p>
+          </AwsCard>
+  )
+  const clusterDetail = selCluster ? (
+    <AwsCard title={`Cluster detail — ${str(selCluster, 'name')}`}>
+      <ConsoleTabs
+        tabs={[
+          { id: 'overview', label: 'Overview' },
+          { id: 'services', label: 'Services' },
+          { id: 'tasks', label: 'Tasks' },
+        ]}
+        active={clusterTab}
+        onChange={(id) => setClusterTab(id as typeof clusterTab)}
+      />
+      <div className="mt-3">
+        {clusterTab === 'overview' && (
+          <dl className="grid grid-cols-2 gap-2 text-sm">
+            <dt className="font-medium">Cluster name</dt><dd>{str(selCluster, 'name')}</dd>
+            <dt className="font-medium">Cluster id</dt><dd><code className="text-xs">{String(selCluster.id)}</code></dd>
+            <dt className="font-medium">Status</dt><dd>{str(selCluster, 'status') || '—'}</dd>
+            <dt className="font-medium">Running tasks</dt><dd>{String(num(selCluster, 'running_tasks'))}</dd>
+            <dt className="font-medium">Services</dt><dd>{String(clusterServices.length)}</dd>
+            <dt className="font-medium">Tasks</dt><dd>{String(clusterTasks.length)}</dd>
+          </dl>
+        )}
+        {clusterTab === 'services' && (
+          <AwsTable<Rec>
+            caption="Services in this cluster"
+            emptyMessage="No services in this cluster."
+            rows={clusterServices}
+            totalCount={clusterServices.length}
+            columns={[
+              { header: 'Service name', render: (r) => <span className="font-mono">{str(r, 'name')}</span> },
+              { header: 'Launch type', render: (r) => str(r, 'launch_type') || '—' },
+              { header: 'Status', render: (r) => str(r, 'status') || '—' },
+              { header: 'Desired', render: (r) => String(num(r, 'desired_count')) },
+              { header: 'Running', render: (r) => String(num(r, 'running_count')) },
+            ]}
+          />
+        )}
+        {clusterTab === 'tasks' && (
+          <AwsTable<Rec>
+            caption="Tasks in this cluster"
+            emptyMessage="No tasks in this cluster."
+            rows={clusterTasks}
+            totalCount={clusterTasks.length}
+            columns={[
+              { header: 'Task', render: (r) => <span className="font-mono text-xs">{str(r, 'name')}</span> },
+              { header: 'Launch type', render: (r) => str(r, 'launch_type') || '—' },
+              { header: 'Status', render: (r) => str(r, 'status') || '—' },
+              { header: 'Exit code', render: (r) => (typeof r.exit_code === 'number' ? String(r.exit_code as number) : '—') },
+            ]}
+          />
+        )}
+      </div>
+    </AwsCard>
+  ) : null
+
   return (
-    <ConsoleWithHome
+    <ServiceConsole
       icon="layers"
       breadcrumb={[{ label: 'CloudForge', to: '/' }, { label: 'Containers', to: '/services' }, { label: 'ECS' }]}
       title="ECS — Clusters, Task Definitions, Services, Tasks"
       description="Container orchestration on a real sandboxed subprocess runtime: no Docker here, so no container is started and no image is pulled — the task command runs with resource limits and its status comes from the real process."
       fidelity="PARTIAL"
       fidelityFootnote="subprocess runtime · no Docker · no VPC networking"
-      homeLabel="ECS dashboard"
-      listLabel="Clusters"
-      initialSection={initialSection}
-      home={(goToList) => (
-          <ServiceHomeDashboard
-            serviceName="ECS"
-            banner="Clusters, task definitions, services and tasks are real records; the runtime is SIMULATED — a task command runs as a sandboxed subprocess on the API host, no Docker container is started and no image is pulled."
-            actions={[
-              { label: 'Create cluster', primary: true, onClick: goToList },
-            { label: 'Open Fargate (serverless runs)', to: '/services/fargate' },
-            ]}
-            cards={[
-              { label: 'Clusters', count: clusterRows.length, onSelect: goToList },
-            { label: 'Task definitions', count: taskdefRows.length, onSelect: goToList },
-            { label: 'Services', count: serviceRows.length, onSelect: goToList },
-            { label: 'Tasks', count: taskRows.length, onSelect: goToList, note: 'Status comes from the real process' },
-            { label: 'Fargate', count: '—', to: '/services/fargate', note: 'Same runtime, launch type FARGATE, no cluster to manage' },
-            ]}
-            onRefresh={() => void queryClient.invalidateQueries()}
-            refreshing={clusters.isFetching}
-            health={[
-              "clusters.isError ? 'Clusters could not be loaded.' : `${clusterRows.length} cluster(s), ${serviceRows.length} service(s), ${taskRows.length} task(s).`",
-            "Desired count is reconciled on every read and when a task stops; logs are real process output.",
-            ]}
-            settings={[
-              { label: 'Resource Explorer', to: '/explorer' },
-              { label: 'All services', to: '/services' },
-            ]}
-            info={[
-              { label: 'Learning Center — containers track', to: '/learn' },
-            { label: 'EKS (unsupported — Kubernetes concepts)', to: '/services/eks' },
-            ]}
-          />
-        )}
+      subNav={[
+        { id: 'home', label: 'ECS dashboard' },
+        { id: 'search', label: 'Search ECS resources' },
+        { id: 'favorites', label: 'Favorites and recents' },
+        { id: 'express', label: 'Express Mode' },
+        { id: 'clusters', label: 'Clusters' },
+        { id: 'gateways', label: 'Gateways', badge: 'New' },
+        { id: 'namespaces', label: 'Namespaces' },
+        { id: 'task-definitions', label: 'Task definitions' },
+        { id: 'daemon-definitions', label: 'Daemon task definitions' },
+        { id: 'services', label: 'Services' },
+        { id: 'tasks', label: 'Tasks' },
+        { id: 'account', label: 'Account settings' },
+      ]}
+      activeSub={section}
+      onSubChange={setSection}
     >
+      {section === 'home' && (
+
+                  <ServiceHomeDashboard
+                    serviceName="ECS"
+                    banner="Clusters, task definitions, services and tasks are real records; the runtime is SIMULATED — a task command runs as a sandboxed subprocess on the API host, no Docker container is started and no image is pulled."
+                    actions={[
+                      { label: 'Create cluster', primary: true, onClick: goToList },
+                    { label: 'Open Fargate (serverless runs)', to: '/services/fargate' },
+                    ]}
+                    cards={[
+                      { label: 'Clusters', count: clusterRows.length, onSelect: goToList },
+                    { label: 'Task definitions', count: taskdefRows.length, onSelect: goToList },
+                    { label: 'Services', count: serviceRows.length, onSelect: goToList },
+                    { label: 'Tasks', count: taskRows.length, onSelect: goToList, note: 'Status comes from the real process' },
+                    { label: 'Fargate', count: '—', to: '/services/fargate', note: 'Same runtime, launch type FARGATE, no cluster to manage' },
+                    ]}
+                    onRefresh={() => void queryClient.invalidateQueries()}
+                    refreshing={clusters.isFetching}
+                    health={[
+                      clusters.isError ? 'Clusters could not be loaded.' : `${clusterRows.length} cluster(s), ${serviceRows.length} service(s), ${taskRows.length} task(s).`,
+                    "Desired count is reconciled on every read and when a task stops; logs are real process output.",
+                    ]}
+                    settings={[
+                      { label: 'Resource Explorer', to: '/explorer' },
+                      { label: 'All services', to: '/services' },
+                    ]}
+                    info={[
+                      { label: 'Learning Center — containers track', to: '/learn' },
+                    { label: 'EKS (unsupported — Kubernetes concepts)', to: '/services/eks' },
+                    ]}
+                  />
+      )}
       {notice !== '' && <p className="border border-aws-border bg-white px-4 py-2 text-sm" role="status">{notice}</p>}
-
-      <AwsCard title={`Clusters (${clusterRows.length})`}>
-        <form
-          className="mb-3 flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (clusterName.trim() !== '') createCluster.mutate()
-          }}
-        >
-          <label htmlFor="ecs-cluster-name" className="text-sm font-medium">Cluster name</label>
-          <input id="ecs-cluster-name" value={clusterName} onChange={(e) => setClusterName(e.target.value)} placeholder="web" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
-          <AwsButton type="submit" disabled={createCluster.isPending}>Create cluster</AwsButton>
-        </form>
-        {clusters.isPending && <Loading label="Loading clusters" />}
-        {clusters.isError && <ErrorBox message={`Clusters could not be loaded (${clusters.error.message}).`} />}
-        {clusters.data && (
-          <AwsTable<Rec>
-            caption="ECS clusters"
-            emptyMessage="No clusters yet. Create one above."
-            rows={clusterRows}
-            columns={[
-              { header: 'Cluster name', render: (r) => <span className="font-mono">{str(r, 'name')}</span> },
-              { header: 'Status', render: (r) => str(r, 'status') || '—' },
-              { header: 'Running tasks', render: (r) => String(num(r, 'running_tasks')) },
-              {
-                header: 'Actions',
-                render: (r) => (
-                  <AwsButton
-                    variant="secondary"
-                    disabled={num(r, 'running_tasks') > 0}
-                    title={num(r, 'running_tasks') > 0 ? 'Stop the running tasks (or delete the services) first.' : undefined}
-                    onClick={() => deleteCluster.mutate(String(r.id))}
-                  >
-                    Delete
-                  </AwsButton>
-                ),
-              },
-            ]}
-          />
-        )}
-      </AwsCard>
-
-      <AwsCard title={`Task definitions (${taskdefRows.length})`}>
-        <form
-          className="mb-3 flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (family.trim() !== '') registerTaskDef.mutate()
-          }}
-        >
-          <label htmlFor="ecs-family" className="text-sm font-medium">Family</label>
-          <input id="ecs-family" value={family} onChange={(e) => setFamily(e.target.value)} placeholder="echoer" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
-          <label className="text-sm">
-            Image
-            <input value={image} onChange={(e) => setImage(e.target.value)} className="ml-2 w-48 rounded-sm border border-aws-border-dark bg-white px-2 py-1 font-mono text-xs" />
-          </label>
-          <label className="text-sm">
-            Command
-            <input value={command} onChange={(e) => setCommand(e.target.value)} className="ml-2 w-48 rounded-sm border border-aws-border-dark bg-white px-2 py-1 font-mono text-xs" />
-          </label>
-          <AwsButton type="submit" disabled={registerTaskDef.isPending}>Register task definition</AwsButton>
-        </form>
-        <p className="mb-3 text-xs text-aws-muted">CPU 256 / memory 128 MiB per container by default. A container definition without a command is rejected — the runtime needs a real command to run.</p>
-        {taskdefs.data && (
-          <AwsTable<Rec>
-            caption="ECS task definitions"
-            emptyMessage="No task definitions yet. Register one above."
-            rows={taskdefRows}
-            columns={[
-              { header: 'Family', render: (r) => <span className="font-mono">{str(r, 'family')}</span> },
-              { header: 'Revision', render: (r) => String(num(r, 'revision')) },
-              { header: 'Image', render: (r) => <span className="font-mono text-xs">{str(r, 'image') || '—'}</span> },
-              { header: 'Command', render: (r) => <span className="font-mono text-xs">{Array.isArray(r.command) ? (r.command as string[]).join(' ') : '—'}</span> },
-              {
-                header: 'Actions',
-                render: (r) => (
-                  <AwsButton
-                    variant="secondary"
-                    title={num(r, 'in_use_by_services') > 0 ? 'In use by an active service.' : undefined}
-                    disabled={num(r, 'in_use_by_services') > 0}
-                    onClick={() => deleteTaskDef.mutate(String(r.id))}
-                  >
-                    Deregister
-                  </AwsButton>
-                ),
-              },
-            ]}
-          />
-        )}
-      </AwsCard>
-
-      <AwsCard title={`Services (${serviceRows.length})`}>
-        <form
-          className="mb-3 flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (svcName.trim() !== '' && svcTaskDef !== '') createService.mutate()
-          }}
-        >
-          <label htmlFor="ecs-svc-name" className="text-sm font-medium">Service name</label>
-          <input id="ecs-svc-name" value={svcName} onChange={(e) => setSvcName(e.target.value)} placeholder="web-svc" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
-          <label className="text-sm">
-            Launch type
-            <select value={svcLaunch} onChange={(e) => setSvcLaunch(e.target.value)} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm">
-              <option value="EC2">EC2</option>
-              <option value="FARGATE">Fargate</option>
-            </select>
-          </label>
-          <label className="text-sm">
-            Cluster
-            <select value={svcCluster} onChange={(e) => setSvcCluster(e.target.value)} disabled={svcLaunch === 'FARGATE'} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm disabled:opacity-50">
-              <option value="">— select —</option>
-              {clusterRows.map((c) => (
-                <option key={String(c.id)} value={String(c.id)}>{str(c, 'name')}</option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm">
-            Task definition
-            <select value={svcTaskDef} onChange={(e) => setSvcTaskDef(e.target.value)} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm">
-              <option value="">— select —</option>
-              {taskdefRows.map((t) => (
-                <option key={String(t.id)} value={String(t.id)}>{str(t, 'family')}:rev {num(t, 'revision')}</option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm">
-            Desired count
-            <input type="number" min={0} max={10} value={svcDesired} onChange={(e) => setSvcDesired(Number(e.target.value))} className="ml-2 w-16 rounded-sm border border-aws-border-dark px-2 py-1 text-sm" />
-          </label>
-          <AwsButton type="submit" disabled={createService.isPending}>Create service</AwsButton>
-        </form>
-        {services.data && (
-          <AwsTable<Rec>
-            caption="ECS services"
-            emptyMessage="No services yet. Create one above."
-            rows={serviceRows}
-            columns={[
-              { header: 'Service name', render: (r) => <span className="font-mono">{str(r, 'name')}</span> },
-              { header: 'Launch type', render: (r) => str(r, 'launch_type') || '—' },
-              {
-                header: 'Status',
-                render: (r) => (
-                  <span>
-                    {str(r, 'status') || '—'}
-                    {r.reconcile_throttled === true && (
-                      <span className="block text-xs text-aws-warning">Throttled: {typeof r.reconcile_throttle_reason === 'string' ? (r.reconcile_throttle_reason as string) : 'restarts paused — update the service to resume.'}</span>
-                    )}
-                  </span>
-                ),
-              },
-              { header: 'Desired', render: (r) => String(num(r, 'desired_count')) },
-              { header: 'Running', render: (r) => String(num(r, 'running_count')) },
-              {
-                header: 'Actions',
-                render: (r) => (
-                  <span className="flex gap-2">
-                    <AwsButton variant="secondary" disabled={num(r, 'desired_count') >= 10} onClick={() => updateService.mutate({ id: String(r.id), desired: num(r, 'desired_count') + 1 })}>Scale +1</AwsButton>
-                    <AwsButton variant="secondary" disabled={num(r, 'desired_count') <= 0} onClick={() => updateService.mutate({ id: String(r.id), desired: num(r, 'desired_count') - 1 })}>Scale −1</AwsButton>
-                    <AwsButton variant="secondary" onClick={() => deleteService.mutate(String(r.id))}>Delete</AwsButton>
-                  </span>
-                ),
-              },
-            ]}
-          />
-        )}
-      </AwsCard>
-
-      <AwsCard title={`Tasks (${taskRows.length}) — EC2 and Fargate runs`}>
-        <form
-          className="mb-3 flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (runTaskDef !== '') runTask.mutate()
-          }}
-        >
-          <label className="text-sm font-medium">
-            Run task
-            <select value={runTaskDef} onChange={(e) => setRunTaskDef(e.target.value)} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm">
-              <option value="">— task definition —</option>
-              {taskdefRows.map((t) => (
-                <option key={String(t.id)} value={String(t.id)}>{str(t, 'family')}:rev {num(t, 'revision')}</option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm">
-            Launch type
-            <select value={runLaunch} onChange={(e) => setRunLaunch(e.target.value)} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm">
-              <option value="EC2">EC2</option>
-              <option value="FARGATE">Fargate (serverless — no cluster)</option>
-            </select>
-          </label>
-          <label className="text-sm">
-            Cluster
-            <select value={runCluster} onChange={(e) => setRunCluster(e.target.value)} disabled={runLaunch === 'FARGATE'} className="ml-2 rounded-sm border border-aws-border-dark bg-white px-2 py-1 text-sm disabled:opacity-50">
-              <option value="">— select —</option>
-              {clusterRows.map((c) => (
-                <option key={String(c.id)} value={String(c.id)}>{str(c, 'name')}</option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm">
-            Count
-            <input type="number" min={1} max={10} value={runCount} onChange={(e) => setRunCount(Number(e.target.value))} className="ml-2 w-16 rounded-sm border border-aws-border-dark px-2 py-1 text-sm" />
-          </label>
-          <AwsButton type="submit" disabled={runTask.isPending}>Run task</AwsButton>
-        </form>
-        {tasks.data && (
-          <AwsTable<Rec>
-            caption="ECS tasks"
-            emptyMessage="No tasks yet. Run one above, or create a service."
-            rows={taskRows}
-            columns={[
-              { header: 'Task', render: (r) => <span className="font-mono text-xs">{str(r, 'name')}</span> },
-              { header: 'Launch type', render: (r) => str(r, 'launch_type') || '—' },
-              { header: 'Status', render: (r) => str(r, 'status') || '—' },
-              { header: 'Exit code', render: (r) => (typeof r.exit_code === 'number' ? String(r.exit_code as number) : '—') },
-              { header: 'Command', render: (r) => <span className="font-mono text-xs">{Array.isArray(r.command) ? (r.command as string[]).join(' ') : '—'}</span> },
-              {
-                header: 'Actions',
-                render: (r) => (
-                  <span className="flex gap-2">
-                    <AwsButton variant="secondary" onClick={() => setLogTaskId(String(r.id))}>Logs</AwsButton>
-                    <AwsButton
-                      variant="secondary"
-                      disabled={str(r, 'status') !== 'RUNNING'}
-                      title={str(r, 'status') !== 'RUNNING' ? 'Only a RUNNING task can be stopped.' : str(r, 'service_id') !== '' ? 'Service-managed task — scale the service instead.' : undefined}
-                      onClick={() => stopTask.mutate(String(r.id))}
-                    >
-                      Stop
-                    </AwsButton>
-                  </span>
-                ),
-              },
-            ]}
-          />
-        )}
-        {logTaskId !== '' && (
-          <div className="mt-4 border-t border-aws-border pt-3">
-            <h3 className="mb-2 text-sm font-semibold">Task logs <span className="font-mono text-xs font-normal text-aws-muted">{logTaskId}</span></h3>
-            {logs.isPending && <Loading label="Loading logs" />}
-            {logs.data && (
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-sm border border-aws-border bg-[#f7f7f7] p-3 font-mono text-xs">
-                {typeof logs.data.logs === 'string' ? (logs.data.logs as string) : typeof logs.data.note === 'string' ? (logs.data.note as string) : 'No log output.'}
-              </pre>
-            )}
-          </div>
-        )}
-        <p className="mt-3 text-xs text-aws-muted">
-          Runtime: subprocess sandbox — timeout + output cap + temp workdir + prlimit memory cap + uid 65534 (nobody). Fargate runs use the same runtime with no cluster to manage.
-        </p>
-      </AwsCard>
-    </ConsoleWithHome>
+      {section === 'clusters' && (<>{clustersCard}{taskDefsCard}{servicesCard}{tasksCard}{clusterDetail}</>)}
+      {section === 'task-definitions' && taskDefsCard}
+      {section === 'services' && servicesCard}
+      {section === 'tasks' && tasksCard}
+      {section === 'search' && (
+        <UnsupportedSection
+          title="Search ECS resources"
+          reason="Search ECS resources is UNSUPPORTED in CloudForge — there is no cross-resource search API. Use the filter on each list instead."
+          actionLabel="Search ECS resources"
+        />
+      )}
+      {section === 'favorites' && (
+        <UnsupportedSection
+          title="Favorites and recents"
+          reason="Favorites and recents are UNSUPPORTED in CloudForge — no favorites are stored."
+          actionLabel="Add favorite"
+        />
+      )}
+      {section === 'express' && (
+        <UnsupportedSection
+          title="Express Mode"
+          reason="Express Mode is UNSUPPORTED in CloudForge — there is no express cluster-creation flow. Use Create cluster on the Clusters section."
+          actionLabel="Create cluster (Express Mode)"
+        />
+      )}
+      {section === 'gateways' && (
+        <UnsupportedSection
+          title="Gateways"
+          reason="Gateways are UNSUPPORTED in CloudForge — there is no gateway API."
+          actionLabel="Create gateway"
+        />
+      )}
+      {section === 'namespaces' && (
+        <UnsupportedSection
+          title="Namespaces"
+          reason="Namespaces are UNSUPPORTED in CloudForge — there is no service-discovery namespace API."
+          actionLabel="Create namespace"
+        />
+      )}
+      {section === 'daemon-definitions' && (
+        <UnsupportedSection
+          title="Daemon task definitions"
+          reason="Daemon task definitions are UNSUPPORTED in CloudForge — there is no daemon scheduling; task definitions run as one-off tasks or services."
+          actionLabel="Register daemon task definition"
+        />
+      )}
+      {section === 'account' && (
+        <UnsupportedSection
+          title="Account settings"
+          reason="Account settings are UNSUPPORTED in CloudForge — no account settings are stored."
+          actionLabel="Save account settings"
+        />
+      )}
+    </ServiceConsole>
   )
 }

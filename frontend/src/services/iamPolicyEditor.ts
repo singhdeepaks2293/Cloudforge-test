@@ -357,3 +357,202 @@ export function visualValidationErrors(statements: VisualStatement[]): string[] 
   })
   return errors
 }
+
+// --- Access-level action groups (survey 2026-11-22) -------------------------
+//
+// AWS groups a service's actions into List / Read / Write / Permissions
+// management / Tagging with counts. CloudForge groups its own picker
+// actions the same way, client-side, from the action verb — this is a
+// display grouping only; the backend evaluates the actions themselves,
+// not the group they sit in.
+
+export type AccessLevel = 'List' | 'Read' | 'Write' | 'Permissions management' | 'Tagging'
+
+/** Access level for one action, from its verb (CloudForge's grouping, not AWS's). */
+export function accessLevelForAction(action: string): AccessLevel {
+  const verb = action.includes(':') ? action.split(':')[1] : action
+  if (/^(Tag|Untag)/.test(verb)) return 'Tagging'
+  if (/Policy|Permission|Attach|Detach|PassRole|Acl$|Grant/.test(verb)) return 'Permissions management'
+  if (/^(List|Describe)/.test(verb)) return 'List'
+  if (/^(Get|Head|BatchGet|Check|Lookup|Select|Query|Scan)/.test(verb)) return 'Read'
+  return 'Write'
+}
+
+export interface ActionGroup {
+  level: AccessLevel
+  actions: string[]
+}
+
+/** A service's picker actions grouped by access level, with counts. Empty groups are omitted. */
+export function groupServiceActions(service: ServiceActions): ActionGroup[] {
+  const levels: AccessLevel[] = ['List', 'Read', 'Write', 'Permissions management', 'Tagging']
+  return levels
+    .map((level) => ({ level, actions: service.actions.filter((a) => accessLevelForAction(a) === level) }))
+    .filter((g) => g.actions.length > 0)
+}
+
+// --- Client-side policy linter (survey 2026-11-22) --------------------------
+//
+// AWS shows a Policy Linter panel (Security / Errors / Warnings /
+// Suggestions). This is a basic client-side linter over the stored
+// document grammar only: it cannot see AWS's managed-policy rules or
+// the account, so it says what it checked and never claims an AWS
+// lint result. The backend still validates on create.
+
+export interface LintFinding {
+  category: 'Security' | 'Errors' | 'Warnings' | 'Suggestions'
+  message: string
+}
+
+export function lintPolicyDocument(doc: unknown): LintFinding[] {
+  const findings: LintFinding[] = []
+  if (!isRecord(doc)) {
+    findings.push({ category: 'Errors', message: 'Policy document must be a JSON object.' })
+    return findings
+  }
+  const rawStatements = doc.Statement
+  if (!Array.isArray(rawStatements) || rawStatements.length === 0) {
+    findings.push({ category: 'Errors', message: 'Policy must contain at least one Statement.' })
+    return findings
+  }
+  rawStatements.forEach((raw, i) => {
+    const n = i + 1
+    if (!isRecord(raw)) {
+      findings.push({ category: 'Errors', message: `Statement ${n} is not a JSON object.` })
+      return
+    }
+    const actions = asStringList(raw.Action)
+    const resources = asStringList(raw.Resource)
+    if (actions === null || actions.length === 0) {
+      findings.push({ category: 'Errors', message: `Statement ${n}: Action is required and must be a string or a list of strings.` })
+    }
+    if (resources === null || resources.length === 0) {
+      findings.push({ category: 'Errors', message: `Statement ${n}: Resource is required and must be a string or a list of strings.` })
+    }
+    if (raw.Effect !== 'Allow' && raw.Effect !== 'Deny') {
+      findings.push({ category: 'Errors', message: `Statement ${n}: Effect must be Allow or Deny.` })
+    }
+    if (actions === null || resources === null) return
+    const allActions = actions.some((a) => a === '*' || a.endsWith(':*'))
+    const allResources = resources.includes('*')
+    const writeActions = actions.filter((a) => accessLevelForAction(a) === 'Write' || accessLevelForAction(a) === 'Permissions management')
+    if (raw.Effect === 'Allow' && allActions && allResources) {
+      findings.push({ category: 'Security', message: `Statement ${n}: allows all actions on all resources — an overly broad grant. Narrow the actions or the resources.` })
+    } else if (raw.Effect === 'Allow' && allResources && writeActions.length > 0) {
+      findings.push({ category: 'Warnings', message: `Statement ${n}: write actions (${writeActions.join(', ')}) apply to all resources (*). Consider specific ARNs.` })
+    }
+    if (raw.Effect === 'Allow' && allResources && actions.some((a) => /^(iam|kms|sts):/.test(a))) {
+      findings.push({ category: 'Security', message: `Statement ${n}: identity/security actions (${actions.filter((a) => /^(iam|kms|sts):/.test(a)).join(', ')}) apply to all resources — scope them to specific ARNs.` })
+    }
+    if (allResources && actions.length > 0 && !allActions) {
+      findings.push({ category: 'Suggestions', message: `Statement ${n}: replace Resource "*" with the specific ARN(s) this statement needs.` })
+    }
+  })
+  return findings
+}
+
+// --- Permissions summary (review step + policy detail) -----------------------
+
+export interface PolicySummaryRow {
+  service: string
+  accessLevel: string
+  resource: string
+  condition: string
+}
+
+/**
+ * One summary row per statement, as the AWS Permissions summary shows
+ * (Service / Access level / Resource / Request condition). Derived
+ * from the stored document via the visual parse; unrepresentable
+ * documents return representable: false instead of a guessed summary.
+ */
+export function summarizePolicyDocument(doc: unknown): { rows: PolicySummaryRow[]; representable: boolean } {
+  const parsed = documentToVisual(doc)
+  if (!parsed.statements) return { rows: [], representable: false }
+  const rows = parsed.statements.map((st) => {
+    const actions = [...st.actions, st.customAction.trim()].filter((a) => a !== '')
+    const levels = [...new Set(actions.map(accessLevelForAction))]
+    const all = actions.some((a) => a === '*' || a.endsWith(':*'))
+    const accessLevel = all ? 'All' : levels.length > 1 ? `Limited: ${levels.join(', ')}` : (levels[0] ?? '—')
+    const service = serviceById(st.service)?.name ?? st.service
+    return {
+      service,
+      accessLevel,
+      resource: st.resources.trim() === '' ? '—' : st.resources,
+      condition: st.username.trim() !== '' ? `StringEquals aws:username = ${st.username.trim()}` : 'None',
+    }
+  })
+  return { rows, representable: true }
+}
+
+// --- CloudForge managed policies (import source) -----------------------------
+//
+// AWS's Import policy dialog lists 1,622 AWS managed policies.
+// CloudForge has no AWS managed-policy catalogue, so the import dialog
+// offers this built-in list of CloudForge sample policies instead —
+// real documents in the grammar the backend accepts, labelled as
+// CloudForge samples, never as AWS managed policies.
+
+export interface ManagedPolicy {
+  name: string
+  description: string
+  document: Record<string, unknown>
+}
+
+export const CLOUDFORGE_MANAGED_POLICIES: ManagedPolicy[] = [
+  {
+    name: 'CloudForgeReadOnly',
+    description: 'Read-only list/describe/get across S3, EC2, DynamoDB, Lambda and RDS.',
+    document: {
+      Version: '2012-10-17',
+      Statement: [
+        { Effect: 'Allow', Action: ['s3:ListBuckets', 's3:ListBucket', 's3:GetObject'], Resource: '*' },
+        { Effect: 'Allow', Action: ['ec2:DescribeInstances', 'ec2:DescribeVolumes'], Resource: '*' },
+        { Effect: 'Allow', Action: ['dynamodb:DescribeTable', 'dynamodb:GetItem', 'dynamodb:Query'], Resource: '*' },
+        { Effect: 'Allow', Action: ['lambda:ListFunctions', 'lambda:GetFunction'], Resource: '*' },
+        { Effect: 'Allow', Action: 'rds:DescribeDBInstances', Resource: '*' },
+      ],
+    },
+  },
+  {
+    name: 'CloudForgeS3ReadOnly',
+    description: 'List buckets and read objects; no writes.',
+    document: {
+      Version: '2012-10-17',
+      Statement: [
+        { Effect: 'Allow', Action: ['s3:ListBuckets', 's3:ListBucket', 's3:GetObject', 's3:GetBucketPolicy'], Resource: '*' },
+      ],
+    },
+  },
+  {
+    name: 'CloudForgeLambdaInvoke',
+    description: 'Invoke and inspect Lambda functions.',
+    document: {
+      Version: '2012-10-17',
+      Statement: [
+        { Effect: 'Allow', Action: ['lambda:InvokeFunction', 'lambda:ListFunctions', 'lambda:GetFunction'], Resource: '*' },
+      ],
+    },
+  },
+  {
+    name: 'CloudForgeMessagingSend',
+    description: 'Send/receive SQS messages and publish SNS topics.',
+    document: {
+      Version: '2012-10-17',
+      Statement: [
+        { Effect: 'Allow', Action: ['sqs:SendMessage', 'sqs:ReceiveMessage', 'sqs:ListQueues'], Resource: '*' },
+        { Effect: 'Allow', Action: ['sns:Publish', 'sns:ListTopics'], Resource: '*' },
+      ],
+    },
+  },
+  {
+    name: 'CloudForgeBillingReadOnly',
+    description: 'Read cost and usage data only.',
+    document: {
+      Version: '2012-10-17',
+      Statement: [
+        { Effect: 'Allow', Action: ['ce:GetCostAndUsage', 'ce:GetCostForecast'], Resource: '*' },
+      ],
+    },
+  },
+]

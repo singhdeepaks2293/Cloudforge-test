@@ -7,7 +7,7 @@ Base URL: same-origin in the Docker deployment (nginx proxies
 base. The frontend client (`frontend/src/services/api.ts`) uses
 relative URLs when `VITE_API_URL` is unset.
 
-Version: `0.9.0-m9` (see `GET /api/v1/health`).
+Version: `4.0.0` (see `GET /api/v1/health`).
 
 ## Conventions
 

@@ -5,8 +5,9 @@ import { AwsCard } from '../components/AwsCard.tsx'
 import { ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
-import { FidelityBadge } from '../components/AwsBadge.tsx'
-import { ServiceConsole } from '../components/ServiceConsole.tsx'
+import { FidelityBadge, StateBadge } from '../components/AwsBadge.tsx'
+import { ConsoleTabs, ServiceConsole } from '../components/ServiceConsole.tsx'
+import { UnsupportedSection } from '../components/UnsupportedSection.tsx'
 import { TransitGatewayListContent } from './NetworkingConsoles.tsx'
 import {
   AwsActionsMenu,
@@ -15,6 +16,7 @@ import {
   AwsRefreshButton,
   AwsStat,
   AwsToolbar,
+  AwsWizard,
 } from '../components/AwsShell.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import {
@@ -33,6 +35,17 @@ import {
   setResourceTags,
 } from '../services/api.ts'
 import { getStoredRegion } from '../services/catalog.ts'
+import {
+  fmtTime,
+  str,
+  useCustomerGateways,
+  useExamAction,
+  useExamCreate,
+  useExamDelete,
+  useVpnConnections,
+  useVpnGateways,
+  type Rec,
+} from '../services/examResources.ts'
 import type { LabResource } from '../types/index.ts'
 
 /**
@@ -51,10 +64,27 @@ import type { LabResource } from '../types/index.ts'
  * NACLs are API_EMULATED exam resources — durable records with real
  * stateless rule evaluation (lowest rule number first, default deny);
  * the ACL is not attached to any subnet and filters no live traffic.
+ * VPN is API-EMULATED too: customer gateways, VPN gateways and
+ * connections are durable records with tunnel activate/deactivate;
+ * the tunnel state is a teaching field — no IPsec tunnel exists and
+ * no traffic flows. Site-to-Site VPN Concentrators and Client VPN
+ * endpoints have no backend and stay disabled nav labels.
+ * v4 survey (2026-11-22): Your VPCs uses the survey's exact 17
+ * columns (Name, VPC ID, ARN, State, Encryption control ID/mode,
+ * Block Public Access, Automated internet firewall coverage, IPv4/IPv6
+ * CIDR, DHCP option set, Main route table, Main network ACL, Tenancy,
+ * Default VPC, Owner ID) with VPCs / VPC encryption controls tabs
+ * above the table; Subnets uses the survey's exact 22 columns;
+ * a selected VPC opens the survey's 6 observed detail tabs
+ * (Resource map, CIDRs, Flow logs, Tags, Related resources,
+ * Integrations); Create VPC is the observed wizard (VPC only /
+ * VPC and more, name tag, IPv4 CIDR manual or IPAM, IPv6, Tenancy,
+ * VPC encryption control, Tags). Columns the lab record has no
+ * value for render '—', never an invented value.
  */
-type Section = 'dashboard' | 'vpcs' | 'subnets' | 'routetables' | 'gateways' | 'nat' | 'securitygroups' | 'nacls' | 'vpn' | 'tgw'
+type Section = 'dashboard' | 'vpcs' | 'subnets' | 'routetables' | 'gateways' | 'nat' | 'securitygroups' | 'nacls' | 'vpn' | 'customer-gateways' | 'vpn-gateways' | 'tgw' | 'verified-access' | 'cloud-wan' | 'lattice' | 'dns-firewall'
 
-const SECTION_KIND: Record<Exclude<Section, 'gateways' | 'nat' | 'nacls' | 'dashboard' | 'vpn' | 'tgw'>, string> = {
+const SECTION_KIND: Record<Exclude<Section, 'gateways' | 'nat' | 'nacls' | 'dashboard' | 'vpn' | 'customer-gateways' | 'vpn-gateways' | 'tgw' | 'verified-access' | 'cloud-wan' | 'lattice' | 'dns-firewall'>, string> = {
   vpcs: 'vpc',
   subnets: 'subnet',
   routetables: 'route-table',
@@ -70,6 +100,20 @@ function cfgList(config: Record<string, unknown> | undefined, key: string): Reco
   return v.filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
 }
 
+/**
+ * Usable IPv4 addresses in a subnet CIDR, derived from the real CIDR
+ * (AWS reserves 5 addresses: network, router, DNS, future use,
+ * broadcast). Returns '—' when the CIDR is absent or unparseable.
+ */
+function availableIpv4(cidr: string | undefined): string {
+  if (!cidr) return '—'
+  const m = cidr.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)$/)
+  if (!m) return '—'
+  const prefix = Number(m[5])
+  if (prefix < 16 || prefix > 28) return '—'
+  return String(Math.max(0, 2 ** (32 - prefix) - 5))
+}
+
 function cfgStr(config: Record<string, unknown> | undefined, key: string): string {
   if (!config) return ''
   const v = config[key]
@@ -81,15 +125,21 @@ export function VpcConsole() {
   const [searchParams] = useSearchParams()
   const [section, setSection] = useState<Section>(() => {
     const fromUrl = searchParams.get('section')
-    return fromUrl === 'vpn' || fromUrl === 'tgw' || fromUrl === 'nacls' ? (fromUrl as Section) : 'dashboard'
+    return fromUrl === 'vpn' || fromUrl === 'customer-gateways' || fromUrl === 'vpn-gateways' || fromUrl === 'tgw' || fromUrl === 'nacls' || fromUrl === 'verified-access' || fromUrl === 'cloud-wan' || fromUrl === 'lattice' || fromUrl === 'dns-firewall' ? (fromUrl as Section) : 'dashboard'
   })
   const [labId, setLabId] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
+  // Tabs above the Your VPCs table (v4 survey): VPCs / VPC encryption controls.
+  const [vpcTab, setVpcTab] = useState<'vpcs' | 'encryption-controls'>('vpcs')
+  const [checkedIds, setCheckedIds] = useState<string[]>([])
   const region = getStoredRegion()
 
   const labs = useQuery({ queryKey: ['labs'], queryFn: fetchLabs, retry: 1 })
   const activeLabId = labId !== '' ? labId : (labs.data?.[0]?.id ?? '')
+  // VPN connections are real API-EMULATED records (exam.go); the
+  // dashboard card reads the same query the VPN section uses.
+  const vpnConnections = useVpnConnections()
   const resources = useQuery({
     queryKey: ['vpc-resources', activeLabId],
     queryFn: () => fetchLabResources(activeLabId),
@@ -107,6 +157,12 @@ export function VpcConsole() {
       case 'nacls':
         return []
       case 'vpn':
+      case 'customer-gateways':
+      case 'vpn-gateways':
+      case 'verified-access':
+      case 'cloud-wan':
+      case 'lattice':
+      case 'dns-firewall':
       case 'tgw':
         // Rendered by their own sections below, not the generic table.
         return []
@@ -129,6 +185,73 @@ export function VpcConsole() {
     },
     onError: (e: Error) => setNotice(`Delete failed: ${e.message}`),
   })
+
+  const idCell = (r: LabResource) => (
+    <button type="button" className="text-aws-link hover:underline" onClick={() => setSelectedId(r.id)}>
+      {r.id}
+    </button>
+  )
+  // Your VPCs columns in the v4 survey's exact order (17). Only Name,
+  // VPC ID, State and IPv4 CIDR have real lab values; every other
+  // column renders '—' — CloudForge records no ARN, encryption
+  // control, Block Public Access, DHCP option set, main route table /
+  // network ACL, tenancy, default flag or owner id for a lab VPC.
+  const vpcColumns = [
+    { header: 'Name', render: (r: LabResource) => r.name },
+    { header: 'VPC ID', render: (r: LabResource) => idCell(r) },
+    { header: 'ARN', render: () => '—' },
+    { header: 'State', render: (r: LabResource) => r.state ?? '—' },
+    { header: 'Encryption control ID', render: () => '—' },
+    { header: 'Encryption control mode', render: () => '—' },
+    { header: 'Block Public Access', render: () => '—' },
+    { header: 'Automated internet firewall coverage', render: () => '—' },
+    { header: 'IPv4 CIDR', render: (r: LabResource) => r.cidr ?? '—' },
+    { header: 'IPv6 CIDR', render: () => '—' },
+    { header: 'DHCP option set', render: () => '—' },
+    { header: 'Main route table', render: () => '—' },
+    { header: 'Main network ACL', render: () => '—' },
+    { header: 'Tenancy', render: () => '—' },
+    { header: 'Default VPC', render: () => '—' },
+    { header: 'Owner ID', render: () => '—' },
+  ]
+  // Subnets columns in the v4 survey's exact order (22). Real values:
+  // Name, Subnet ID, State, VPC (parent), IPv4 CIDR, Available IPv4
+  // addresses (derived from the CIDR). CloudForge labs have no
+  // availability zones, IPv6, route-table or NACL attachment, so those
+  // columns render '—'.
+  const subnetColumns = [
+    { header: 'Name', render: (r: LabResource) => r.name },
+    { header: 'Subnet ID', render: (r: LabResource) => idCell(r) },
+    { header: 'ARN', render: () => '—' },
+    { header: 'State', render: (r: LabResource) => r.state ?? '—' },
+    { header: 'VPC', render: (r: LabResource) => r.parent_id ?? '—' },
+    { header: 'Block Public Access', render: () => '—' },
+    { header: 'Automated internet firewall connectivity type', render: () => '—' },
+    { header: 'IPv4 CIDR', render: (r: LabResource) => r.cidr ?? '—' },
+    { header: 'IPv6 CIDR', render: () => '—' },
+    { header: 'IPv6 CIDR association ID', render: () => '—' },
+    { header: 'Available IPv4 addresses', render: (r: LabResource) => availableIpv4(r.cidr) },
+    { header: 'Availability Zone', render: () => '—' },
+    { header: 'Network border group', render: () => '—' },
+    { header: 'Route table', render: () => '—' },
+    { header: 'Internet access', render: () => '—' },
+    { header: 'Network ACL', render: () => '—' },
+    { header: 'Default subnet', render: () => '—' },
+    { header: 'Auto-assign public IPv4', render: () => '—' },
+    { header: 'Auto-assign customer-owned IPv4', render: () => '—' },
+    { header: 'Customer-owned IPv4 pool', render: () => '—' },
+    { header: 'Auto-assign IPv6', render: () => '—' },
+    { header: 'Owner ID', render: () => '—' },
+  ]
+  const genericColumns = [
+    { header: 'ID', render: (r: LabResource) => idCell(r) },
+    { header: 'Name', render: (r: LabResource) => r.name },
+    { header: 'CIDR', render: (r: LabResource) => r.cidr ?? '—' },
+    { header: 'State', render: (r: LabResource) => r.state ?? '—' },
+    { header: 'Parent', render: (r: LabResource) => r.parent_id ?? '—' },
+    { header: 'Fidelity', render: () => <FidelityBadge fidelity="PARTIAL" footnote="" /> },
+  ]
+  const tableColumns = section === 'vpcs' ? vpcColumns : section === 'subnets' ? subnetColumns : genericColumns
 
   return (
     <ServiceConsole
@@ -155,14 +278,44 @@ export function VpcConsole() {
         { id: 'peering', label: 'Peering Connections', group: 'Virtual private cloud', to: '/services/vpcpeering' },
         { id: 'route-servers', label: 'Route Servers', group: 'Virtual private cloud', disabledReason: 'No route-server API in CloudForge.' },
         { id: 'nacls', label: 'Network ACLs', group: 'Security' },
+        { id: 'dns-firewall-rules', label: 'Rule Groups', group: 'DNS Firewall', to: '/services/vpc?section=dns-firewall' },
+        { id: 'dns-firewall-domains', label: 'Domain Lists', group: 'DNS Firewall', to: '/services/vpc?section=dns-firewall' },
         { id: 'securitygroups', label: 'Security Groups', group: 'Security' },
+        { id: 'privatelink-start', label: 'Getting Started', group: 'PrivateLink and Lattice', disabledReason: 'No PrivateLink getting-started page in CloudForge.' },
         { id: 'endpoints', label: 'Endpoints', group: 'PrivateLink and Lattice', to: '/services/vpcendpoints' },
         { id: 'endpoint-services', label: 'Endpoint Services', group: 'PrivateLink and Lattice', disabledReason: 'No endpoint-service API in CloudForge.' },
+        { id: 'lattice-service-networks', label: 'Service Networks', group: 'PrivateLink and Lattice', disabledReason: 'No service-network API in CloudForge — Lattice is UNSUPPORTED.' },
+        { id: 'lattice-services', label: 'Lattice Services', group: 'PrivateLink and Lattice', disabledReason: 'No Lattice service API in CloudForge — Lattice is UNSUPPORTED.' },
+        { id: 'lattice-resource-configs', label: 'Resource Configurations', group: 'PrivateLink and Lattice', disabledReason: 'No Lattice resource-configuration API in CloudForge — Lattice is UNSUPPORTED.' },
+        { id: 'lattice-resource-gateways', label: 'Resource Gateways', group: 'PrivateLink and Lattice', disabledReason: 'No Lattice resource-gateway API in CloudForge — Lattice is UNSUPPORTED.' },
+        { id: 'lattice-target-groups', label: 'Target Groups', group: 'PrivateLink and Lattice', disabledReason: 'No Lattice target-group API in CloudForge — Lattice is UNSUPPORTED.' },
+        { id: 'lattice-domain-verifications', label: 'Domain Verifications', group: 'PrivateLink and Lattice', disabledReason: 'No Lattice domain-verification API in CloudForge — Lattice is UNSUPPORTED.' },
+        { id: 'lattice', label: 'Lattice', group: 'PrivateLink and Lattice' },
         { id: 'firewalls', label: 'Firewalls', group: 'Network Firewall', to: '/services/networkfirewall' },
+        { id: 'nfw-policies', label: 'Firewall Policies', group: 'Network Firewall', disabledReason: 'No Network Firewall policy API in CloudForge.' },
+        { id: 'nfw-rule-groups', label: 'Network Firewall Rule Groups', group: 'Network Firewall', disabledReason: 'No Network Firewall rule-group API in CloudForge.' },
+        { id: 'nfw-tls', label: 'TLS Inspection Configurations', group: 'Network Firewall', disabledReason: 'No TLS inspection API in CloudForge.' },
+        { id: 'nfw-resource-groups', label: 'Network Firewall Resource Groups', group: 'Network Firewall', disabledReason: 'No Network Firewall resource-group API in CloudForge.' },
+        { id: 'nfw-endpoint-assoc', label: 'VPC Endpoint Associations', group: 'Network Firewall', disabledReason: 'No Network Firewall endpoint-association API in CloudForge.' },
+        { id: 'nfw-containers', label: 'Container Associations', group: 'Network Firewall', disabledReason: 'No Network Firewall container-association API in CloudForge.' },
         { id: 'vpn', label: 'Site-to-Site VPN Connections', group: 'Virtual private network (VPN)' },
+        { id: 'customer-gateways', label: 'Customer Gateways', group: 'Virtual private network (VPN)' },
+        { id: 'vpn-gateways', label: 'Virtual Private Gateways', group: 'Virtual private network (VPN)' },
+        { id: 'concentrators', label: 'Site-to-Site VPN Concentrators', group: 'Virtual private network (VPN)', disabledReason: 'No concentrator API in CloudForge — concentrators are not modelled.' },
+        { id: 'client-vpn', label: 'Client VPN Endpoints', group: 'Virtual private network (VPN)', disabledReason: 'No Client VPN API in CloudForge — client VPN endpoints are not modelled.' },
+        { id: 'verified-access', label: 'Verified Access', group: 'Verified Access' },
         { id: 'tgw', label: 'Transit Gateways', group: 'Transit Gateways' },
+        { id: 'tgw-attachments', label: 'Transit Gateway Attachments', group: 'Transit Gateways', to: '/services/vpc?section=tgw' },
+        { id: 'tgw-policy-tables', label: 'Transit Gateway Policy Tables', group: 'Transit Gateways', to: '/services/vpc?section=tgw' },
+        { id: 'tgw-route-tables', label: 'Transit Gateway Route Tables', group: 'Transit Gateways', to: '/services/vpc?section=tgw' },
+        { id: 'tgw-multicast', label: 'Transit Gateway Multicast', group: 'Transit Gateways', disabledReason: 'No transit-gateway multicast API in CloudForge.' },
+        { id: 'tgw-metering', label: 'Metering Policies', group: 'Transit Gateways', disabledReason: 'No transit-gateway metering API in CloudForge.' },
         { id: 'mirroring', label: 'Mirror Sessions', group: 'Traffic Mirroring', disabledReason: 'No traffic-mirroring API in CloudForge.' },
+        { id: 'mirror-targets', label: 'Mirror Targets', group: 'Traffic Mirroring', disabledReason: 'No traffic-mirroring API in CloudForge.' },
+        { id: 'mirror-filters', label: 'Mirror Filters', group: 'Traffic Mirroring', disabledReason: 'No traffic-mirroring API in CloudForge.' },
+        { id: 'flex-cost', label: 'Networking Flexible Cost Allocation', disabledReason: 'No flexible cost-allocation API in CloudForge.' },
         { id: 'network-manager', label: 'Network Manager', to: '/explorer' },
+        { id: 'cloud-wan', label: 'Cloud WAN', group: 'Cloud WAN' },
         { id: 'ipam', label: 'VPC IP Address Manager', disabledReason: 'No IPAM API in CloudForge.' },
         { id: 'firewall-manager', label: 'Firewall Manager', disabledReason: 'No Firewall Manager console in CloudForge.' },
         { id: 'settings', label: 'Settings', disabledReason: 'No VPC console settings are stored in CloudForge.' },
@@ -171,6 +324,8 @@ export function VpcConsole() {
       onSubChange={(id) => {
         setSection(id as Section)
         setSelectedId(null)
+        setCheckedIds([])
+        setVpcTab('vpcs')
       }}
     >
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -231,7 +386,7 @@ export function VpcConsole() {
             { label: 'Elastic IPs', count: 0, disabledReason: 'No Elastic IP operation in CloudForge.' },
             { label: 'VPC Endpoints', count: '—', to: '/services/vpcendpoints', note: 'PrivateLink-style endpoints (SIMULATED)' },
             { label: 'Transit Gateways', count: '—', onSelect: () => setSection('tgw'), note: 'Attachments are real route-table entries (SIMULATED)' },
-            { label: 'Site-to-Site VPN Connections', count: 0, onSelect: () => setSection('vpn'), note: 'VPN is UNSUPPORTED — no VPN API; see the VPN section.' },
+            { label: 'Site-to-Site VPN Connections', count: vpnConnections.isPending ? '—' : vpnConnections.rows.length, onSelect: () => setSection('vpn'), note: 'API-EMULATED — customer gateways, VPN gateways and connections; tunnel state is a teaching field, no real IPsec tunnel.' },
           ]}
           onRefresh={refresh}
           refreshing={resources.isFetching}
@@ -255,51 +410,42 @@ export function VpcConsole() {
           ]}
         />
       )}
-      {section === 'vpn' && (
-        <div className="space-y-4">
-          <AwsFlash tone="info">
-            VPN is the VPC console&apos;s Virtual private network section — it has no standalone console (2026-11-22
-            survey). The old /services/vpn bookmark redirects here.
-          </AwsFlash>
-          <AwsCard title="VPN connections (0)">
-            <p className="mb-3 text-sm text-aws-muted">
-              VPN connections are <strong>UNSUPPORTED</strong> in CloudForge — there is no VPN API. Transit Gateway
-              attachments are the available hybrid-networking practice. The table below uses the survey&apos;s exact
-              VPN Connections columns; every column is empty because no connection can exist.
-            </p>
-            <AwsTable<{ id: string }>
-              caption="VPN connections"
-              emptyMessage="No VPN connections — VPN is UNSUPPORTED in CloudForge."
-              rows={[]}
-              totalCount={0}
-              columns={[
-                { header: 'Name', render: () => '—' },
-                { header: 'VPN ID', render: () => '—' },
-                { header: 'State', render: () => '—' },
-                { header: 'Virtual private gateway', render: () => '—' },
-                { header: 'Transit gateway', render: () => '—' },
-                { header: 'VPN Concentrator ID', render: () => '—' },
-                { header: 'Customer gateway', render: () => '—' },
-                { header: 'Customer gateway address', render: () => '—' },
-                { header: 'Inside IP version', render: () => '—' },
-                { header: 'Type', render: () => '—' },
-                { header: 'Category', render: () => '—' },
-                { header: 'VPC', render: () => '—' },
-                { header: 'Routing', render: () => '—' },
-                { header: 'Acceleration enabled', render: () => '—' },
-                { header: 'Authentication', render: () => '—' },
-                { header: 'Local/ Remote IPv4/IPv6 network CIDR', render: () => '—' },
-                { header: 'Core network ARN', render: () => '—' },
-                { header: 'Gateway association state', render: () => '—' },
-                { header: 'Outside IP address type', render: () => '—' },
-              ]}
-            />
-            <p className="mt-2 text-xs text-aws-muted">
-              Create VPN connection is disabled: there is no VPN API in CloudForge, so the survey&apos;s entry button
-              has no working target here.
-            </p>
-          </AwsCard>
-        </div>
+      {section === 'vpn' && <VpnConnectionsSection onNotice={setNotice} />}
+
+      {section === 'customer-gateways' && <CustomerGatewaysSection onNotice={setNotice} />}
+
+      {section === 'vpn-gateways' && <VpnGatewaysSection onNotice={setNotice} />}
+
+      {section === 'verified-access' && (
+        <UnsupportedSection
+          title="Verified Access"
+          reason="Verified Access (trust providers, groups and endpoints) is UNSUPPORTED in CloudForge — there is no Verified Access API and no identity-aware access evaluation."
+          actionLabel="Create Verified Access instance"
+        />
+      )}
+
+      {section === 'cloud-wan' && (
+        <UnsupportedSection
+          title="Cloud WAN"
+          reason="Cloud WAN (core networks, segments and attachments) is UNSUPPORTED in CloudForge — there is no Cloud WAN API and no global-network record."
+          actionLabel="Create core network"
+        />
+      )}
+
+      {section === 'lattice' && (
+        <UnsupportedSection
+          title="Lattice"
+          reason="Lattice (service networks, services and listeners) is UNSUPPORTED in CloudForge — there is no service-network API."
+          actionLabel="Create service network"
+        />
+      )}
+
+      {section === 'dns-firewall' && (
+        <UnsupportedSection
+          title="DNS Firewall"
+          reason="DNS Firewall (rule groups and domain lists) is UNSUPPORTED in CloudForge — there is no DNS Firewall API and no DNS filtering."
+          actionLabel="Create rule group"
+        />
       )}
 
       {section === 'tgw' && (
@@ -312,7 +458,7 @@ export function VpcConsole() {
         </div>
       )}
 
-      {section !== 'nacls' && section !== 'dashboard' && section !== 'vpn' && section !== 'tgw' && activeLabId !== '' && (
+      {section !== 'nacls' && section !== 'dashboard' && section !== 'vpn' && section !== 'customer-gateways' && section !== 'vpn-gateways' && section !== 'verified-access' && section !== 'cloud-wan' && section !== 'lattice' && section !== 'dns-firewall' && section !== 'tgw' && activeLabId !== '' && (
         <>
           {resources.data && (
             <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -322,14 +468,35 @@ export function VpcConsole() {
               <AwsStat label="Security groups" value={all.filter((r) => r.kind === 'security-group').length} />
             </div>
           )}
-          <CreateForm
-            section={section}
-            labId={activeLabId}
-            vpcs={vpcs}
-            gateways={all.filter((r) => r.kind === 'gateway')}
-            onCreated={refresh}
-            onNotice={setNotice}
-          />
+          {section === 'vpcs' ? (
+            <CreateVpcWizard labId={activeLabId} onCreated={refresh} onNotice={setNotice} />
+          ) : (
+            <CreateForm
+              section={section}
+              labId={activeLabId}
+              vpcs={vpcs}
+              gateways={all.filter((r) => r.kind === 'gateway')}
+              onCreated={refresh}
+              onNotice={setNotice}
+            />
+          )}
+          {section === 'vpcs' && (
+            <ConsoleTabs
+              tabs={[
+                { id: 'vpcs', label: 'VPCs' },
+                { id: 'encryption-controls', label: 'VPC encryption controls' },
+              ]}
+              active={vpcTab}
+              onChange={(id) => setVpcTab(id as 'vpcs' | 'encryption-controls')}
+            />
+          )}
+          {section === 'vpcs' && vpcTab === 'encryption-controls' ? (
+            <UnsupportedSection
+              title="VPC encryption controls"
+              reason="VPC encryption controls are UNSUPPORTED in CloudForge — there is no encryption-control API and no control is recorded for any VPC. The None / Monitor / Enforce choice in the Create VPC wizard is recorded as a VPC tag only; nothing is enforced."
+              actionLabel="Create encryption control"
+            />
+          ) : (
           <AwsCard title={`${sectionLabel(section)} (${rows.length}) — region ${region}`}>
             <AwsToolbar
               right={
@@ -363,17 +530,18 @@ export function VpcConsole() {
               emptyMessage={`No ${sectionLabel(section).toLowerCase()} recorded in this lab yet — create one above.`}
               rows={rows}
               totalCount={rows.length}
-              columns={[
-                { header: 'ID', render: (r) => <button type="button" className="text-aws-link hover:underline" onClick={() => setSelectedId(r.id)}>{r.id}</button> },
-                { header: 'Name', render: (r) => r.name },
-                { header: 'CIDR', render: (r) => r.cidr ?? '—' },
-                { header: 'State', render: (r) => r.state ?? '—' },
-                { header: 'Parent', render: (r) => r.parent_id ?? '—' },
-                { header: 'Fidelity', render: () => <FidelityBadge fidelity="PARTIAL" footnote="" /> },
-              ]}
+              selectable
+              selectedIds={checkedIds}
+              onToggleRow={(id) => {
+                setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [id]))
+                setSelectedId(id)
+              }}
+              onToggleAll={(checked) => setCheckedIds(checked ? rows.map((r) => r.id) : [])}
+              columns={tableColumns}
             />
             {selected && (
               <ResourceDetail
+                key={selected.id}
                 resource={selected}
                 labId={activeLabId}
                 all={all}
@@ -383,6 +551,7 @@ export function VpcConsole() {
               />
             )}
           </AwsCard>
+          )}
         </>
       )}
     </ServiceConsole>
@@ -643,8 +812,376 @@ function sectionLabel(section: Section): string {
     case 'securitygroups': return 'Security Groups'
     case 'nacls': return 'Network ACLs'
     case 'vpn': return 'Site-to-Site VPN Connections'
+    case 'customer-gateways': return 'Customer Gateways'
+    case 'vpn-gateways': return 'Virtual Private Gateways'
+    case 'verified-access': return 'Verified Access'
+    case 'cloud-wan': return 'Cloud WAN'
+    case 'lattice': return 'Lattice'
+    case 'dns-firewall': return 'DNS Firewall'
     case 'tgw': return 'Transit Gateways'
   }
+}
+
+/**
+ * Create VPC wizard — the observed AWS wizard steps (v4 survey,
+ * 2026-11-22, all left via Cancel, nothing submitted): Resources to
+ * create (VPC only / VPC and more), Name tag, IPv4 CIDR (manual or
+ * IPAM), IPv6 options, Tenancy, VPC encryption control, Tags.
+ * "VPC and more" uses the survey's observed defaults: name
+ * "project", 10.0.0.0/16, 2 AZs, 2 public + 2 private subnets, NAT
+ * None, S3 Gateway endpoint, DNS hostnames + resolution checked.
+ * What it really creates (all through the real lab-resources API):
+ * the VPC, plus for "VPC and more" on a /16 CIDR the 4 subnets, 1
+ * internet gateway and 3 route tables. There is no IPAM, no IPv6,
+ * no dedicated tenancy, no encryption-control API and no gateway
+ * endpoint in CloudForge labs, so those choices are disabled or
+ * recorded as VPC tags only — the wizard says so at each step, and
+ * the success notice lists what was NOT created (S3 Gateway
+ * endpoint, DNS hostnames/resolution — not modelled).
+ */
+const VPC_WIZARD_STEPS = [
+  'Resources to create',
+  'Name tag',
+  'IPv4 CIDR',
+  'IPv6 options',
+  'Tenancy',
+  'VPC encryption control',
+  'Tags',
+]
+
+function CreateVpcWizard({ labId, onCreated, onNotice }: {
+  labId: string
+  onCreated: () => void
+  onNotice: (s: string) => void
+}) {
+  const [step, setStep] = useState(0)
+  const [mode, setMode] = useState<'only' | 'more'>('only')
+  const [name, setName] = useState('')
+  const [cidr, setCidr] = useState('10.0.0.0/16')
+  const [cidrSource, setCidrSource] = useState<'manual' | 'ipam'>('manual')
+  const [ipv6, setIpv6] = useState<'none' | 'ipam' | 'amazon' | 'owned'>('none')
+  const [tenancy, setTenancy] = useState<'default' | 'dedicated'>('default')
+  const [encControl, setEncControl] = useState<'none' | 'monitor' | 'enforce'>('none')
+  const [azs, setAzs] = useState(2)
+  const [publicSubnets, setPublicSubnets] = useState(2)
+  const [privateSubnets, setPrivateSubnets] = useState(2)
+  const [nat, setNat] = useState<'none' | 'one' | 'per-az'>('none')
+  const [s3Endpoint, setS3Endpoint] = useState(true)
+  const [dnsHostnames, setDnsHostnames] = useState(true)
+  const [dnsResolution, setDnsResolution] = useState(true)
+  const [tags, setTags] = useState<{ key: string; value: string }[]>([])
+  const [busy, setBusy] = useState(false)
+  const inputCls =
+    'rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none'
+
+  const reset = () => {
+    setStep(0)
+    setMode('only')
+    setName('')
+    setCidr('10.0.0.0/16')
+    setCidrSource('manual')
+    setIpv6('none')
+    setTenancy('default')
+    setEncControl('none')
+    setAzs(2)
+    setPublicSubnets(2)
+    setPrivateSubnets(2)
+    setNat('none')
+    setS3Endpoint(true)
+    setDnsHostnames(true)
+    setDnsResolution(true)
+    setTags([])
+  }
+
+  const submit = async () => {
+    const vpcName = name.trim()
+    if (vpcName === '') {
+      onNotice('Create failed: enter a VPC name tag first.')
+      setStep(1)
+      return
+    }
+    if (cidr.trim() === '') {
+      onNotice('Create failed: enter an IPv4 CIDR first.')
+      setStep(2)
+      return
+    }
+    setBusy(true)
+    try {
+      const vpc = await createLabResource(labId, { kind: 'vpc', name: vpcName, cidr: cidr.trim() })
+      const created: string[] = [`VPC "${vpc.name}" (${vpc.cidr ?? cidr.trim()})`]
+      const skipped: string[] = []
+      if (mode === 'more') {
+        const m = cidr.trim().match(/^(\d+)\.(\d+)\.0\.0\/16$/)
+        if (m) {
+          const base = `${m[1]}.${m[2]}`
+          const subnetSpecs: { name: string; cidr: string }[] = []
+          for (let i = 0; i < publicSubnets; i += 1) {
+            subnetSpecs.push({ name: `${vpcName}-public-${i + 1}`, cidr: `${base}.${i + 1}.0/24` })
+          }
+          for (let i = 0; i < privateSubnets; i += 1) {
+            subnetSpecs.push({ name: `${vpcName}-private-${i + 1}`, cidr: `${base}.${101 + i}.0/24` })
+          }
+          for (const spec of subnetSpecs) {
+            try {
+              await createLabResource(labId, { kind: 'subnet', name: spec.name, cidr: spec.cidr, parent_id: vpc.id })
+              created.push(`subnet ${spec.name} (${spec.cidr})`)
+            } catch (e) {
+              skipped.push(`subnet ${spec.name} (${e instanceof Error ? e.message : 'create failed'})`)
+            }
+          }
+          try {
+            await createLabResource(labId, { kind: 'gateway', name: `${vpcName}-igw`, config: { gateway_type: 'igw' } })
+            created.push(`internet gateway ${vpcName}-igw`)
+          } catch (e) {
+            skipped.push(`internet gateway (${e instanceof Error ? e.message : 'create failed'})`)
+          }
+          const rtNames = [`${vpcName}-public-rt`, `${vpcName}-private-rt-1`, `${vpcName}-private-rt-2`]
+          for (const rtName of rtNames) {
+            try {
+              await createLabResource(labId, { kind: 'route-table', name: rtName, parent_id: vpc.id })
+              created.push(`route table ${rtName}`)
+            } catch (e) {
+              skipped.push(`route table ${rtName} (${e instanceof Error ? e.message : 'create failed'})`)
+            }
+          }
+        } else {
+          skipped.push('subnets, internet gateway and route tables need a /16 CIDR (e.g. 10.0.0.0/16) — only the VPC was created')
+        }
+        if (nat !== 'none') skipped.push('NAT gateway — NAT gateways are created separately on the NAT Gateways page')
+        if (s3Endpoint) skipped.push('S3 Gateway endpoint — no gateway-endpoint API in CloudForge labs')
+        if (dnsHostnames || dnsResolution) skipped.push('DNS hostnames / DNS resolution — not modelled for lab VPCs')
+      }
+      const tagRecord: Record<string, string> = {}
+      for (const t of tags) {
+        if (t.key.trim() !== '') tagRecord[t.key.trim()] = t.value
+      }
+      if (encControl !== 'none') tagRecord['encryption-control'] = encControl
+      if (Object.keys(tagRecord).length > 0) {
+        try {
+          await setResourceTags(labId, vpc.id, tagRecord)
+        } catch (e) {
+          skipped.push(`tags (${e instanceof Error ? e.message : 'tag save failed'})`)
+        }
+      }
+      onNotice(
+        `Created: ${created.join('; ')}.${skipped.length > 0 ? ` Not created: ${skipped.join('; ')}.` : ''}`,
+      )
+      onCreated()
+      reset()
+    } catch (e) {
+      onNotice(`Create failed: ${e instanceof Error ? e.message : 'unknown error'}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <AwsWizard
+      title="Create VPC"
+      steps={VPC_WIZARD_STEPS}
+      current={step}
+      onStep={setStep}
+      onCancel={reset}
+      onSubmit={() => void submit()}
+      submitLabel="Create VPC"
+      busy={busy}
+    >
+      {step === 0 && (
+        <div className="space-y-3 text-sm">
+          <p className="text-aws-muted">
+            Choose what to create. &ldquo;VPC and more&rdquo; also creates subnets, an internet gateway and route
+            tables from the defaults below — all real lab resources.
+          </p>
+          <label className="flex items-start gap-2">
+            <input type="radio" name="vpc-mode" checked={mode === 'only'} onChange={() => setMode('only')} className="mt-1" />
+            <span><strong>VPC only</strong> — just the VPC, nothing else.</span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input
+              type="radio"
+              name="vpc-mode"
+              checked={mode === 'more'}
+              onChange={() => {
+                setMode('more')
+                if (name.trim() === '') setName('project')
+              }}
+              className="mt-1"
+            />
+            <span><strong>VPC and more</strong> — VPC plus subnets, an internet gateway and route tables (survey defaults).</span>
+          </label>
+          {mode === 'more' && (
+            <div className="space-y-2 rounded-sm border border-aws-border bg-[#f9f9f9] p-3">
+              <div className="flex flex-wrap gap-3">
+                <label>
+                  Number of Availability Zones
+                  <select value={azs} onChange={(e) => setAzs(Number(e.target.value))} className={`ml-2 ${inputCls}`}>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                  </select>
+                </label>
+                <label>
+                  Public subnets
+                  <select value={publicSubnets} onChange={(e) => setPublicSubnets(Number(e.target.value))} className={`ml-2 ${inputCls}`}>
+                    <option value={0}>0</option>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                  </select>
+                </label>
+                <label>
+                  Private subnets
+                  <select value={privateSubnets} onChange={(e) => setPrivateSubnets(Number(e.target.value))} className={`ml-2 ${inputCls}`}>
+                    <option value={0}>0</option>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                  </select>
+                </label>
+              </div>
+              <p className="text-xs text-aws-muted">
+                CloudForge labs have no availability zones — subnets are created in the lab without an AZ
+                assignment. Preview: {publicSubnets + privateSubnets} subnets, 3 route tables, 2 connections
+                (internet gateway, S3 gateway endpoint — the endpoint itself is not created, see below).
+              </p>
+              <label className="block">
+                NAT gateways
+                <select value={nat} onChange={(e) => setNat(e.target.value as 'none' | 'one' | 'per-az')} className={`ml-2 ${inputCls}`}>
+                  <option value="none">None</option>
+                  <option value="one">1 NAT gateway</option>
+                  <option value="per-az">1 per AZ</option>
+                </select>
+                <span className="ml-2 text-xs text-aws-muted">NAT gateways are created separately on the NAT Gateways page.</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={s3Endpoint} onChange={(e) => setS3Endpoint(e.target.checked)} />
+                S3 Gateway endpoint (noted, not created — no gateway-endpoint API in CloudForge labs)
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={dnsHostnames} onChange={(e) => setDnsHostnames(e.target.checked)} />
+                Enable DNS hostnames (not modelled for lab VPCs)
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={dnsResolution} onChange={(e) => setDnsResolution(e.target.checked)} />
+                Enable DNS resolution (not modelled for lab VPCs)
+              </label>
+            </div>
+          )}
+        </div>
+      )}
+      {step === 1 && (
+        <div className="space-y-3 text-sm">
+          <label className="block">
+            <span className="mb-1 block font-medium">Name tag</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="project" className={`w-full max-w-md ${inputCls}`} />
+          </label>
+          <p className="text-aws-muted">The VPC&apos;s Name tag. &ldquo;VPC and more&rdquo; defaults the name to <strong>project</strong>.</p>
+        </div>
+      )}
+      {step === 2 && (
+        <div className="space-y-3 text-sm">
+          <label className="flex items-start gap-2">
+            <input type="radio" name="cidr-source" checked={cidrSource === 'manual'} onChange={() => setCidrSource('manual')} className="mt-1" />
+            <span>
+              <strong>IPv4 CIDR block — manual input</strong>
+              <input value={cidr} onChange={(e) => setCidr(e.target.value)} placeholder="10.0.0.0/16" className={`ml-2 font-mono ${inputCls}`} />
+              <span className="ml-2 text-xs text-aws-muted">/16–/28. The backend validates the CIDR (400 otherwise).</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 opacity-60">
+            <input type="radio" name="cidr-source" checked={cidrSource === 'ipam'} disabled className="mt-1" />
+            <span><strong>IPv4 CIDR block — IPAM-allocated</strong> — no IPAM API in CloudForge, so IPAM allocation is unavailable.</span>
+          </label>
+        </div>
+      )}
+      {step === 3 && (
+        <div className="space-y-3 text-sm">
+          <p className="text-aws-muted">Lab VPCs are IPv4-only; IPv6 is not modelled in CloudForge.</p>
+          <label className="flex items-start gap-2">
+            <input type="radio" name="ipv6" checked={ipv6 === 'none'} onChange={() => setIpv6('none')} className="mt-1" />
+            <span><strong>No IPv6 CIDR block</strong></span>
+          </label>
+          {(['ipam', 'amazon', 'owned'] as const).map((opt) => (
+            <label key={opt} className="flex items-start gap-2 opacity-60">
+              <input type="radio" name="ipv6" checked={ipv6 === opt} disabled className="mt-1" />
+              <span>
+                <strong>{opt === 'ipam' ? 'IPAM-allocated IPv6 CIDR block' : opt === 'amazon' ? 'Amazon-provided IPv6 CIDR block' : 'IPv6 CIDR owned by me'}</strong>
+                {' — '}not available: no IPv6 in CloudForge labs.
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+      {step === 4 && (
+        <div className="space-y-3 text-sm">
+          <label className="flex items-start gap-2">
+            <input type="radio" name="tenancy" checked={tenancy === 'default'} onChange={() => setTenancy('default')} className="mt-1" />
+            <span><strong>Default</strong> — lab VPCs run on shared lab capacity.</span>
+          </label>
+          <label className="flex items-start gap-2 opacity-60">
+            <input type="radio" name="tenancy" checked={tenancy === 'dedicated'} disabled className="mt-1" />
+            <span><strong>Dedicated</strong> — no dedicated tenancy in CloudForge labs.</span>
+          </label>
+        </div>
+      )}
+      {step === 5 && (
+        <div className="space-y-3 text-sm">
+          <p className="text-aws-muted">
+            CloudForge has no VPC encryption-control API. A Monitor or Enforce choice is recorded as a VPC tag
+            only — nothing is enforced.
+          </p>
+          {(['none', 'monitor', 'enforce'] as const).map((opt) => (
+            <label key={opt} className="flex items-start gap-2">
+              <input type="radio" name="enc-control" checked={encControl === opt} onChange={() => setEncControl(opt)} className="mt-1" />
+              <span>
+                <strong>{opt === 'none' ? 'None' : opt === 'monitor' ? 'Monitor' : 'Enforce'}</strong>
+                {opt === 'enforce' && ' — recorded as a tag only; enforcement does not exist in CloudForge.'}
+                {opt === 'monitor' && ' — recorded as a tag only; no monitoring is performed.'}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+      {step === 6 && (
+        <div className="space-y-3 text-sm">
+          <p className="text-aws-muted">Tags are saved on the VPC with the real tags API when it is created.</p>
+          {tags.map((t, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2">
+              <input
+                value={t.key}
+                onChange={(e) => setTags((prev) => prev.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))}
+                placeholder="Key"
+                className={inputCls}
+                aria-label="Tag key"
+              />
+              <input
+                value={t.value}
+                onChange={(e) => setTags((prev) => prev.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+                placeholder="Value"
+                className={inputCls}
+                aria-label="Tag value"
+              />
+              <AwsButton onClick={() => setTags((prev) => prev.filter((_, j) => j !== i))}>Remove</AwsButton>
+            </div>
+          ))}
+          <div>
+            <AwsButton onClick={() => setTags((prev) => [...prev, { key: '', value: '' }])}>Add tag</AwsButton>
+          </div>
+          <div className="rounded-sm border border-aws-border bg-[#f9f9f9] p-3">
+            <h3 className="font-semibold">Summary</h3>
+            <p>
+              VPC <strong>{name.trim() === '' ? '(no name yet)' : name.trim()}</strong> — {cidr.trim() === '' ? '(no CIDR yet)' : cidr.trim()}
+              {mode === 'more'
+                ? `, plus ${publicSubnets} public + ${privateSubnets} private subnets, 1 internet gateway and 3 route tables (needs a /16 CIDR).`
+                : ' — VPC only.'}
+            </p>
+            <p className="text-xs text-aws-muted">
+              Not created: S3 Gateway endpoint and DNS hostnames/resolution (not modelled); NAT gateways are
+              created separately. Encryption control {encControl === 'none' ? 'None' : encControl} is recorded as a
+              tag only.
+            </p>
+          </div>
+        </div>
+      )}
+    </AwsWizard>
+  )
 }
 
 function CreateForm({ section, labId, vpcs, gateways, onCreated, onNotice }: {
@@ -675,8 +1212,16 @@ function CreateForm({ section, labId, vpcs, gateways, onCreated, onNotice }: {
           return createLabResource(labId, { kind: 'security-group', name: name.trim() })
         case 'nacls':
           throw new Error('Network ACLs are created in the Network ACLs section, not this form.')
+        case 'customer-gateways':
+        case 'vpn-gateways':
+          throw new Error('Gateways are created in their own VPN section, not this form.')
+        case 'verified-access':
+        case 'cloud-wan':
+        case 'lattice':
+        case 'dns-firewall':
+          throw new Error('This section has no create form — there is no backend for it in CloudForge.')
         case 'vpn':
-          throw new Error('VPN connections are UNSUPPORTED.')
+          throw new Error('VPN connections are created in the VPN section, not this form.')
         case 'tgw':
           throw new Error('Transit gateways are created on the Transit Gateways section, not this form.')
         case 'dashboard':
@@ -739,6 +1284,15 @@ function CreateForm({ section, labId, vpcs, gateways, onCreated, onNotice }: {
   )
 }
 
+/**
+ * VPC detail tabs — OBSERVED in the v4 survey for a real VPC
+ * (Resource map, CIDRs, Flow logs, Tags, Related resources,
+ * Integrations). Resource map / Flow logs / Integrations are honest
+ * info panels (CloudForge has no per-VPC topology graph, no lab
+ * flow-log API and no VPC integrations); CIDRs and Related resources
+ * render real lab data; Tags reuses the real tags editor. Other
+ * resource kinds keep the single detail panel below.
+ */
 function ResourceDetail({ resource, labId, all, onChanged, onDelete, onNotice }: {
   resource: LabResource
   labId: string
@@ -747,6 +1301,89 @@ function ResourceDetail({ resource, labId, all, onChanged, onDelete, onNotice }:
   onDelete: () => void
   onNotice: (s: string) => void
 }) {
+  const [vpcTab, setVpcTab] = useState('resource-map')
+  if (resource.kind === 'vpc') {
+    const subnets = all.filter((r) => r.kind === 'subnet' && r.parent_id === resource.id)
+    const routeTables = all.filter((r) => r.kind === 'route-table' && r.parent_id === resource.id)
+    const gateways = all.filter((r) => r.kind === 'gateway')
+    return (
+      <div className="mt-3 border-t border-aws-border pt-3">
+        <dl className="mb-3 space-y-1 text-sm">
+          <div className="flex gap-2"><dt className="w-24 shrink-0 font-medium">VPC ID</dt><dd className="break-all">{resource.id}</dd></div>
+          <div className="flex gap-2"><dt className="w-24 shrink-0 font-medium">Name</dt><dd>{resource.name}</dd></div>
+          <div className="flex gap-2"><dt className="w-24 shrink-0 font-medium">State</dt><dd>{resource.state ?? '—'}</dd></div>
+        </dl>
+        <ConsoleTabs
+          tabs={[
+            { id: 'resource-map', label: 'Resource map' },
+            { id: 'cidrs', label: 'CIDRs' },
+            { id: 'flow-logs', label: 'Flow logs' },
+            { id: 'tags', label: 'Tags' },
+            { id: 'related', label: 'Related resources' },
+            { id: 'integrations', label: 'Integrations' },
+          ]}
+          active={vpcTab}
+          onChange={setVpcTab}
+        />
+        <div className="pt-3 text-sm">
+          {vpcTab === 'resource-map' && (
+            <p className="text-aws-muted">
+              CloudForge has no per-VPC topology graph. The lab topology page shows this VPC&apos;s subnets,
+              route tables and gateways from the same lab store:{' '}
+              <Link to={`/labs/${labId}/topology`} className="text-aws-link hover:underline">
+                View lab topology (real VPC/subnet/route state)
+              </Link>
+              .
+            </p>
+          )}
+          {vpcTab === 'cidrs' && (
+            <dl className="space-y-1">
+              <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium">IPv4 CIDR</dt><dd className="font-mono text-xs">{resource.cidr ?? '—'}</dd></div>
+              <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium">IPv6 CIDR</dt><dd>— (IPv6 is not modelled in CloudForge labs)</dd></div>
+              <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium">CIDR block count</dt><dd>1 IPv4 CIDR; no additional CIDR associations — the lab API accepts one CIDR per VPC.</dd></div>
+            </dl>
+          )}
+          {vpcTab === 'flow-logs' && (
+            <p className="text-aws-muted">
+              Flow logs are UNSUPPORTED for lab VPCs — CloudForge has no flow-log API for lab resources, so no
+              flow log is recorded for this VPC. Flow log groups exist as a separate exam console:{' '}
+              <Link to="/services/flowlogs" className="text-aws-link hover:underline">Flow Logs</Link>.
+            </p>
+          )}
+          {vpcTab === 'tags' && (
+            <TagsEditor resource={resource} labId={labId} onChanged={onChanged} onNotice={onNotice} />
+          )}
+          {vpcTab === 'related' && (
+            <div className="space-y-2">
+              <p>
+                Subnets in this VPC: {subnets.length === 0 ? 'none' : subnets.map((r) => `${r.name} (${r.cidr ?? 'no CIDR'})`).join(', ')}
+              </p>
+              <p>
+                Route tables in this VPC: {routeTables.length === 0 ? 'none' : routeTables.map((r) => r.name).join(', ')}
+              </p>
+              <p>
+                Gateways in this lab: {gateways.length === 0 ? 'none' : gateways.map((r) => `${r.name} (${r.state ?? '—'})`).join(', ')}
+              </p>
+              <p className="text-xs text-aws-muted">
+                Security groups and network ACLs are lab-wide records; they are not attached to a single VPC in
+                CloudForge, so they are not listed here.
+              </p>
+            </div>
+          )}
+          {vpcTab === 'integrations' && (
+            <p className="text-aws-muted">
+              No integrations — CloudForge has no IPAM, Firewall Manager, flow-log delivery or other VPC
+              integration for lab VPCs. The VPC encryption control choice in the Create VPC wizard is recorded
+              as a tag only.
+            </p>
+          )}
+        </div>
+        <div className="mt-3">
+          <AwsButton onClick={onDelete}>Delete resource</AwsButton>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="mt-3 border-t border-aws-border pt-3">
       <dl className="space-y-1 text-sm">
@@ -897,7 +1534,7 @@ function GatewayDetail({ resource, labId, all, onChanged, onNotice }: {
         </div>
       )}
       {type === 'nat' && (
-        <p className="mt-2 text-sm text-aws-muted">NAT gateways are engine-managed; delete the resource to remove it (the engine DeleteNAT runs on delete).</p>
+        <p className="mt-2 text-sm text-aws-muted">NAT gateways are engine-managed; delete the resource to remove it (the engine DeleteNAT runs on delete). No Elastic IP association: CloudForge has no Elastic IP API; NAT gateways are engine-managed with a documentation-range address.</p>
       )}
     </div>
   )
@@ -1068,6 +1705,491 @@ function TagsEditor({ resource, labId, onChanged, onNotice }: {
         <AwsButton type="submit" disabled={key.trim() === ''}>Add / update tag</AwsButton>
         <span className="text-sm text-aws-muted">Keys starting with aws: are reserved and rejected.</span>
       </form>
+    </div>
+  )
+}
+
+/**
+ * Site-to-Site VPN connections — wired to the real API-EMULATED backend
+ * (POST/GET/DELETE /api/v1/aws/vpn/connections, POST .../activate|deactivate).
+ * The table keeps the survey's exact 19 VPN Connections columns; columns
+ * the backend has no value for render '—' instead of an invented value.
+ * Tunnel state is a teaching field: no IPsec tunnel exists and no
+ * traffic flows. Connections validate their gateways — the backend
+ * returns 400 when a gateway id does not exist, and the tunnel starts
+ * DOWN. Concentrators and Client VPN endpoints have no backend and stay
+ * disabled nav labels, not built features.
+ */
+function VpnConnectionsSection({ onNotice }: { onNotice: (s: string) => void }) {
+  const connections = useVpnConnections()
+  const customerGateways = useCustomerGateways()
+  const vpnGateways = useVpnGateways()
+  const create = useExamCreate('vpn/connections')
+  const act = useExamAction('vpn/connections')
+  const remove = useExamDelete('vpn/connections')
+  const [filter, setFilter] = useState('')
+  const [checkedIds, setCheckedIds] = useState<string[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const [name, setName] = useState('')
+  const [cgwId, setCgwId] = useState('')
+  const [vgwId, setVgwId] = useState('')
+  const selected = connections.rows.find((r) => r.id === checkedIds[0]) ?? null
+  const rows = connections.rows.filter(
+    (r) =>
+      filter.trim() === '' ||
+      str(r, 'name').toLowerCase().includes(filter.toLowerCase()) ||
+      r.id.toLowerCase().includes(filter.toLowerCase()),
+  )
+  const cgwAddress = (id: string): string => {
+    const gw = customerGateways.rows.find((g) => g.id === id)
+    return gw === undefined ? '—' : str(gw, 'ip_address')
+  }
+  const inputCls =
+    'rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none'
+  const tunnelAction = (action: 'activate' | 'deactivate') => {
+    if (selected === null) return
+    act.mutate(
+      { id: selected.id, action },
+      {
+        onSuccess: () =>
+          onNotice(`VPN connection ${selected.id} tunnel ${action === 'activate' ? 'UP' : 'DOWN'} (teaching field — no real tunnel).`),
+        onError: (e: Error) => onNotice(`${action === 'activate' ? 'Activate' : 'Deactivate'} failed: ${e.message}`),
+      },
+    )
+  }
+  return (
+    <div className="space-y-4">
+      <AwsFlash tone="info">
+        VPN is the VPC console&apos;s Virtual private network section — it has no standalone console (2026-11-22
+        survey). The old /services/vpn bookmark redirects here.
+      </AwsFlash>
+      <AwsCard title={`VPN connections (${connections.rows.length})`}>
+        <p className="mb-3 text-sm text-aws-muted">
+          VPN connections are <strong>API-EMULATED</strong> in CloudForge — durable records with tunnel
+          activate/deactivate. The tunnel state is a teaching field: no IPsec tunnel exists and no traffic flows.
+          Transit Gateway attachments are the available hybrid-networking practice for real route-table entries.
+        </p>
+        {connections.isError && (
+          <ErrorBox message={`VPN connections could not be loaded (${connections.errorMessage}).`} />
+        )}
+        <AwsToolbar
+          right={
+            <>
+              <AwsButton disabled title="No configuration-download API in CloudForge — tunnel parameters are teaching fields.">
+                Download configuration
+              </AwsButton>
+              <AwsRefreshButton onClick={connections.refresh} busy={connections.isFetching} />
+              <AwsPreferencesButton />
+            </>
+          }
+        >
+          <AwsActionsMenu
+            items={[
+              {
+                label: 'Activate tunnel',
+                disabledReason:
+                  selected === null
+                    ? 'Select a connection first.'
+                    : str(selected, 'tunnel_status') === 'UP'
+                      ? 'Tunnel is already UP.'
+                      : undefined,
+                onClick: () => tunnelAction('activate'),
+              },
+              {
+                label: 'Deactivate tunnel',
+                disabledReason:
+                  selected === null
+                    ? 'Select a connection first.'
+                    : str(selected, 'tunnel_status') === 'DOWN'
+                      ? 'Tunnel is already DOWN.'
+                      : undefined,
+                onClick: () => tunnelAction('deactivate'),
+              },
+              {
+                label: 'Delete',
+                disabledReason: selected === null ? 'Select a connection first.' : undefined,
+                onClick: () => {
+                  const sel = selected
+                  if (sel === null) return
+                  remove.mutate(sel.id, {
+                    onSuccess: () => {
+                      onNotice(`VPN connection ${sel.id} deleted.`)
+                      setCheckedIds([])
+                    },
+                    onError: (e: Error) => onNotice(`Delete failed: ${e.message}`),
+                  })
+                },
+              },
+            ]}
+          />
+          <AwsButton variant="primary" onClick={() => setShowCreate((v) => !v)}>
+            Create VPN connection
+          </AwsButton>
+        </AwsToolbar>
+        {showCreate && (
+          <div className="mb-3 space-y-3 rounded-sm border border-aws-border bg-[#f9f9f9] p-3">
+            <h3 className="text-sm font-semibold">Create VPN connection</h3>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Name</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. office-vpn" className={`w-full max-w-md ${inputCls}`} />
+            </label>
+            <div className="flex flex-wrap gap-3">
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Customer gateway</span>
+                <select value={cgwId} onChange={(e) => setCgwId(e.target.value)} className={inputCls}>
+                  <option value="">Select a customer gateway…</option>
+                  {customerGateways.rows.map((g) => (
+                    <option key={g.id} value={g.id}>{str(g, 'name')} ({g.id}) — {str(g, 'ip_address')}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Virtual private gateway</span>
+                <select value={vgwId} onChange={(e) => setVgwId(e.target.value)} className={inputCls}>
+                  <option value="">Select a virtual private gateway…</option>
+                  {vpnGateways.rows.map((g) => (
+                    <option key={g.id} value={g.id}>{str(g, 'name')} ({g.id})</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="text-xs text-aws-muted">
+              Create the gateways first on the Customer Gateways and Virtual Private Gateways pages. The backend
+              returns 400 when a gateway id does not exist, and the tunnel starts DOWN.
+            </p>
+            <div>
+              <AwsButton
+                variant="primary"
+                disabled={name.trim() === '' || cgwId === '' || vgwId === '' || create.isPending}
+                onClick={() =>
+                  create.mutate(
+                    { name: name.trim(), customer_gateway_id: cgwId, vpn_gateway_id: vgwId },
+                    {
+                      onSuccess: (c) => {
+                        onNotice(`VPN connection ${c.id} created — tunnel DOWN.`)
+                        setName('')
+                        setShowCreate(false)
+                      },
+                      onError: (e: Error) => onNotice(`Create failed: ${e.message}`),
+                    },
+                  )
+                }
+              >
+                Create VPN connection
+              </AwsButton>
+            </div>
+          </div>
+        )}
+        <AwsTable<Rec>
+          caption="VPN connections"
+          emptyMessage="No VPN connections yet — create the gateways first, then a connection."
+          rows={rows}
+          totalCount={connections.rows.length}
+          filter={filter}
+          onFilterChange={setFilter}
+          filterPlaceholder="Filter connections by name or ID"
+          selectable
+          selectedIds={checkedIds}
+          onToggleRow={(id) => setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [id]))}
+          onToggleAll={(checked) => setCheckedIds(checked ? rows.map((r) => r.id) : [])}
+          columns={[
+            { header: 'Name', render: (r) => str(r, 'name') },
+            { header: 'VPN ID', render: (r) => <span className="font-mono">{r.id}</span> },
+            { header: 'State', render: (r) => <StateBadge state={str(r, 'status')} /> },
+            { header: 'Virtual private gateway', render: (r) => <span className="font-mono">{str(r, 'vpn_gateway_id')}</span> },
+            { header: 'Transit gateway', render: () => '—' },
+            { header: 'VPN Concentrator ID', render: () => '—' },
+            { header: 'Customer gateway', render: (r) => <span className="font-mono">{str(r, 'customer_gateway_id')}</span> },
+            { header: 'Customer gateway address', render: (r) => cgwAddress(str(r, 'customer_gateway_id')) },
+            { header: 'Inside IP version', render: () => '—' },
+            { header: 'Type', render: (r) => str(r, 'type') },
+            { header: 'Category', render: () => '—' },
+            { header: 'VPC', render: () => '—' },
+            { header: 'Routing', render: () => '—' },
+            { header: 'Acceleration enabled', render: () => '—' },
+            { header: 'Authentication', render: () => '—' },
+            { header: 'Local IPv4 network CIDR', render: () => '—' },
+            { header: 'Remote IPv4 network CIDR', render: () => '—' },
+            { header: 'Local IPv6 network CIDR', render: () => '—' },
+            { header: 'Remote IPv6 network CIDR', render: () => '—' },
+            { header: 'Core network ARN', render: () => '—' },
+            { header: 'Core network attachment ARN', render: () => '—' },
+            { header: 'Gateway association state', render: () => '—' },
+            { header: 'Outside IP address type', render: () => '—' },
+          ]}
+        />
+        {selected !== null && (
+          <dl className="mt-3 space-y-1 text-sm">
+            <dt className="font-medium">Tunnel status</dt>
+            <dd><StateBadge state={str(selected, 'tunnel_status')} /> — teaching field, no real IPsec tunnel.</dd>
+            <dt className="font-medium">Type</dt>
+            <dd>{str(selected, 'type')}</dd>
+            <dt className="font-medium">Created</dt>
+            <dd>{fmtTime(selected.created_at)}</dd>
+          </dl>
+        )}
+      </AwsCard>
+    </div>
+  )
+}
+
+/**
+ * Customer gateways — wired to the real API-EMULATED backend
+ * (POST/GET/DELETE /api/v1/aws/vpn/customer-gateways). The survey
+ * records no Customer Gateways list columns, so the table uses the
+ * record's own fields rather than invented AWS columns.
+ */
+function CustomerGatewaysSection({ onNotice }: { onNotice: (s: string) => void }) {
+  const gateways = useCustomerGateways()
+  const create = useExamCreate('vpn/customer-gateways')
+  const remove = useExamDelete('vpn/customer-gateways')
+  const [filter, setFilter] = useState('')
+  const [checkedIds, setCheckedIds] = useState<string[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const [name, setName] = useState('')
+  const [ipAddress, setIpAddress] = useState('')
+  const [bgpAsn, setBgpAsn] = useState(65000)
+  const selected = gateways.rows.find((r) => r.id === checkedIds[0]) ?? null
+  const rows = gateways.rows.filter(
+    (r) =>
+      filter.trim() === '' ||
+      str(r, 'name').toLowerCase().includes(filter.toLowerCase()) ||
+      r.id.toLowerCase().includes(filter.toLowerCase()),
+  )
+  const inputCls =
+    'rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none'
+  return (
+    <div className="space-y-4">
+      <AwsFlash tone="info">
+        Customer gateways are the on-premises side of a Site-to-Site VPN connection — the customer gateway address
+        is the public IP of your side of the tunnel. Connections on the Site-to-Site VPN Connections page
+        reference a gateway from this list.
+      </AwsFlash>
+      <AwsCard title={`Customer gateways (${gateways.rows.length})`}>
+        <p className="mb-3 text-sm text-aws-muted">
+          Customer gateways are <strong>API-EMULATED</strong> in CloudForge — durable records. The IP address must
+          be a valid IP (the backend returns 400 otherwise) and the BGP ASN defaults to 65000.
+        </p>
+        {gateways.isError && (
+          <ErrorBox message={`Customer gateways could not be loaded (${gateways.errorMessage}).`} />
+        )}
+        <AwsToolbar
+          right={
+            <>
+              <AwsRefreshButton onClick={gateways.refresh} busy={gateways.isFetching} />
+              <AwsPreferencesButton />
+            </>
+          }
+        >
+          <AwsActionsMenu
+            items={[
+              {
+                label: 'Delete',
+                disabledReason: selected === null ? 'Select a gateway first.' : undefined,
+                onClick: () => {
+                  const sel = selected
+                  if (sel === null) return
+                  remove.mutate(sel.id, {
+                    onSuccess: () => {
+                      onNotice(`Customer gateway ${sel.id} deleted.`)
+                      setCheckedIds([])
+                    },
+                    onError: (e: Error) => onNotice(`Delete failed: ${e.message}`),
+                  })
+                },
+              },
+            ]}
+          />
+          <AwsButton variant="primary" onClick={() => setShowCreate((v) => !v)}>
+            Create customer gateway
+          </AwsButton>
+        </AwsToolbar>
+        {showCreate && (
+          <div className="mb-3 space-y-3 rounded-sm border border-aws-border bg-[#f9f9f9] p-3">
+            <h3 className="text-sm font-semibold">Create customer gateway</h3>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Name</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. office-gw" className={`w-full max-w-md ${inputCls}`} />
+            </label>
+            <div className="flex flex-wrap gap-3">
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">IP address</span>
+                <input value={ipAddress} onChange={(e) => setIpAddress(e.target.value)} placeholder="e.g. 203.0.113.10" className={`w-full max-w-md font-mono ${inputCls}`} />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">BGP ASN</span>
+                <input type="number" min={1} value={bgpAsn} onChange={(e) => setBgpAsn(Number(e.target.value))} className={`w-32 ${inputCls}`} />
+              </label>
+            </div>
+            <div>
+              <AwsButton
+                variant="primary"
+                disabled={name.trim() === '' || ipAddress.trim() === '' || create.isPending}
+                onClick={() =>
+                  create.mutate(
+                    { name: name.trim(), ip_address: ipAddress.trim(), bgp_asn: bgpAsn },
+                    {
+                      onSuccess: (g) => {
+                        onNotice(`Customer gateway ${g.id} created.`)
+                        setName('')
+                        setIpAddress('')
+                        setShowCreate(false)
+                      },
+                      onError: (e: Error) => onNotice(`Create failed: ${e.message}`),
+                    },
+                  )
+                }
+              >
+                Create customer gateway
+              </AwsButton>
+            </div>
+          </div>
+        )}
+        <AwsTable<Rec>
+          caption="Customer gateways"
+          emptyMessage="No customer gateways yet — create one to start a Site-to-Site VPN connection."
+          rows={rows}
+          totalCount={gateways.rows.length}
+          filter={filter}
+          onFilterChange={setFilter}
+          filterPlaceholder="Filter gateways by name or ID"
+          selectable
+          selectedIds={checkedIds}
+          onToggleRow={(id) => setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [id]))}
+          onToggleAll={(checked) => setCheckedIds(checked ? rows.map((r) => r.id) : [])}
+          columns={[
+            { header: 'Name', render: (r) => str(r, 'name') },
+            { header: 'Customer gateway ID', render: (r) => <span className="font-mono">{r.id}</span> },
+            { header: 'IP address', render: (r) => <span className="font-mono">{str(r, 'ip_address')}</span> },
+            { header: 'BGP ASN', render: (r) => String(r.bgp_asn ?? '—') },
+            { header: 'State', render: (r) => <StateBadge state={str(r, 'status')} /> },
+            { header: 'Created', render: (r) => fmtTime(r.created_at) },
+          ]}
+        />
+      </AwsCard>
+    </div>
+  )
+}
+
+/**
+ * Virtual private gateways — wired to the real API-EMULATED backend
+ * (POST/GET/DELETE /api/v1/aws/vpn/vpn-gateways). The survey records
+ * no Virtual Private Gateways list columns, so the table uses the
+ * record's own fields rather than invented AWS columns.
+ */
+function VpnGatewaysSection({ onNotice }: { onNotice: (s: string) => void }) {
+  const gateways = useVpnGateways()
+  const create = useExamCreate('vpn/vpn-gateways')
+  const remove = useExamDelete('vpn/vpn-gateways')
+  const [filter, setFilter] = useState('')
+  const [checkedIds, setCheckedIds] = useState<string[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const [name, setName] = useState('')
+  const selected = gateways.rows.find((r) => r.id === checkedIds[0]) ?? null
+  const rows = gateways.rows.filter(
+    (r) =>
+      filter.trim() === '' ||
+      str(r, 'name').toLowerCase().includes(filter.toLowerCase()) ||
+      r.id.toLowerCase().includes(filter.toLowerCase()),
+  )
+  const inputCls =
+    'rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none'
+  return (
+    <div className="space-y-4">
+      <AwsFlash tone="info">
+        Virtual private gateways are the CloudForge side of a Site-to-Site VPN connection. Connections on the
+        Site-to-Site VPN Connections page reference a gateway from this list.
+      </AwsFlash>
+      <AwsCard title={`Virtual private gateways (${gateways.rows.length})`}>
+        <p className="mb-3 text-sm text-aws-muted">
+          Virtual private gateways are <strong>API-EMULATED</strong> in CloudForge — durable records. A gateway
+          has no attachment in CloudForge (no VPC attachment API); it exists so connections have a real gateway
+          id to reference.
+        </p>
+        {gateways.isError && (
+          <ErrorBox message={`Virtual private gateways could not be loaded (${gateways.errorMessage}).`} />
+        )}
+        <AwsToolbar
+          right={
+            <>
+              <AwsRefreshButton onClick={gateways.refresh} busy={gateways.isFetching} />
+              <AwsPreferencesButton />
+            </>
+          }
+        >
+          <AwsActionsMenu
+            items={[
+              {
+                label: 'Delete',
+                disabledReason: selected === null ? 'Select a gateway first.' : undefined,
+                onClick: () => {
+                  const sel = selected
+                  if (sel === null) return
+                  remove.mutate(sel.id, {
+                    onSuccess: () => {
+                      onNotice(`Virtual private gateway ${sel.id} deleted.`)
+                      setCheckedIds([])
+                    },
+                    onError: (e: Error) => onNotice(`Delete failed: ${e.message}`),
+                  })
+                },
+              },
+            ]}
+          />
+          <AwsButton variant="primary" onClick={() => setShowCreate((v) => !v)}>
+            Create virtual private gateway
+          </AwsButton>
+        </AwsToolbar>
+        {showCreate && (
+          <div className="mb-3 space-y-3 rounded-sm border border-aws-border bg-[#f9f9f9] p-3">
+            <h3 className="text-sm font-semibold">Create virtual private gateway</h3>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Name</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. cf-vgw" className={`w-full max-w-md ${inputCls}`} />
+            </label>
+            <div>
+              <AwsButton
+                variant="primary"
+                disabled={name.trim() === '' || create.isPending}
+                onClick={() =>
+                  create.mutate(
+                    { name: name.trim() },
+                    {
+                      onSuccess: (g) => {
+                        onNotice(`Virtual private gateway ${g.id} created.`)
+                        setName('')
+                        setShowCreate(false)
+                      },
+                      onError: (e: Error) => onNotice(`Create failed: ${e.message}`),
+                    },
+                  )
+                }
+              >
+                Create virtual private gateway
+              </AwsButton>
+            </div>
+          </div>
+        )}
+        <AwsTable<Rec>
+          caption="Virtual private gateways"
+          emptyMessage="No virtual private gateways yet — create one to start a Site-to-Site VPN connection."
+          rows={rows}
+          totalCount={gateways.rows.length}
+          filter={filter}
+          onFilterChange={setFilter}
+          filterPlaceholder="Filter gateways by name or ID"
+          selectable
+          selectedIds={checkedIds}
+          onToggleRow={(id) => setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [id]))}
+          onToggleAll={(checked) => setCheckedIds(checked ? rows.map((r) => r.id) : [])}
+          columns={[
+            { header: 'Name', render: (r) => str(r, 'name') },
+            { header: 'VPN gateway ID', render: (r) => <span className="font-mono">{r.id}</span> },
+            { header: 'State', render: (r) => <StateBadge state={str(r, 'status')} /> },
+            { header: 'Created', render: (r) => fmtTime(r.created_at) },
+          ]}
+        />
+      </AwsCard>
     </div>
   )
 }

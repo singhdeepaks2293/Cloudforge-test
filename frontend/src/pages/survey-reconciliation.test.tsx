@@ -138,13 +138,14 @@ describe('Survey table columns', () => {
     expect(html).toContain('Date created')
   })
 
-  it('Cost Explorer breakdown groups by Service with Total cost and % of total cost; Budgets uses the survey columns', async () => {
+  it('Cost Explorer breakdown groups by Service with Total and May–Oct 2026 monthly columns (v4 survey); Budgets uses the survey columns', async () => {
     const html = await renderSettled(<CostExplorerConsole initialSection="list" />, '/services/costexplorer', [
       pf(['costs'], '/api/v1/aws/costexplorer/costs'),
       pf(['cost-budgets'], '/api/v1/aws/costexplorer/budgets'),
     ])
     expect(html).toContain('Total cost')
-    expect(html).toContain('% of total cost')
+    expect(html).toContain('May 2026')
+    expect(html).toContain('Oct 2026')
     expect(html).toContain('monthly')
     expect(html).toContain('Thresholds')
     expect(html).toContain('Amount used')
@@ -229,15 +230,15 @@ describe('Survey grouping (sections, not standalone consoles)', () => {
     expect(html).toContain('Volumes (0)')
     expect(html).toContain('Volume ID')
     expect(html).toContain('Availability Zone')
-    expect(html).toContain('No volumes — EBS is UNSUPPORTED')
+    expect(html).toContain('No volumes yet — create one to practise attach and detach.')
   })
 
-  it('EC2 ?section=autoscaling renders the Auto Scaling empty state with a disabled Create button', async () => {
+  it('EC2 ?section=autoscaling renders the wired Auto Scaling Groups section with a working Create button', async () => {
     const html = await renderSettled(<Ec2Console initialSection="home" />, '/services/ec2?section=autoscaling', [])
     expect(html).toContain('Auto Scaling Groups')
     expect(html).toContain('Create Auto Scaling group')
     expect(html).toContain('Auto Scaling is')
-    expect(html).toContain('UNSUPPORTED')
+    expect(html).toContain('API-EMULATED')
   })
 
   it('EC2 ?section=load-balancers renders the ELB list inside EC2', async () => {
@@ -254,7 +255,7 @@ describe('Survey grouping (sections, not standalone consoles)', () => {
     expect(html).toContain('VPN connections (0)')
     expect(html).toContain('VPN ID')
     expect(html).toContain('Customer gateway')
-    expect(html).toContain('No VPN connections — VPN is UNSUPPORTED')
+    expect(html).toContain('No VPN connections yet — create the gateways first, then a connection.')
   })
 
 describe('EC2 long tail (audit gap #4)', () => {
@@ -316,7 +317,7 @@ describe('EC2 long tail (audit gap #4)', () => {
     ['key-pairs', 'Key Pairs are', 'Create key pair'],
     ['network-interfaces', 'Network Interfaces are', 'Networking tab'],
     ['launch-templates', 'Launch templates are', 'Create launch template'],
-    ['snapshots', 'Snapshots are', 'EBS is unsupported'],
+    ['snapshots', 'Snapshots are', 'no snapshot API'],
     ['ebs-snapshots', 'Snapshots are', 'one list, shown here from either nav item'],
     ['lifecycle', 'Lifecycle Manager is', 'no lifecycle-policy API'],
     ['elastic-ips', 'Elastic IPs are', 'no Elastic IP operation'],
@@ -384,29 +385,44 @@ describe('Audit gaps #1 (routing) and #2 (DataSync columns)', () => {
   })
 
   it('DataSync Task executions, Locations and Agents use the survey columns', async () => {
-    const html = await renderSettled(<DataSyncConsole />, '/services/datasync', [
+    // v4: Task executions, Locations and Agents are real left-nav
+    // sections now, so each is rendered with its own initialSection.
+    const tasksPrefetch = [pf(['datasync-tasks'], '/api/v1/aws/datasync/tasks')]
+    // Task executions, derived from the task's own run.
+    const execHtml = await renderSettled(<DataSyncConsole initialSection="executions" />, '/services/datasync', tasksPrefetch)
+    expect(execHtml).toContain('Task executions')
+    expect(execHtml).toContain('Execution ID')
+    expect(execHtml).toContain('Start time')
+    expect(execHtml).toContain('Duration')
+    expect(execHtml).toContain('Data throughput')
+    expect(execHtml).toContain('File throughput')
+    expect(execHtml).toContain('10.0s')
+    expect(execHtml).toContain('90.00 B/s')
+    expect(execHtml).toContain('0.30 files/s')
+    // Locations, derived from the task's source/destination strings.
+    const locHtml = await renderSettled(<DataSyncConsole initialSection="locations" />, '/services/datasync', tasksPrefetch)
+    expect(locHtml).toContain('Locations')
+    expect(locHtml).toContain('Location ID')
+    expect(locHtml).toContain('Host')
+    expect(locHtml).toContain('Path')
+    expect(locHtml).toContain('backup')
+    expect(locHtml).toContain('/docs')
+    // Agents: honestly empty — CloudForge has no agent API.
+    const agentsHtml = await renderSettled(<DataSyncConsole initialSection="agents" />, '/services/datasync', tasksPrefetch)
+    expect(agentsHtml).toContain('Agents (0)')
+    expect(agentsHtml).toContain('Service endpoint')
+    expect(agentsHtml).toContain('No DataSync agents')
+  })
+
+  it('DataSync left nav is the survey order with the New badge on Dashboard', async () => {
+    const html = await renderSettled(<DataSyncConsole initialSection="home" />, '/services/datasync', [
       pf(['datasync-tasks'], '/api/v1/aws/datasync/tasks'),
     ])
-    // Task executions, derived from the task's own run.
-    expect(html).toContain('Task executions')
-    expect(html).toContain('Execution ID')
-    expect(html).toContain('Start time')
-    expect(html).toContain('Duration')
+    for (const label of ['DataSync dashboard', 'Task executions', 'Tasks', 'Locations', 'Agents']) {
+      expect(html).toContain(label)
+    }
+    expect(html).toContain('New')
+    expect(html).toContain('Total transferred by task')
     expect(html).toContain('Data throughput')
-    expect(html).toContain('File throughput')
-    expect(html).toContain('10.0s')
-    expect(html).toContain('90.00 B/s')
-    expect(html).toContain('0.30 files/s')
-    // Locations, derived from the task's source/destination strings.
-    expect(html).toContain('Locations')
-    expect(html).toContain('Location ID')
-    expect(html).toContain('Host')
-    expect(html).toContain('Path')
-    expect(html).toContain('backup')
-    expect(html).toContain('/docs')
-    // Agents: honestly empty — CloudForge has no agent API.
-    expect(html).toContain('Agents (0)')
-    expect(html).toContain('Service endpoint')
-    expect(html).toContain('No DataSync agents')
   })
 })

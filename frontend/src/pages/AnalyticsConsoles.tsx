@@ -334,7 +334,7 @@ export function KinesisConsole({ initialSection }: { initialSection?: 'home' | '
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={streams.isFetching}
             health={[
-              "streams.isError ? 'Streams could not be loaded.' : `${streamRows.length} stream(s) listed.`",
+              streams.isError ? 'Streams could not be loaded.' : `${streamRows.length} stream(s) listed.`,
             "Shard_count 1–8, 1 MiB cap, monotonic sequence numbers.",
             ]}
             settings={[
@@ -475,7 +475,7 @@ export function FirehoseConsole({ initialSection }: { initialSection?: 'home' | 
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={streams.isFetching}
             health={[
-              "streams.isError ? 'Delivery streams could not be loaded.' : `${streamRows.length} delivery stream(s) listed.`",
+              streams.isError ? 'Delivery streams could not be loaded.' : `${streamRows.length} delivery stream(s) listed.`,
             "Counters only on DELIVERED; a FAILED delivery returns 502.",
             ]}
             settings={[

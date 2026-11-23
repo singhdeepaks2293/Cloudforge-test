@@ -304,7 +304,7 @@ describe('Dedicated exam-service consoles — one render test per console', () =
     { id: 'auditmanager', listPath: 'auditmanager/assessments', el: <AuditManagerConsole />, row: 'q4-audit', column: 'Evidence entries', createLabel: 'Create assessment', listLabel: 'Assessments' },
     { id: 'artifact', listPath: 'artifact/agreements', el: <ArtifactConsole />, row: 'soc2-agreement', column: 'Report', createLabel: 'Create agreement', listLabel: 'Agreements' },
     { id: 'cloudfront', listPath: 'cloudfront/distributions', el: <CloudFrontConsole />, row: 'web-dist', column: 'Alternate domain names', createLabel: 'Create distribution', listLabel: 'Distributions' },
-    { id: 'efs', listPath: 'efs/file-systems', el: <EfsConsole />, row: 'shared-fs', column: 'Performance mode', createLabel: 'Create file system', listLabel: 'File systems' },
+    { id: 'efs', listPath: 'efs/file-systems', el: <EfsConsole initialSection="file-systems" />, row: 'shared-fs', column: 'Encrypted', createLabel: 'Create file system', listLabel: 'File systems' },
     { id: 'fsx', listPath: 'fsx/file-systems', el: <FsxConsole />, row: 'lustre-fs', column: 'Throughput (Mbps)', createLabel: 'Create file system', listLabel: 'File systems' },
     { id: 'shield', listPath: 'shield/protections', el: <ShieldConsole />, row: 'web-protection', column: 'Resource type', createLabel: 'Create protection', listLabel: 'Protections' },
     { id: 'controltower', listPath: 'controltower/landing-zones', el: <ControlTowerConsole />, row: 'main-lz', column: 'Guardrails', createLabel: 'Create landing zone', listLabel: 'Landing zones' },

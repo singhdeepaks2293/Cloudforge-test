@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
 import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
+import { ConsoleTabs } from '../components/ServiceConsole.tsx'
+import { AwsPreferencesButton, AwsRefreshButton, AwsToolbar } from '../components/AwsShell.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
 import { FidelityBadge } from '../components/AwsBadge.tsx'
@@ -183,7 +185,12 @@ export function TransitGatewayListContent() {
         <AwsTable
           columns={[
             { header: 'Name', render: (r) => str(r, 'name') },
-            { header: 'Status', render: (r) => str(r, 'status') },
+            { header: 'Transit gateway ID', render: (r) => str(r, 'id') },
+            {
+              header: 'Owner ID',
+              render: () => <span title="CloudForge stores no owner ID for transit gateways">Not available</span>,
+            },
+            { header: 'State', render: (r) => str(r, 'status') },
             { header: 'Attachments', render: (r) => String(num(r, 'attachment_count')) },
             {
               header: 'Actions',
@@ -198,7 +205,11 @@ export function TransitGatewayListContent() {
           rows={rows}
           emptyMessage="No transit gateways yet."
         />
-        <p className="mt-2 text-xs text-aws-muted">Delete is refused (409) while attachments exist.</p>
+        <p className="mt-2 text-xs text-aws-muted">
+          Delete is refused (409) while attachments exist. Gateway columns are the 2026-11-22 v4 survey&apos;s
+          exact columns (Name, Transit gateway ID, Owner ID, State) in order; Attachments and Actions are
+          CloudForge&apos;s own — the survey records no such columns.
+        </p>
       </AwsCard>
       {sel && (
         <AwsCard title={`Attachments: ${str(sel, 'name')}`}>
@@ -223,6 +234,27 @@ export function TransitGatewayListContent() {
           />
         </AwsCard>
       )}
+      <AwsCard title="Transit gateway multicast">
+        <p className="mb-3 text-sm text-aws-muted">
+          Transit gateway multicast is not modelled in CloudForge — there is no multicast-domain API, no IGMP
+          support in the network engine, and no multicast traffic to route. The survey records Transit gateway
+          multicast as a left-nav item of the VPC console&apos;s Transit gateways group; the item is shown here
+          as reference only.
+        </p>
+        <AwsButton disabled title="Transit gateway multicast is not modelled — no multicast API in CloudForge.">
+          Create multicast domain
+        </AwsButton>
+      </AwsCard>
+      <AwsCard title="Metering policies">
+        <p className="mb-3 text-sm text-aws-muted">
+          Metering policies are not modelled in CloudForge — there is no metering-policy API and no per-flow
+          metering in the network engine. The survey records Metering policies as a left-nav item of the VPC
+          console&apos;s Transit gateways group; the item is shown here as reference only.
+        </p>
+        <AwsButton disabled title="Metering policies are not modelled — no metering-policy API in CloudForge.">
+          Create metering policy
+        </AwsButton>
+      </AwsCard>
     </>
   )
 }
@@ -237,9 +269,17 @@ export function VpcEndpointsConsole({ initialSection }: { initialSection?: 'home
   const [name, setName] = useState('')
   const [vpc, setVpc] = useState('')
   const [service, setService] = useState('s3')
+  const [filter, setFilter] = useState('')
+  const [selected, setSelected] = useState('')
+  const [detailTab, setDetailTab] = useState('details')
   const [notice, setNotice] = useState('')
   const endpoints = useQuery({ queryKey: ['vpc-endpoints'], queryFn: () => request<Rec>('/api/v1/aws/vpc/endpoints'), retry: 1 })
   const rows = listOf(endpoints.data, 'endpoints')
+  const filteredRows = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    if (q === '') return rows
+    return rows.filter((r) => [str(r, 'name'), str(r, 'service'), str(r, 'vpc_resource_id'), str(r, 'dns_name'), str(r, 'status')].some((v) => v.toLowerCase().includes(q)))
+  }, [rows, filter])
   const refresh = () => { void queryClient.invalidateQueries({ queryKey: ['vpc-endpoints'] }) }
   const create = useMutation({
     mutationFn: () => request<Rec>('/api/v1/aws/vpc/endpoints', { method: 'POST', body: { name: name.trim(), vpc_resource_id: vpc, service } }),
@@ -248,9 +288,10 @@ export function VpcEndpointsConsole({ initialSection }: { initialSection?: 'home
   })
   const del = useMutation({
     mutationFn: (id: string) => request<Rec>(`/api/v1/aws/vpc/endpoints/${id}`, { method: 'DELETE' }),
-    onSuccess: () => { setNotice('Endpoint deleted.'); refresh() },
+    onSuccess: () => { setNotice('Endpoint deleted.'); setSelected(''); refresh() },
     onError: (e: Error) => setNotice(`Delete failed: ${e.message}`),
   })
+  const sel = rows.find((e) => e.id === selected)
   return (
     <ConsoleWithHome
       icon="network"
@@ -278,7 +319,7 @@ export function VpcEndpointsConsole({ initialSection }: { initialSection?: 'home
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={endpoints.isFetching}
             health={[
-              "endpoints.isError ? 'Endpoints could not be loaded.' : `${rows.length} endpoint(s) listed.`",
+              endpoints.isError ? 'Endpoints could not be loaded.' : `${rows.length} endpoint(s) listed.`,
             "Endpoint records route lab traffic to platform services.",
             ]}
             settings={[
@@ -313,6 +354,18 @@ export function VpcEndpointsConsole({ initialSection }: { initialSection?: 'home
           </label>
           <AwsButton variant="primary" type="submit">Create endpoint</AwsButton>
         </form>
+        <AwsToolbar
+          right={
+            <>
+              <AwsRefreshButton onClick={refresh} busy={endpoints.isFetching} />
+              <AwsPreferencesButton disabledReason="Table preferences are not persisted in CloudForge." />
+            </>
+          }
+        >
+          <span className="text-sm text-aws-muted">
+            {rows.length} endpoint(s) · endpoint records — the DNS name is a teaching name, not registered.
+          </span>
+        </AwsToolbar>
         <AwsTable
           columns={[
             { header: 'Name', render: (r) => str(r, 'name') },
@@ -322,13 +375,84 @@ export function VpcEndpointsConsole({ initialSection }: { initialSection?: 'home
             { header: 'Status', render: (r) => str(r, 'status') },
             {
               header: 'Actions',
-              render: (r) => <AwsButton onClick={() => del.mutate(str(r, 'id'))}>Delete</AwsButton>,
+              render: (r) => (
+                <span className="flex gap-2">
+                  <AwsButton
+                    onClick={() => {
+                      setSelected(str(r, 'id'))
+                      setDetailTab('details')
+                    }}
+                  >
+                    Open
+                  </AwsButton>
+                  <AwsButton onClick={() => del.mutate(str(r, 'id'))}>Delete</AwsButton>
+                </span>
+              ),
             },
           ]}
-          rows={rows}
+          rows={filteredRows}
+          totalCount={rows.length}
+          filter={filter}
+          onFilterChange={setFilter}
+          filterPlaceholder="Filter endpoints"
           emptyMessage="No endpoints yet."
         />
       </AwsCard>
+      {sel && (
+        <AwsCard title={`Endpoint: ${str(sel, 'name')}`}>
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+            <p className="text-xs text-aws-muted">
+              {str(sel, 'service')} · {str(sel, 'id')} · status {str(sel, 'status') || '—'}
+            </p>
+            <div className="flex gap-2">
+              <AwsButton onClick={() => del.mutate(sel.id)}>Delete</AwsButton>
+              <button type="button" className="text-sm text-aws-link hover:underline" onClick={() => setSelected('')}>
+                Close
+              </button>
+            </div>
+          </div>
+          <ConsoleTabs
+            tabs={[
+              { id: 'details', label: 'Details' },
+              { id: 'policy', label: 'Endpoint policy' },
+            ]}
+            active={detailTab}
+            onChange={setDetailTab}
+          />
+          <div className="pt-3">
+            {detailTab === 'details' && (
+              <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-[220px_1fr]">
+                <dt className="font-medium">ID</dt>
+                <dd className="font-mono text-xs break-all">{sel.id}</dd>
+                <dt className="font-medium">Name</dt>
+                <dd>{str(sel, 'name')}</dd>
+                <dt className="font-medium">Service</dt>
+                <dd>{str(sel, 'service')}</dd>
+                <dt className="font-medium">VPC</dt>
+                <dd>
+                  {str(sel, 'vpc_name') || str(sel, 'vpc_resource_id')}
+                  {str(sel, 'vpc_id') !== '' && <span className="text-aws-muted"> ({str(sel, 'vpc_id')})</span>}
+                </dd>
+                <dt className="font-medium">DNS name</dt>
+                <dd className="font-mono text-xs break-all">{str(sel, 'dns_name')}</dd>
+                <dt className="font-medium">Status</dt>
+                <dd>{str(sel, 'status')}</dd>
+                <dt className="font-medium">Created</dt>
+                <dd>{str(sel, 'created_at') || '—'}</dd>
+                <dt className="font-medium">Note</dt>
+                <dd>{str(sel, 'note') || '—'}</dd>
+              </dl>
+            )}
+            {detailTab === 'policy' && (
+              <p className="text-sm text-aws-muted">
+                Endpoint policies are not modelled in CloudForge — there is no endpoint-policy API, so no policy
+                can be attached to this endpoint. The 2026-11-22 survey records VPC Endpoints only as a VPC nav
+                item; no policy editor was observed.
+              </p>
+            )}
+          </div>
+        </AwsCard>
+      )}
     </ConsoleWithHome>
   )
 }
@@ -417,7 +541,7 @@ export function NetworkFirewallConsole({ initialSection }: { initialSection?: 'h
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={firewalls.isFetching}
             health={[
-              "firewalls.isError ? 'Firewalls could not be loaded.' : `${rows.length} firewall(s) listed.`",
+              firewalls.isError ? 'Firewalls could not be loaded.' : `${rows.length} firewall(s) listed.`,
             "Rules are evaluated in priority order; anything unmatched is denied.",
             ]}
             settings={[
@@ -503,6 +627,18 @@ export function NetworkFirewallConsole({ initialSection }: { initialSection?: 'h
             emptyMessage="No rules."
           />
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            <AwsButton
+              disabled
+              title="Rules are fixed at create time — there is no update-rule API; delete and recreate the firewall to change its rules."
+            >
+              Add rule
+            </AwsButton>
+            <span className="text-xs text-aws-muted">
+              Rules are fixed at create time: the backend has no add/update-rule endpoint, so a firewall&apos;s
+              rules can only change by deleting it and creating a new one.
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <input value={srcIp} onChange={(e) => setSrcIp(e.target.value)} placeholder="Source IP" className={inputCls} aria-label="Source IP" />
             <input value={dstIp} onChange={(e) => setDstIp(e.target.value)} placeholder="Dest IP" className={inputCls} aria-label="Dest IP" />
             <input type="number" value={dstPort} onChange={(e) => setDstPort(Number(e.target.value))} className={`w-24 ${inputCls}`} aria-label="Dest port" />
@@ -583,7 +719,7 @@ export function FlowLogsConsole({ initialSection }: { initialSection?: 'home' | 
             onRefresh={() => void queryClient.invalidateQueries()}
             refreshing={groups.isFetching}
             health={[
-              "groups.isError ? 'Flow log groups could not be loaded.' : `${rows.length} group(s) listed.`",
+              groups.isError ? 'Flow log groups could not be loaded.' : `${rows.length} group(s) listed.`,
             "Capture calls the engine CollectTelemetry; engine down means an honest 503 and zero records.",
             ]}
             settings={[
@@ -684,6 +820,8 @@ export function TransitGatewayConsole({ initialSection }: { initialSection?: 'ho
             { label: 'Attachments', count: rows.reduce((n, r) => n + (Array.isArray(r.attachments) ? r.attachments.length : 0), 0), onSelect: goToList, note: 'Each attachment writes a 0.0.0.0/0 route into the VPC' },
             { label: 'Route tables', count: '—', onSelect: goToList, note: 'Transit gateway route tables are not modelled' },
             { label: 'Policy tables', count: 0, disabledReason: 'Not modelled.' },
+            { label: 'Transit gateway multicast', count: 0, disabledReason: 'Not modelled — no multicast-domain API in CloudForge.' },
+            { label: 'Metering policies', count: 0, disabledReason: 'Not modelled — no metering-policy API in CloudForge.' },
           ]}
           onRefresh={() => void queryClient.invalidateQueries()}
           refreshing={tgws.isFetching}

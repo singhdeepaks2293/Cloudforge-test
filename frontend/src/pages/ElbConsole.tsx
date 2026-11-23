@@ -4,6 +4,7 @@ import { AwsCard } from '../components/AwsCard.tsx'
 import { ConsoleWithHome, ServiceHomeDashboard } from '../components/ServiceHome.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
 import { AwsTable } from '../components/AwsTable.tsx'
+import { AwsActionsMenu, AwsPreferencesButton, AwsRefreshButton, AwsToolbar } from '../components/AwsShell.tsx'
 import { ErrorBox, Loading } from '../components/Layout.tsx'
 import { request } from '../services/api.ts'
 
@@ -15,12 +16,19 @@ const listOf = (v: unknown, key: string): Rec[] => {
 
 /**
  * Elastic Load Balancing console (Phase 3) — mirrors the AWS ELB
- * console's Load Balancers list, Listeners and Target Groups tabs.
- * SIMULATED: in-process round-robin with real HTTP/TCP health
+ * console's Load Balancers list and Target Groups table. Listeners
+ * are added per load balancer with an "Add :80 listener" button, not
+ * a tab. SIMULATED: in-process round-robin with real HTTP/TCP health
  * probes. No engine RPC, no nginx reconfiguration; the DNS name is
  * a local teaching name. Only targets whose last probe said healthy
  * are eligible for routing — unprobed targets are never assumed
- * healthy.
+ * healthy. The Load Balancers table has the v4 survey's Actions menu
+ * (9 items): Manage listeners and Delete load balancer are wired;
+ * Edit IP address type, Edit subnets, Manage instances, Edit health
+ * check settings, Edit security groups, Edit load balancer
+ * attributes and Manage tags are disabled with reasons — CloudForge
+ * load balancers have no IP address type, VPC, security groups,
+ * tags or editable attributes.
  */
 /**
  * Load-balancer list content without the console shell, so the EC2
@@ -39,11 +47,35 @@ export function ElbListContent() {
   const [selectedTg, setSelectedTg] = useState('')
   const [routeResult, setRouteResult] = useState('')
   const [notice, setNotice] = useState('')
+  const [filter, setFilter] = useState('')
+  const [checked, setChecked] = useState<string[]>([])
 
   const lbs = useQuery({ queryKey: ['elb-lbs'], queryFn: () => request<Rec>('/api/v1/aws/elb/load-balancers'), retry: 1 })
   const tgs = useQuery({ queryKey: ['elb-tgs'], queryFn: () => request<Rec>('/api/v1/aws/elb/target-groups'), retry: 1 })
-  const lbRows = listOf(lbs.data, 'load_balancers')
+  const lbRows = listOf(lbs.data, 'load_balancers').filter(
+    (lb) => filter.trim() === '' || String(lb.name ?? '').toLowerCase().includes(filter.toLowerCase()) || String(lb.id).toLowerCase().includes(filter.toLowerCase()),
+  )
   const tgRows = listOf(tgs.data, 'target_groups')
+  const checkedLb = lbRows.find((lb) => String(lb.id) === checked[0])
+  const addListener = (lbId: string, lbName: string) => {
+    const tg = tgRows[0]
+    if (!tg) {
+      setNotice('Create a target group first, then add a listener to this load balancer.')
+      return
+    }
+    void request(`/api/v1/aws/elb/load-balancers/${lbId}/listeners`, { method: 'POST', body: { port: 80, protocol: 'HTTP', target_group_id: String(tg.id) } }).then(() => {
+      setNotice(`Listener :80 added to ${lbName}, forwarding to target group ${String(tg.name)}.`)
+      refresh()
+    }).catch((e: Error) => setNotice(`Add listener failed: ${e.message}`))
+  }
+  const deleteLb = (lbId: string) => {
+    void request(`/api/v1/aws/elb/load-balancers/${lbId}`, { method: 'DELETE' }).then(() => {
+      setNotice('Load balancer deleted.')
+      setSelectedLb('')
+      setChecked([])
+      refresh()
+    }).catch((e: Error) => setNotice(`Delete failed: ${e.message}`))
+  }
   const tgDetail = useQuery({
     queryKey: ['elb-tg', selectedTg],
     queryFn: () => request<Rec>(`/api/v1/aws/elb/target-groups/${selectedTg}`),
@@ -110,11 +142,52 @@ export function ElbListContent() {
             <input id="elb-name" value={lbName} onChange={(e) => setLbName(e.target.value)} placeholder="web-lb" className="rounded-sm border border-aws-border-dark bg-white px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none" />
             <AwsButton type="submit" disabled={createLb.isPending}>Create load balancer</AwsButton>
           </form>
+          <AwsToolbar
+            right={
+              <>
+                <AwsRefreshButton onClick={refresh} busy={lbs.isFetching} />
+                <AwsPreferencesButton />
+              </>
+            }
+          >
+            <AwsActionsMenu
+              items={[
+                // Load Balancers Actions menu in the v4 survey's exact order (9).
+                { label: 'Edit IP address type', disabledReason: checkedLb === undefined ? 'Select a load balancer first.' : 'CloudForge load balancers have no IP address type.' },
+                { label: 'Edit subnets', disabledReason: checkedLb === undefined ? 'Select a load balancer first.' : 'CloudForge load balancers are not attached to a VPC or subnets.' },
+                { label: 'Manage instances', disabledReason: checkedLb === undefined ? 'Select a load balancer first.' : 'CloudForge load balancers route to target groups, not EC2 instances directly — register targets on the target group below.' },
+                { label: 'Edit health check settings', disabledReason: checkedLb === undefined ? 'Select a load balancer first.' : 'Health check settings are set when the target group is created (path /) and cannot be edited.' },
+                {
+                  label: 'Manage listeners',
+                  disabledReason: checkedLb === undefined ? 'Select a load balancer first.' : undefined,
+                  onClick: () => { if (checkedLb) addListener(String(checkedLb.id), String(checkedLb.name)) },
+                },
+                { label: 'Edit security groups', disabledReason: checkedLb === undefined ? 'Select a load balancer first.' : 'CloudForge load balancers have no security groups.' },
+                { label: 'Edit load balancer attributes', disabledReason: checkedLb === undefined ? 'Select a load balancer first.' : 'CloudForge load balancers have no editable attributes (no idle timeout, no deletion protection).' },
+                { label: 'Manage tags', disabledReason: checkedLb === undefined ? 'Select a load balancer first.' : 'CloudForge load balancers have no tags.' },
+                {
+                  label: 'Delete load balancer',
+                  disabledReason: checkedLb === undefined ? 'Select a load balancer first.' : undefined,
+                  onClick: () => { if (checkedLb) deleteLb(String(checkedLb.id)) },
+                },
+              ]}
+            />
+          </AwsToolbar>
           <AwsTable<Rec>
             caption="Load balancers"
             emptyMessage="No load balancers yet. Create one above."
             rows={lbRows}
-            totalCount={lbRows.length}
+            totalCount={listOf(lbs.data, 'load_balancers').length}
+            filter={filter}
+            onFilterChange={setFilter}
+            filterPlaceholder="Filter load balancers by name"
+            selectable
+            selectedIds={checked}
+            onToggleRow={(id) => {
+              setSelectedLb(id)
+              setChecked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [id]))
+            }}
+            onToggleAll={(all) => setChecked(all ? lbRows.map((r) => r.id) : [])}
             columns={[
               { header: 'Name', render: (lb) => <button type="button" className="text-aws-link underline" onClick={() => setSelectedLb(String(lb.id))}>{String(lb.name)}</button> },
               { header: 'State', render: (lb) => String(lb.status ?? '—') },
@@ -134,17 +207,7 @@ export function ElbListContent() {
                     <AwsButton
                       variant="secondary"
                       disabled={selectedLb !== String(lb.id) && selectedLb !== ''}
-                      onClick={() => {
-                        const tg = tgRows[0]
-                        if (!tg) {
-                          setNotice('Create a target group first, then add a listener to this load balancer.')
-                          return
-                        }
-                        void request(`/api/v1/aws/elb/load-balancers/${String(lb.id)}/listeners`, { method: 'POST', body: { port: 80, protocol: 'HTTP', target_group_id: String(tg.id) } }).then(() => {
-                          setNotice(`Listener :80 added, forwarding to target group ${String(tg.name)}.`)
-                          refresh()
-                        }).catch((e: Error) => setNotice(`Add listener failed: ${e.message}`))
-                      }}
+                      onClick={() => addListener(String(lb.id), String(lb.name))}
                     >
                       Add :80 listener
                     </AwsButton>
@@ -162,13 +225,7 @@ export function ElbListContent() {
                     <AwsButton
                       variant="secondary"
                       disabled={selectedLb !== String(lb.id)}
-                      onClick={() => {
-                        void request(`/api/v1/aws/elb/load-balancers/${String(lb.id)}`, { method: 'DELETE' }).then(() => {
-                          setNotice('Load balancer deleted.')
-                          setSelectedLb('')
-                          refresh()
-                        }).catch((e: Error) => setNotice(`Delete failed: ${e.message}`))
-                      }}
+                      onClick={() => deleteLb(String(lb.id))}
                     >
                       Delete
                     </AwsButton>
@@ -280,13 +337,13 @@ export function ElbConsole({ initialSection }: { initialSection?: 'home' | 'list
           actions={[
             { label: 'Create load balancer', primary: true, onClick: goToList },
             { label: 'Open EC2 console — Load Balancing section', to: '/services/ec2?section=load-balancers' },
-            { label: 'Open Auto Scaling (unsupported)', to: '/services/ec2?section=autoscaling' },
+            { label: 'Open Auto Scaling groups', to: '/services/ec2?section=autoscaling' },
           ]}
           cards={[
             { label: 'Load balancers', count: lbRows.length, onSelect: goToList },
             { label: 'Target groups', count: tgRows.length, onSelect: goToList },
             { label: 'Listeners', count: '—', onSelect: goToList, note: 'Per load balancer, on the list page' },
-            { label: 'Auto Scaling groups', count: 0, disabledReason: 'Auto Scaling is UNSUPPORTED — no scaling API.' },
+            { label: 'Auto Scaling groups', count: '—', to: '/services/ec2?section=autoscaling', note: 'API-EMULATED — groups with min/desired/max and a scale action; nothing is really launched.' },
           ]}
           onRefresh={() => void queryClient.invalidateQueries()}
           refreshing={lbs.isFetching}

@@ -25,7 +25,11 @@ const listOf = (v: unknown, key: string): Rec[] => {
 }
 
 const DEFAULT_CODE = "import json, sys\n\nevent = json.load(sys.stdin)\nprint(json.dumps({'got': event}))\n"
-const CREATE_STEPS = ['Basic information', 'Runtime and code', 'Permissions', 'Summary']
+const NODE_CODE = "const event = JSON.parse(require('fs').readFileSync(0, 'utf-8'));\nconsole.log(JSON.stringify({ got: event }));\n"
+// Wizard steps from the v4 survey (2026-11-22), which opened the Create
+// Event Function wizard and left via Cancel: author choice, function
+// name + runtime, configuration (toggles + additional settings), summary.
+const CREATE_STEPS = ['Author', 'Name and runtime', 'Configuration', 'Summary']
 
 /**
  * Lambda console — mirrors the AWS Lambda console: service sub-nav,
@@ -44,7 +48,17 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
   const queryClient = useQueryClient()
   const [activeSub, setActiveSub] = useState(initialSection ?? 'functions')
   const [name, setName] = useState('')
-  const [runtime, setRuntime] = useState('python3')
+  // Runtime default is Node.js 22.x, the newest the backend supports
+  // (SupportedRuntimes in backend/internal/phase3/phase3.go). Node.js
+  // 26.x is the AWS console default in the v4 survey, but the backend
+  // rejects it with 400 unsupported_runtime, so it is listed in the
+  // wizard as a disabled option with that reason instead of a default
+  // that would make every create fail.
+  const [runtime, setRuntime] = useState('nodejs22')
+  const [author, setAuthor] = useState<'scratch' | 'blueprint' | 'container'>('scratch')
+  const [blueprint, setBlueprint] = useState<'echo' | 'hello'>('echo')
+  const [durable] = useState(false)
+  const [ec2Capacity] = useState(false)
   const [code, setCode] = useState(DEFAULT_CODE)
   const [selected, setSelected] = useState('')
   const [checked, setChecked] = useState<string[]>([])
@@ -53,11 +67,14 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
   const [invokeResult, setInvokeResult] = useState<Rec | null>(null)
   const [notice, setNotice] = useState('')
   const [noticeTone, setNoticeTone] = useState<'success' | 'info' | 'error'>('info')
+  const [filter, setFilter] = useState('')
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardStep, setWizardStep] = useState(0)
 
   const functions = useQuery({ queryKey: ['lambda-functions'], queryFn: () => request<Rec>('/api/v1/aws/lambda/functions'), retry: 1 })
-  const rows = listOf(functions.data, 'functions')
+  const rows = listOf(functions.data, 'functions').filter(
+    (r) => filter.trim() === '' || String(r.name ?? '').toLowerCase().includes(filter.toLowerCase()) || r.id.toLowerCase().includes(filter.toLowerCase()),
+  )
   const invocations = useQuery({
     queryKey: ['lambda-invocations', selected],
     queryFn: () => request<Rec>(`/api/v1/aws/lambda/functions/${selected}/invocations`),
@@ -128,10 +145,14 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
       fidelityFootnote="subprocess sandbox · not containers · not AWS Lambda"
       subNav={[
         { id: 'home', label: 'Lambda dashboard' },
-        { id: 'functions', label: 'Functions' },
+        { id: 'functions', label: 'Event Functions' },
+        { id: 'web-functions', label: 'Web Functions' },
         { id: 'layers', label: 'Layers', disabledReason: 'Not modelled' },
+        { id: 'applications', label: 'Applications' },
+        { id: 'test-events', label: 'Test events' },
         { id: 'event-sources', label: 'Event source mappings', disabledReason: 'Triggers are per-function via the API' },
-        { id: 'code-signing', label: 'Code signing', disabledReason: 'Not supported' },
+        { id: 'code-signing', label: 'Code signing configurations' },
+        { id: 'settings', label: 'Settings' },
       ]}
       activeSub={activeSub}
       onSubChange={setActiveSub}
@@ -167,7 +188,7 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
             { label: 'View SQS queues (trigger source)', to: '/services/sqs' },
           ]}
           cards={[
-            { label: 'Functions', count: rows.length, onSelect: () => setActiveSub('functions') },
+            { label: 'Event Functions', count: rows.length, onSelect: () => setActiveSub('functions') },
             { label: 'Layers', count: 0, disabledReason: 'Not modelled.' },
             { label: 'Event source mappings', count: '—', note: 'Triggers are per-function via the API' },
             {
@@ -203,40 +224,104 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
               current={wizardStep}
               onStep={setWizardStep}
               onCancel={() => setWizardOpen(false)}
-              onSubmit={() => create.mutate()}
+              onSubmit={() => {
+                if (name.trim() === '' || name.trim().length > 64) {
+                  flash('Function name must be 1–64 characters.', 'error')
+                  setWizardStep(1)
+                  return
+                }
+                create.mutate()
+              }}
               submitLabel="Create function"
               busy={create.isPending}
             >
               {wizardStep === 0 && (
                 <div className="space-y-3">
-                  <h3 className="text-sm font-semibold">Basic information</h3>
-                  <label className="block text-sm">
-                    <span className="mb-1 block font-medium">Function name</span>
-                    <input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="echoer"
-                      className="w-full max-w-md rounded-sm border border-aws-border-dark px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none"
-                    />
+                  <h3 className="text-sm font-semibold">Author</h3>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="radio" name="lambda-author" checked={author === 'scratch'} onChange={() => setAuthor('scratch')} className="mt-1" />
+                    <span><strong>Author from scratch</strong> — write the code in the next step.</span>
                   </label>
-                  <p className="text-sm text-aws-muted">
-                    Names are local to this CloudForge deployment. There is no AWS account, region or ARN allocation.
-                  </p>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="lambda-author"
+                      checked={author === 'blueprint'}
+                      onChange={() => {
+                        setAuthor('blueprint')
+                        if (blueprint === 'echo') { setCode(DEFAULT_CODE); setRuntime('python3') }
+                        else { setCode(NODE_CODE); setRuntime('nodejs22') }
+                      }}
+                      className="mt-1"
+                    />
+                    <span><strong>Use a blueprint</strong> — a built-in starting template (CloudForge has no AWS blueprint library).</span>
+                  </label>
+                  {author === 'blueprint' && (
+                    <label className="block text-sm">
+                      <span className="mb-1 block font-medium">Blueprint</span>
+                      <select
+                        value={blueprint}
+                        onChange={(e) => {
+                          const next = e.target.value as 'echo' | 'hello'
+                          setBlueprint(next)
+                          if (next === 'echo') { setCode(DEFAULT_CODE); setRuntime('python3') }
+                          else { setCode(NODE_CODE); setRuntime('nodejs22') }
+                        }}
+                        className="rounded-sm border border-aws-border-dark px-2 py-1 text-sm"
+                      >
+                        <option value="echo">Echo event (Python) — reads the event JSON and prints it back</option>
+                        <option value="hello">Hello world (Node.js) — reads the event JSON and prints it back</option>
+                      </select>
+                    </label>
+                  )}
+                  <label className="flex items-start gap-2 text-sm opacity-60">
+                    <input type="radio" name="lambda-author" checked={author === 'container'} disabled className="mt-1" />
+                    <span><strong>Container image</strong> — not supported: CloudForge has no Docker invoker and no container-image registry for functions.</span>
+                  </label>
                 </div>
               )}
               {wizardStep === 1 && (
                 <div className="space-y-3">
-                  <h3 className="text-sm font-semibold">Runtime and code</h3>
+                  <h3 className="text-sm font-semibold">Function name and runtime</h3>
+                  <label className="block text-sm">
+                    <span className="mb-1 block font-medium">Function name (1–64 characters)</span>
+                    <input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="echoer"
+                      maxLength={64}
+                      className="w-full max-w-md rounded-sm border border-aws-border-dark px-2.5 py-1.5 text-sm focus:border-aws-link focus:outline-none"
+                    />
+                  </label>
+                  {name.trim() !== '' && name.trim().length > 64 && (
+                    <p className="text-sm text-aws-error" role="alert">Function names are at most 64 characters.</p>
+                  )}
                   <label className="block text-sm">
                     <span className="mb-1 block font-medium">Runtime</span>
-                    <select value={runtime} onChange={(e) => setRuntime(e.target.value)} className="rounded-sm border border-aws-border-dark px-2 py-1 text-sm">
-                      <option value="python3">Python 3</option>
+                    <select
+                      value={runtime}
+                      onChange={(e) => {
+                        const next = e.target.value
+                        setRuntime(next)
+                        if (next.startsWith('node') && code === DEFAULT_CODE) setCode(NODE_CODE)
+                        if (next.startsWith('python') && code === NODE_CODE) setCode(DEFAULT_CODE)
+                      }}
+                      className="rounded-sm border border-aws-border-dark px-2 py-1 text-sm"
+                    >
+                      <option value="nodejs26" disabled>Node.js 26.x (AWS console default — not supported in CloudForge; the backend supports up to Node.js 22.x)</option>
+                      <option value="nodejs22">Node.js 22.x</option>
+                      <option value="nodejs20">Node.js 20.x</option>
+                      <option value="node">Node.js (node)</option>
                       <option value="python3.12">Python 3.12</option>
                       <option value="python3.11">Python 3.11</option>
-                      <option value="nodejs20">Node.js 20</option>
-                      <option value="nodejs22">Node.js 22</option>
+                      <option value="python3">Python 3</option>
                     </select>
                   </label>
+                  <p className="text-sm text-aws-muted">
+                    Node.js 26.x is the AWS console default in the v4 survey, but CloudForge&apos;s backend rejects
+                    it (400 unsupported_runtime) — the newest supported Node.js runtime is 22.x, so that is the
+                    default here. Python and Node.js run as sandboxed subprocesses, not containers.
+                  </p>
                   <label className="block text-sm">
                     <span className="mb-1 block font-medium">Code (whole program — reads the event as JSON on stdin, prints the result on stdout)</span>
                     <textarea value={code} onChange={(e) => setCode(e.target.value)} rows={8} className="w-full rounded-sm border border-aws-border-dark px-2 py-1 font-mono text-xs" />
@@ -244,12 +329,29 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
                 </div>
               )}
               {wizardStep === 2 && (
-                <div className="space-y-2 text-sm">
-                  <h3 className="text-sm font-semibold">Permissions</h3>
-                  <p className="text-aws-muted">
-                    Functions run with <strong>no IAM role and no AWS credentials</strong>. There is no execution-role
-                    model in CloudForge, so no role is attached here.
-                  </p>
+                <div className="space-y-3 text-sm">
+                  <h3 className="text-sm font-semibold">Configuration</h3>
+                  <label className="flex items-start gap-2 opacity-60">
+                    <input type="checkbox" checked={durable} disabled className="mt-1" />
+                    <span><strong>Durable execution</strong> — not available in CloudForge: a function runs once in a subprocess and does not resume after a failure.</span>
+                  </label>
+                  <label className="flex items-start gap-2 opacity-60">
+                    <input type="checkbox" checked={ec2Capacity} disabled className="mt-1" />
+                    <span><strong>EC2 capacity provider</strong> — not available in CloudForge: there is no capacity-provider backend and no EC2 capacity to draw on.</span>
+                  </label>
+                  <details className="rounded-sm border border-aws-border p-3">
+                    <summary className="cursor-pointer font-medium">Additional settings</summary>
+                    <dl className="mt-2 space-y-1 text-aws-muted">
+                      <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium text-aws-text">Architecture</dt><dd>x86_64 (fixed — no arm64 in the subprocess sandbox)</dd></div>
+                      <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium text-aws-text">Execution role</dt><dd>None — functions run with no IAM role and no AWS credentials</dd></div>
+                      <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium text-aws-text">HTTP(S) endpoints</dt><dd>None — invoke from this console or the API only</dd></div>
+                      <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium text-aws-text">Tenant isolation</dt><dd>Not modelled</dd></div>
+                      <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium text-aws-text">VPC</dt><dd>None — no VPC attachment in CloudForge</dd></div>
+                      <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium text-aws-text">Code signing</dt><dd>None — functions run unsigned in the sandbox</dd></div>
+                      <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium text-aws-text">KMS key</dt><dd>None — no encryption-key setting for function code</dd></div>
+                      <div className="flex gap-2"><dt className="w-40 shrink-0 font-medium text-aws-text">Tags</dt><dd>Not stored — the teaching Lambda API has no tag field</dd></div>
+                    </dl>
+                  </details>
                 </div>
               )}
               {wizardStep === 3 && (
@@ -257,7 +359,10 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
                   <h3 className="text-sm font-semibold">Summary</h3>
                   <dl className="divide-y divide-aws-border border-y border-aws-border">
                     <div className="flex gap-2 px-1 py-2"><dt className="w-48 shrink-0 font-medium">Function name</dt><dd>{name.trim() || '—'}</dd></div>
+                    <div className="flex gap-2 px-1 py-2"><dt className="w-48 shrink-0 font-medium">Author</dt><dd>{author === 'scratch' ? 'Author from scratch' : author === 'blueprint' ? `Blueprint — ${blueprint === 'echo' ? 'Echo event (Python)' : 'Hello world (Node.js)'}` : 'Container image'}</dd></div>
                     <div className="flex gap-2 px-1 py-2"><dt className="w-48 shrink-0 font-medium">Runtime</dt><dd>{runtime}</dd></div>
+                    <div className="flex gap-2 px-1 py-2"><dt className="w-48 shrink-0 font-medium">Durable execution</dt><dd>Off (not available)</dd></div>
+                    <div className="flex gap-2 px-1 py-2"><dt className="w-48 shrink-0 font-medium">EC2 capacity provider</dt><dd>Off (not available)</dd></div>
                     <div className="flex gap-2 px-1 py-2"><dt className="w-48 shrink-0 font-medium">Timeout / memory</dt><dd>10s / 256 MB</dd></div>
                     <div className="flex gap-2 px-1 py-2"><dt className="w-48 shrink-0 font-medium">Sandbox</dt><dd>Subprocess with timeout, output cap and prlimit — not containers</dd></div>
                   </dl>
@@ -267,8 +372,10 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
             </AwsWizard>
           )}
           <p className="text-xs text-aws-muted">
-            Wizard steps inferred from the console&apos;s Create function action, not observed — the 2026-11-22
-            survey opened no create wizard, so no AWS wizard steps were recorded.
+            Wizard steps follow the v4 survey (2026-11-22), which opened the Create Event Function wizard and left
+            via Cancel: author from scratch / blueprint / container image, function name, runtime (Node.js 26.x
+            default in AWS — CloudForge&apos;s newest supported runtime is Node.js 22.x), Durable execution and EC2
+            capacity provider toggles, collapsed Additional settings.
           </p>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -318,7 +425,10 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
                 caption="Lambda functions"
                 emptyMessage="No functions yet. Choose Create function to make one."
                 rows={rows}
-                totalCount={rows.length}
+                totalCount={listOf(functions.data, 'functions').length}
+                filter={filter}
+                onFilterChange={setFilter}
+                filterPlaceholder="Filter functions by name"
                 selectable
                 selectedIds={checked}
                 onToggleRow={(id) => {
@@ -336,7 +446,9 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
                     ),
                   },
                   { header: 'Description', render: () => <span title="CloudForge does not store a function description">Not available</span> },
+                  { header: 'Package type', render: () => 'Zip' },
                   { header: 'Runtime', render: (f) => String(f.runtime ?? '—') },
+                  { header: 'Type', render: () => 'Event Function' },
                   { header: 'Last modified', render: (f) => (typeof f.updated_at === 'string' ? new Date(f.updated_at as string).toLocaleString() : '—') },
                   {
                     header: 'Actions',
@@ -350,8 +462,9 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
                 ]}
               />
               <p className="mt-2 text-sm text-aws-muted">
-                Supported runtimes: python3 / nodejs only. A Docker invoker does not exist. No VPC attachment, managed
-                scaling, or layers. The sandbox that actually applied is reported on every invocation.
+                Supported runtimes: python3 / nodejs only. A Docker invoker does not exist, so every function&apos;s
+                package type is Zip — container images cannot be created. No VPC attachment, managed scaling, or
+                layers. The sandbox that actually applied is reported on every invocation.
               </p>
             </AwsCard>
           )}
@@ -463,6 +576,71 @@ export function LambdaConsole({ initialSection }: { initialSection?: string }) {
             </AwsCard>
           )}
         </div>
+      )}
+
+      {activeSub === 'web-functions' && (
+        <AwsCard title="Web Functions">
+          <p className="text-sm text-aws-muted">
+            Web Functions are <strong>UNSUPPORTED</strong> in CloudForge — there is no web-function type and no
+            function-URL hosting. Functions here are event functions only: they run when invoked with an event,
+            not when a browser requests a URL.
+          </p>
+          <div className="mt-3">
+            <AwsButton disabled title="Web Functions are UNSUPPORTED — no web-function type.">
+              Create web function
+            </AwsButton>
+          </div>
+        </AwsCard>
+      )}
+
+      {activeSub === 'applications' && (
+        <AwsCard title="Applications">
+          <p className="text-sm text-aws-muted">
+            Applications are <strong>UNSUPPORTED</strong> in CloudForge — there is no SAM/template application
+            model and no application registry. Functions are created one at a time on the Event Functions page.
+          </p>
+          <div className="mt-3">
+            <AwsButton disabled title="Applications are UNSUPPORTED — no application model.">
+              Create application
+            </AwsButton>
+          </div>
+        </AwsCard>
+      )}
+
+      {activeSub === 'test-events' && (
+        <AwsCard title="Test events">
+          <p className="text-sm text-aws-muted">
+            CloudForge keeps no saved test-event library — test events are entered per function on that
+            function&apos;s Test tab and sent as the invoke payload. Open a function to test it.
+          </p>
+          <div className="mt-3">
+            <AwsButton onClick={() => setActiveSub('functions')}>Open Event Functions</AwsButton>
+          </div>
+        </AwsCard>
+      )}
+
+      {activeSub === 'code-signing' && (
+        <AwsCard title="Code signing configurations">
+          <p className="text-sm text-aws-muted">
+            Code signing configurations are <strong>UNSUPPORTED</strong> in CloudForge — there is no code-signing
+            API and no signing profile. Functions run unsigned in the subprocess sandbox.
+          </p>
+          <div className="mt-3">
+            <AwsButton disabled title="Code signing configurations are UNSUPPORTED — no code-signing API.">
+              Create code signing configuration
+            </AwsButton>
+          </div>
+        </AwsCard>
+      )}
+
+      {activeSub === 'settings' && (
+        <AwsCard title="Settings">
+          <p className="text-sm text-aws-muted">
+            CloudForge stores no Lambda console settings — there is no default runtime, concurrency or
+            execution-role setting to change. Supported runtimes are python3 / nodejs only; functions run as
+            sandboxed subprocesses with a 10s timeout and 256 MB memory.
+          </p>
+        </AwsCard>
       )}
     </ServiceConsole>
   )

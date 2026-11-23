@@ -150,7 +150,7 @@ describe('Phase 6 consoles', () => {
   })
 
   it('DMS renders replication tasks with row counts', async () => {
-    const html = await renderSettled(<DmsConsole />, '/services/dms', [pf(['dms-tasks'], '/api/v1/aws/dms/tasks'), pf(['rds-instances'], '/api/v1/aws/rds/instances')])
+    const html = await renderSettled(<DmsConsole initialSection="list" />, '/services/dms', [pf(['dms-tasks'], '/api/v1/aws/dms/tasks'), pf(['rds-instances'], '/api/v1/aws/rds/instances')])
     expect(html).toContain('platform-to-rds')
     expect(html).toContain('42')
   })

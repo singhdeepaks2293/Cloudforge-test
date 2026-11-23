@@ -79,7 +79,7 @@ export default function App() {
             <Route path="services/vpc" element={<VpcConsole />} />
             <Route path="services/nacl" element={<Navigate to="/services/vpc?section=nacls" replace />} />  // survey 2026-11-22: Network ACLs is the VPC console's Security section
             <Route path="services/iam" element={<IamConsole initialSection="roles" />} />  // survey: IAM lands on Roles
-            <Route path="services/cloudwatch" element={<CloudWatchConsole />} />
+            <Route path="services/cloudwatch" element={<CloudWatchConsole initialSection="home" />} />
             <Route path="services/cloudtrail" element={<CloudTrailConsole initialSection="home" />} />
             {/* Phase 3 — data and application services. */}
             <Route path="services/dynamodb" element={<DynamoDbConsole />} />
@@ -124,7 +124,7 @@ export default function App() {
             <Route path="services/vpcendpoints" element={<VpcEndpointsConsole initialSection="home" />} />
             <Route path="services/networkfirewall" element={<NetworkFirewallConsole initialSection="home" />} />
             <Route path="services/flowlogs" element={<FlowLogsConsole initialSection="home" />} />
-            <Route path="services/ssm" element={<SsmConsole />} />
+            <Route path="services/ssm" element={<SsmConsole initialSection="home" />} />
             <Route path="services/trustedadvisor" element={<TrustedAdvisorConsole initialSection="home" />} />
             <Route path="services/costexplorer" element={<CostExplorerConsole initialSection="home" />} />
             <Route path="services/budgets" element={<BudgetsConsole />} />  // survey 2026-11-22: Budgets is the Billing console's Budgets tab — same table as in Cost Explorer

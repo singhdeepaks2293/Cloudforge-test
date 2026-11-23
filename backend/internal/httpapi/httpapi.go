@@ -42,8 +42,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Version is the M9 API version string.
-const Version = "0.9.0-m9"
+// Version is the v4 API version string.
+const Version = "4.0.0"
 
 type ctxKey string
 

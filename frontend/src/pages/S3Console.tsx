@@ -60,6 +60,17 @@ import type { S3Bucket, S3Object } from '../types/index.ts'
  * operation either (see backend/internal/httpapi/httpapi.go — the S3
  * routes are buckets, objects, versioning and policy only), so they
  * stay disabled in the nav with the reason shown under the label.
+ *
+ * v4 survey (2026-11-22) notes: the Buckets table header is now
+ * "AWS Region"; bucket-type tabs (General purpose / Directory) sit
+ * above the table — only general-purpose buckets exist here. The
+ * IAM Access Analyzer column is KEPT even though the new survey
+ * shows no Analyzer column: the old survey recorded one and the two
+ * surveys disagree, so the column stays as-is (always "Not
+ * available") rather than being deleted on one pass's evidence.
+ * Storage Lens now has its survey tabs (dashboards / groups) and an
+ * empty table with the survey's columns (Dashboard name, Status).
+ * Access Points for FSx is an honest UNSUPPORTED section.
  */
 const CREATE_STEPS = ['General configuration', 'Ownership', 'Block Public Access', 'Versioning', 'Summary']
 
@@ -73,6 +84,14 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
   const [newName, setNewName] = useState('')
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardStep, setWizardStep] = useState(0)
+  const [bucketFilter, setBucketFilter] = useState('')
+  // Bucket-type tabs above the Buckets table (v4 survey): General
+  // purpose buckets / Directory buckets. Only general-purpose buckets
+  // exist in CloudForge (local MinIO has no directory-bucket type).
+  const [bucketType, setBucketType] = useState<'general' | 'directory'>('general')
+  // Storage Lens tabs (v4 survey): Storage Lens dashboards / Storage
+  // Lens groups. Both are empty — no dashboard exists.
+  const [lensTab, setLensTab] = useState<'dashboards' | 'groups'>('dashboards')
   const [notice, setNotice] = useState('')
   const [noticeTone, setNoticeTone] = useState<'success' | 'info' | 'error'>('info')
 
@@ -101,7 +120,9 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
     onError: (e: Error) => flash(`Delete bucket failed: ${e.message}`, 'error'),
   })
 
-  const rows: (S3Bucket & { id: string })[] = (buckets.data ?? []).map((b) => ({ ...b, id: b.name }))
+  const rows: (S3Bucket & { id: string })[] = (buckets.data ?? [])
+    .map((b) => ({ ...b, id: b.name }))
+    .filter((b) => bucketFilter.trim() === '' || b.name.toLowerCase().includes(bucketFilter.toLowerCase()))
   const selected = rows.find((b) => b.name === selectedName) ?? null
   const minioDown = buckets.isError
   const nameValid = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(newName.trim())
@@ -119,6 +140,7 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
         { id: 'buckets', label: 'Buckets' },
         { id: 'files', label: 'Files' },
         { id: 'access-points', label: 'Access points', group: 'Access management and security', disabledReason: 'Not supported by the local adapter' },
+        { id: 'access-points-fsx', label: 'Access Points for FSx', group: 'Access management and security' },
         { id: 'access-grants', label: 'Access Grants', group: 'Access management and security' },
         { id: 'analyzer', label: 'IAM Access Analyzer', group: 'Access management and security' },
         { id: 'storage-management', label: 'Storage management and insights' },
@@ -315,14 +337,34 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
             />
           </AwsToolbar>
 
-          {buckets.isPending && <Loading label="Loading buckets" />}
-          {buckets.data && (
+          <ConsoleTabs
+            tabs={[
+              { id: 'general', label: 'General purpose buckets' },
+              { id: 'directory', label: 'Directory buckets' },
+            ]}
+            active={bucketType}
+            onChange={(id) => setBucketType(id as 'general' | 'directory')}
+          />
+          {bucketType === 'directory' && (
+            <AwsCard title="Directory buckets">
+              <p className="text-sm text-aws-muted">
+                Directory buckets are <strong>UNSUPPORTED</strong> in CloudForge — local MinIO has no
+                directory-bucket type, so no directory bucket can exist or be created. All CloudForge buckets are
+                general purpose buckets, listed on the General purpose buckets tab.
+              </p>
+            </AwsCard>
+          )}
+          {buckets.isPending && bucketType === 'general' && <Loading label="Loading buckets" />}
+          {buckets.data && bucketType === 'general' && (
             <AwsCard>
               <AwsTable<S3Bucket & { id: string }>
                 caption="S3 buckets"
                 emptyMessage="No buckets yet — choose Create bucket to make one."
                 rows={rows}
-                totalCount={rows.length}
+                totalCount={(buckets.data ?? []).length}
+                filter={bucketFilter}
+                onFilterChange={setBucketFilter}
+                filterPlaceholder="Filter buckets by name"
                 selectable
                 selectedIds={checked}
                 onToggleRow={(id) => {
@@ -346,7 +388,7 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
                       </button>
                     ),
                   },
-                  { header: 'Region', render: () => 'cf-local-1' },
+                  { header: 'AWS Region', render: () => 'cf-local-1' },
                   { header: 'IAM Access Analyzer', render: () => <span title="No Access Analyzer data exists in CloudForge">Not available</span> },
                   { header: 'Creation date', render: (b) => (b.created_at ? new Date(b.created_at).toLocaleString() : '—') },
                   {
@@ -367,7 +409,7 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
             </AwsCard>
           )}
 
-          {selected && (
+          {selected && bucketType === 'general' && (
             <AwsCard>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -445,6 +487,24 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
         </div>
       )}
 
+      {activeSub === 'access-points-fsx' && (
+        <div className="space-y-4">
+          <AwsCard title="Access Points for FSx">
+            <p className="text-sm text-aws-muted">
+              Access Points for FSx are <strong>UNSUPPORTED</strong> in CloudForge — there is no FSx access-point
+              API and no FSx file system for an access point to attach to. The v4 survey records &ldquo;Access
+              Points for FSx&rdquo; as an S3 left-nav item only — no table was recorded, so no access point is
+              shown here and none is invented.
+            </p>
+            <div className="mt-3">
+              <AwsButton disabled title="Access Points for FSx are UNSUPPORTED — no FSx access-point API.">
+                Create access point
+              </AwsButton>
+            </div>
+          </AwsCard>
+        </div>
+      )}
+
       {activeSub === 'access-grants' && (
         <div className="space-y-4">
           <AwsCard title="Access Grants">
@@ -452,7 +512,9 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
               Access Grants is <strong>UNSUPPORTED</strong> in CloudForge — the backend has no access-grants API.
               No grant exists, no grant can be created, and grants do not change access to any bucket. The
               2026-11-22 survey records &ldquo;Access Grants&rdquo; as an S3 left-nav item only — no table columns
-              were recorded, so no grant list is shown here and no grant is invented.
+              were recorded, so no grant list is shown here and no grant is invented. The v4 survey adds the
+              prerequisite for the AWS getting-started flow: an IAM Identity Center instance in this Region must
+              exist first — CloudForge has no Identity Center either.
             </p>
             <div className="mt-3">
               <AwsButton disabled title="Access Grants is UNSUPPORTED — no access-grants API.">
@@ -516,13 +578,42 @@ export function S3Console({ initialSection }: { initialSection?: string }) {
             <p className="text-sm text-aws-muted">
               Storage Lens is <strong>UNSUPPORTED</strong> in CloudForge — there is no metrics pipeline for bucket
               storage in this deployment, so no Storage Lens dashboard can be built and no storage metrics are
-              collected. The 2026-11-22 survey records &ldquo;Storage Lens&rdquo; as an S3 left-nav item only — no
-              dashboard layout was recorded, so no dashboard is shown here and no metrics are invented.
+              collected. The v4 survey records 0 dashboards and the tabs Storage Lens dashboards / Storage Lens
+              groups with the columns Dashboard name and Status — the empty table below uses exactly those
+              columns; no metrics are invented.
             </p>
             <div className="mt-3">
               <AwsButton disabled title="Storage Lens is UNSUPPORTED — no storage-metrics pipeline.">
                 Create dashboard
               </AwsButton>
+            </div>
+          </AwsCard>
+          <AwsCard title="Storage Lens dashboards">
+            <ConsoleTabs
+              tabs={[
+                { id: 'dashboards', label: 'Storage Lens dashboards' },
+                { id: 'groups', label: 'Storage Lens groups' },
+              ]}
+              active={lensTab}
+              onChange={(id) => setLensTab(id as 'dashboards' | 'groups')}
+            />
+            <div className="pt-3">
+              {lensTab === 'dashboards' ? (
+                <AwsTable<{ id: string }>
+                  caption="Storage Lens dashboards"
+                  emptyMessage="No Storage Lens dashboards — create one above (disabled: no storage-metrics pipeline)."
+                  rows={[]}
+                  totalCount={0}
+                  columns={[
+                    { header: 'Dashboard name', render: () => '—' },
+                    { header: 'Status', render: () => '—' },
+                  ]}
+                />
+              ) : (
+                <p className="text-sm text-aws-muted">
+                  No Storage Lens groups — groups are created from dashboards, and no dashboard exists.
+                </p>
+              )}
             </div>
           </AwsCard>
           <AwsCard title="What you can check instead">
