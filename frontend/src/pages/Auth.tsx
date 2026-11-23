@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, login, register } from '../services/api.ts'
 import { ErrorBox } from '../components/Layout.tsx'
 import { AwsButton } from '../components/AwsButton.tsx'
@@ -8,9 +9,13 @@ import { AwsCard, PageHeader } from '../components/AwsCard.tsx'
 
 function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  // v4.1 "Sign in as root": unchecked by default — the session is
+  // learner-scoped unless the user explicitly asks for root.
+  const [asRoot, setAsRoot] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -20,10 +25,14 @@ function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     setBusy(true)
     try {
       if (mode === 'login') {
-        await login(email, password)
+        await login(email, password, asRoot)
       } else {
         await register(name, email, password)
       }
+      // The header shows the session role from /auth/me — refetch
+      // it now so the role shown after sign-in is this session's,
+      // not a previous session's cached one.
+      await queryClient.invalidateQueries({ queryKey: ['me'] })
       navigate('/')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Request failed')
@@ -76,6 +85,23 @@ function AuthForm({ mode }: { mode: 'login' | 'register' }) {
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
           />
         </label>
+        {mode === 'login' && (
+          <label className="flex items-start gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              checked={asRoot}
+              onChange={(e) => setAsRoot(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0"
+            />
+            <span>
+              Sign in as root (admin)
+              <span className="block text-xs font-normal text-aws-muted">
+                Root sign-in needs an admin account. Without it, you sign in as a learner — IAM management and other
+                admin-only pages stay closed until you sign in as root.
+              </span>
+            </span>
+          </label>
+        )}
         {error && <ErrorBox message={error} />}
         <AwsButton type="submit" variant="primary" disabled={busy} className="w-full">
           {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}

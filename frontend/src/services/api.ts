@@ -506,10 +506,16 @@ export async function fetchTopology(): Promise<Topology> {
   return parseTopology(data)
 }
 
-export async function login(email: string, password: string): Promise<AuthResponse> {
+/**
+ * POST /api/v1/auth/login. `asRoot` is the "Sign in as root" option
+ * on the login page: with it checked, only an admin account signs
+ * in, and the session acts as admin; unchecked (the default) the
+ * session is learner-scoped even for an admin account.
+ */
+export async function login(email: string, password: string, asRoot = false): Promise<AuthResponse> {
   const data = await request<AuthResponse>('/api/v1/auth/login', {
     method: 'POST',
-    body: { email, password },
+    body: { email, password, as_root: asRoot },
     auth: false,
   })
   if (!data || typeof data.token !== 'string' || data.token === '') {

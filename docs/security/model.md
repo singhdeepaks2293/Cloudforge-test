@@ -57,7 +57,14 @@ encryption at rest (Postgres/Redis volumes are local files).
   (`CLOUDFORGE_TOKEN_TTL`), signed with `CLOUDFORGE_JWT_SECRET`.
   Claims: `sub` (user id), `iss: cloudforge`, `iat`, `exp`, and
   since Phase 7 a `jti` (unique token id, `auth.NewJTI`).
-  No roles or PII are embedded in the token.
+  Since v4.1 the token also carries a `role` claim — the
+  session-scoped effective role chosen at sign-in ("Sign in as
+  root" gives `admin` for an admin account, otherwise `learner`).
+  The account's DB role and any other PII are never embedded: the
+  session acts with the claimed role only, and the claim is
+  HS256-signed so a client cannot widen its own session. Tokens
+  issued before v4.1 (or at registration) have no `role` claim and
+  fall back to the account's DB role.
 - **Revocation (Phase 7, R3):** tokens are checked against a
   denylist on every authenticated request. `POST
   /api/v1/auth/logout` revokes the caller's `jti`; an admin can
@@ -92,6 +99,17 @@ encryption at rest (Postgres/Redis volumes are local files).
   registering with `CLOUDFORGE_ADMIN_EMAIL` is promoted to admin
   (bootstrap). Admin-only: user list, course CRUD, audit list,
   curriculum re-seed.
+- **Session scoping (v4.1, "Sign in as root"):** the login page
+  offers a root checkbox, unchecked by default. Signing in with it
+  checked succeeds only for an admin account (otherwise 403
+  `admin role required`) and the session acts as admin. Without it
+  the session is learner-scoped even for an admin account, so
+  admin-only endpoints stay closed until the user explicitly signs
+  in as root. The scope is carried as a signed `role` claim in the
+  session token (see "Sessions" above); `GET /api/v1/auth/me`
+  returns the session's effective role, which the header and
+  Account page show as "Signed in as root" / "Signed in as
+  learner".
 - Every lab/resource/terraform/terminal handler checks ownership:
   a lab belonging to another user returns **404, not 403**, so one
   user cannot enumerate another's labs. The same rule applies to

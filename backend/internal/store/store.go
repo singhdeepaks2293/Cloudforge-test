@@ -38,7 +38,14 @@ type UserStore interface {
 	List() ([]*auth.User, error)
 	SetRole(id, role string) (*auth.User, error)
 	IssueToken(userID string) (string, time.Time)
+	// IssueTokenWithRole is IssueToken with the session's effective
+	// role ("admin" or "learner") baked into the token; "" leaves
+	// the claim unset and later requests fall back to the DB role.
+	IssueTokenWithRole(userID, role string) (string, time.Time)
 	ValidateToken(token string) (string, error)
+	// TokenEffectiveRole returns the session-scoped role carried by
+	// a valid token ("" when the token has no role claim).
+	TokenEffectiveRole(token string) (string, error)
 	// RevokeToken denies token until its expiry (Phase 7 logout).
 	// RevokeUser denies every session issued to userID and returns
 	// how many were revoked (Phase 7 admin session revocation).

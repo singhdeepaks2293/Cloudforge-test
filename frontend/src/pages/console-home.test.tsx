@@ -43,7 +43,7 @@ describe('Console Home renders live data', () => {
     fetchMock.mockImplementation((url: string) => {
       if (String(url).includes('/health')) {
         return Promise.resolve(
-          okResponse({ service: 'cloudforge-api', version: '4.0.0', ok: true, uptime_seconds: 3600, network_engine_reachable: false }),
+          okResponse({ service: 'cloudforge-api', version: '4.1.0', ok: true, uptime_seconds: 3600, network_engine_reachable: false }),
         )
       }
       if (String(url).includes('/courses')) {
@@ -67,7 +67,7 @@ describe('Console Home renders live data', () => {
     ])
     expect(html).toContain('Welcome to CloudForge')
     expect(html).toContain('cloudforge-api')
-    expect(html).toContain('4.0.0')
+    expect(html).toContain('4.1.0')
     expect(html).toContain('VPC Fundamentals')
     expect(html).toContain('Recently visited services')
     expect(html).toContain('Build a solution')

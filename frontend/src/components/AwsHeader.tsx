@@ -345,7 +345,11 @@ export function AwsHeader({ onToggleNav, services = [] }: { onToggleNav: () => v
                   <div className="border-b border-aws-border px-4 py-2">
                     <p className="text-sm font-medium">{me.data.name ?? me.data.email}</p>
                     <p className="text-xs text-aws-muted">{me.data.email}</p>
-                    <p className="text-xs text-aws-muted">Role: {me.data.role ?? 'learner'}</p>
+                    {/* v4.1: /auth/me returns the session's effective role, so this is the role this
+                        sign-in acts with — "root" only for a root sign-in, "learner" otherwise. */}
+                    <p className="text-xs text-aws-muted">
+                      {me.data.role === 'admin' ? 'Signed in as root' : 'Signed in as learner'}
+                    </p>
                   </div>
                 )}
                 <Link

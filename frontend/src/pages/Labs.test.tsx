@@ -25,7 +25,7 @@ async function renderPicker(lite: boolean): Promise<string> {
   const fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
   fetchMock.mockResolvedValue(
-    okResponse({ service: 'cloudforge-api', version: '4.0.0', ok: true, uptime_seconds: 1, lite }),
+    okResponse({ service: 'cloudforge-api', version: '4.1.0', ok: true, uptime_seconds: 1, lite }),
   )
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   await client.prefetchQuery({ queryKey: ['health'], queryFn: fetchHealth })

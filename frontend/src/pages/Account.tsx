@@ -51,7 +51,7 @@ export function Account() {
           <dl className="space-y-2 text-sm">
             <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">Name</dt><dd>{me.data.name ?? '—'}</dd></div>
             <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">Email</dt><dd>{me.data.email}</dd></div>
-            <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">Role</dt><dd>{me.data.role ?? 'learner'}</dd></div>
+            <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">Role</dt><dd>{me.data.role === 'admin' ? 'Signed in as root' : 'Signed in as learner'}</dd></div>
             <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">User ID</dt><dd className="break-all">{me.data.id}</dd></div>
             <div className="flex gap-2"><dt className="w-32 shrink-0 font-medium">Created</dt><dd>{me.data.created_at ? new Date(me.data.created_at).toLocaleString() : '—'}</dd></div>
           </dl>

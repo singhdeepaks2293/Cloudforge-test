@@ -235,3 +235,37 @@ func TestTokenExpiry(t *testing.T) {
 		t.Fatalf("expired token: got %v, want ErrTokenExpired", err)
 	}
 }
+
+func TestIssueTokenWithRole(t *testing.T) {
+	s := NewStore("test-secret")
+	u, err := s.Register("ada@example.com", "Ada", "correct-horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A token issued without a role claim falls back to the DB role.
+	token, _ := s.IssueToken(u.ID)
+	if role, err := s.TokenEffectiveRole(token); err != nil || role != "" {
+		t.Fatalf("claim-less token: role %q err %v, want empty role", role, err)
+	}
+	// A learner-scoped token carries "learner" …
+	learnerToken, _ := s.IssueTokenWithRole(u.ID, RoleLearner)
+	if role, err := s.TokenEffectiveRole(learnerToken); err != nil || role != RoleLearner {
+		t.Fatalf("learner token: role %q err %v, want %q", role, err, RoleLearner)
+	}
+	// … and a root token carries "admin" (the caller must have
+	// checked the account is an admin first — IssueTokenWithRole
+	// itself only records the role it is given).
+	rootToken, _ := s.IssueTokenWithRole(u.ID, RoleAdmin)
+	if role, err := s.TokenEffectiveRole(rootToken); err != nil || role != RoleAdmin {
+		t.Fatalf("root token: role %q err %v, want %q", role, err, RoleAdmin)
+	}
+	// An unknown role is dropped, not recorded.
+	badToken, _ := s.IssueTokenWithRole(u.ID, "superuser")
+	if role, err := s.TokenEffectiveRole(badToken); err != nil || role != "" {
+		t.Fatalf("bad-role token: role %q err %v, want empty role", role, err)
+	}
+	// A tampered token yields no role at all.
+	if _, err := s.TokenEffectiveRole(learnerToken + "x"); err == nil {
+		t.Fatalf("tampered token must fail TokenEffectiveRole")
+	}
+}

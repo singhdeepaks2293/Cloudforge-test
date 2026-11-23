@@ -7,7 +7,7 @@ Base URL: same-origin in the Docker deployment (nginx proxies
 base. The frontend client (`frontend/src/services/api.ts`) uses
 relative URLs when `VITE_API_URL` is unset.
 
-Version: `4.0.0` (see `GET /api/v1/health`).
+Version: `4.1.0` (see `GET /api/v1/health`).
 
 ## Conventions
 
@@ -56,10 +56,10 @@ Version: `4.0.0` (see `GET /api/v1/health`).
 | Method & path | Auth | Notes |
 |---|---|---|
 | `POST /api/v1/auth/register` | — | `{email, name, password}` (password ≥ 8 chars). New passwords are Argon2id-hashed. 201 `{token, expires_at, user}`; 409 `user_exists`. First user with `CLOUDFORGE_ADMIN_EMAIL` becomes admin. |
-| `POST /api/v1/auth/login` | — | `{email, password}` → 200 `{token, expires_at, user}`. Legacy bcrypt hashes still verify and are upgraded to Argon2id on success. Sets the `HttpOnly` `cf_session` cookie (Phase 7). |
+| `POST /api/v1/auth/login` | — | `{email, password, as_root?}` → 200 `{token, expires_at, user}`. Legacy bcrypt hashes still verify and are upgraded to Argon2id on success. Sets the `HttpOnly` `cf_session` cookie (Phase 7). **v4.1 "Sign in as root":** `as_root: true` signs in as admin only when the account's DB role is admin, otherwise 403 `admin role required`; `as_root` false/absent signs in as a learner even for an admin account. The token carries the session's effective role as a signed `role` claim; `user.role` in the response is that effective role. Tokens without the claim (pre-v4.1, registration) fall back to the DB role. |
 | `POST /api/v1/auth/logout` | Bearer or cookie | **Phase 7 (R3).** Revokes the caller's token (`{logged_out: true, token_revoked: true}`) and clears the session cookie; the revoked token then gets 401. |
 | `POST /api/v1/admin/users/{id}/sessions/revoke` | Admin | **Phase 7 (R3).** Revokes all recorded sessions of the given user (`{revoked: N}`); the admin's own token still works. |
-| `GET /api/v1/auth/me` | Bearer or cookie | Current user (public view). Phase 7: the `cf_session` cookie alone authenticates. |
+| `GET /api/v1/auth/me` | Bearer or cookie | Current user (public view). Phase 7: the `cf_session` cookie alone authenticates. v4.1: `role` is the session's effective role ("Signed in as root" only for a root sign-in, otherwise learner), not necessarily the account's DB role. |
 | `GET /api/v1/users/me` | Bearer or cookie | Alias of `/auth/me`. |
 | `GET /api/v1/users` | Admin | All users (public views). |
 | `GET /api/v1/users/me/progress` | Bearer | **M8.** Per-track enrollment/percent, `total_xp`, `streak_days`. |

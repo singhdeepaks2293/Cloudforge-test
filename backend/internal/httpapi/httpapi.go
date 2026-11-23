@@ -42,8 +42,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Version is the v4 API version string.
-const Version = "4.0.0"
+// Version is the v4.1 API version string.
+const Version = "4.1.0"
 
 type ctxKey string
 
@@ -536,6 +536,16 @@ func (s *Server) currentUser(r *http.Request) (*auth.User, bool) {
 	if err != nil {
 		return nil, false
 	}
+	// v4.1 session scoping: a token carrying an effective-role claim
+	// acts with that role for this session only ("admin" only when
+	// the sign-in asked for root AND the account is an admin;
+	// otherwise "learner"). A token without the claim (issued before
+	// v4.1, or at registration) falls back to the account's DB role,
+	// so existing sessions keep working. The claim is HS256-signed,
+	// so a client cannot widen its own session.
+	if role, err := s.Users.TokenEffectiveRole(token); err == nil && role != "" {
+		u.Role = role
+	}
 	return u, true
 }
 
@@ -757,6 +767,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	// AsRoot is the "Sign in as root" option on the login page:
+	// the session acts as admin only when the account's DB role is
+	// admin; otherwise the sign-in is rejected. Unchecked (the
+	// default) signs in as a learner, even for an admin account.
+	AsRoot bool `json:"as_root"`
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -776,9 +791,25 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusUnauthorized, "invalid_credentials", "email or password is incorrect")
 		return
 	}
-	s.audit(r, u.ID, "user_logged_in", "user", u.ID, nil)
-	token, exp := s.Users.IssueToken(u.ID)
+	// v4.1 "Sign in as root": only an admin account may open a
+	// root session. A non-admin asking for root gets 403, never a
+	// widened session — the role is never granted by the request
+	// alone. Without the option the session is learner-scoped even
+	// for an admin account, so an admin must explicitly choose root
+	// to reach admin-only endpoints.
+	effectiveRole := auth.RoleLearner
+	if req.AsRoot {
+		if u.Role != auth.RoleAdmin {
+			s.audit(r, u.ID, "auth.login_failed", "user", u.ID, map[string]any{"as_root": true, "reason": "admin role required"})
+			s.writeError(w, r, http.StatusForbidden, "forbidden", "admin role required")
+			return
+		}
+		effectiveRole = auth.RoleAdmin
+	}
+	s.audit(r, u.ID, "user_logged_in", "user", u.ID, map[string]any{"as_root": req.AsRoot, "session_role": effectiveRole})
+	token, exp := s.Users.IssueTokenWithRole(u.ID, effectiveRole)
 	s.setSessionCookie(w, token, exp)
+	u.Role = effectiveRole
 	s.writeJSON(w, r, http.StatusOK, authResponse{Token: token, ExpiresAt: exp, User: u})
 }
 

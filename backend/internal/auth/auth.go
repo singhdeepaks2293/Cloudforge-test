@@ -229,33 +229,61 @@ func (s *Store) SetRole(id, role string) (*User, error) {
 	return u.Public(), nil
 }
 
-// sessionClaims is the HS256 JWT payload. Only the user id is
-// carried; no roles or PII are embedded in the token. ID is the
-// token id (jti, Phase 7): logout and admin session-revocation
-// deny-list this value, so a stolen token stops working before its
-// 12h expiry.
+// sessionClaims is the HS256 JWT payload. Only the user id and the
+// session-scoped effective role are carried; the account's DB role
+// and any other PII are never embedded in the token. The effective
+// role is chosen at sign-in ("Sign in as root" picks admin for an
+// admin account, otherwise the session is learner-scoped) and is
+// HS256-signed, so a client cannot forge a wider session than the
+// one the server issued. ID is the token id (jti, Phase 7): logout
+// and admin session-revocation deny-list this value, so a stolen
+// token stops working before its 12h expiry.
 type sessionClaims struct {
 	jwt.RegisteredClaims
+	// EffectiveRole is the role this session acts with ("admin" or
+	// "learner"). Empty on tokens issued before v4.1: those fall back
+	// to the account's DB role, so existing sessions keep working.
+	EffectiveRole string `json:"role,omitempty"`
 }
 
 // IssueToken returns a signed HS256 JWT for userID valid for the
 // configured TTL, plus its expiry time. The token carries a fresh
 // random jti, recorded with the revoker (best-effort) so an admin
-// can later revoke all of the user's sessions.
+// can later revoke all of the user's sessions. No effective-role
+// claim is set: sessions from this token fall back to the account's
+// DB role (pre-v4.1 behaviour, kept for registration and callers
+// that do not scope the session).
 func (s *Store) IssueToken(userID string) (string, time.Time) {
+	return s.IssueTokenWithRole(userID, "")
+}
+
+// IssueTokenWithRole is IssueToken with the session's effective role
+// baked into the token ("admin" or "learner"). The caller must have
+// already checked the account is entitled to that role — the claim
+// is trusted on later requests, so it must never be set from
+// client input. An empty role leaves the claim unset (DB-role
+// fallback); any other value must be a known role.
+func (s *Store) IssueTokenWithRole(userID, effectiveRole string) (string, time.Time) {
 	ttl := s.TokenTTL
 	if ttl <= 0 {
 		ttl = TokenTTL
 	}
 	now := s.now()
 	exp := now.Add(ttl)
-	claims := sessionClaims{RegisteredClaims: jwt.RegisteredClaims{
-		Subject:   userID,
-		ID:        NewJTI(),
-		Issuer:    "cloudforge",
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(exp),
-	}}
+	role := effectiveRole
+	if role != "" && !ValidRole(role) {
+		role = ""
+	}
+	claims := sessionClaims{
+		EffectiveRole: role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID,
+			ID:        NewJTI(),
+			Issuer:    "cloudforge",
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(exp),
+		},
+	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.secret)
 	if err != nil {
 		// Signing with an in-memory key cannot fail in practice;
@@ -266,6 +294,24 @@ func (s *Store) IssueToken(userID string) (string, time.Time) {
 		_ = s.Revoker.RecordIssued(context.Background(), claims.ID, userID, exp)
 	}
 	return token, exp
+}
+
+// TokenEffectiveRole returns the session-scoped effective role
+// carried by a valid token ("" when the token has no role claim, so
+// the caller falls back to the account's DB role). The token's
+// signature is verified; an invalid or expired token is an error.
+func (s *Store) TokenEffectiveRole(token string) (string, error) {
+	claims, err := s.parseToken(token)
+	if err != nil {
+		return "", err
+	}
+	if claims.EffectiveRole == "" {
+		return "", nil
+	}
+	if !ValidRole(claims.EffectiveRole) {
+		return "", ErrInvalidToken
+	}
+	return claims.EffectiveRole, nil
 }
 
 // parseToken parses and verifies token, returning its claims.
